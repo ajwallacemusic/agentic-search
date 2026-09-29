@@ -139,7 +139,10 @@ class Executor:
         op = parsed.model_copy(update={"limit": min(parsed.limit, self.max_limit)})
         if isinstance(op, (Vector, Hybrid)):
             try:
-                op = await self._embed(op)
+                op = await asyncio.wait_for(self._embed(op), self.call_timeout)
+            except TimeoutError:
+                return _Outcome(error=ToolError(call_id=c.id, source=op.source, kind="timeout",
+                                                message=f"embedding timed out after {self.call_timeout}s"))
             except Exception as exc:
                 return _Outcome(error=ToolError(call_id=c.id, source=op.source, kind="embedder",
                                                 message=f"{type(exc).__name__}: {_short(exc)}"))

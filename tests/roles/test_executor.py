@@ -1,10 +1,11 @@
 import asyncio
 
+import numpy as np
 import pytest
 
 from agentic_search.core.hooks import Hooks, SourcePolicy
 from agentic_search.core.state import CandidatePool, Trace
-from agentic_search.core.types import Capability, CollectionInfo, Manifest, Query
+from agentic_search.core.types import Capability, CollectionInfo, Manifest, Modality, Query
 from agentic_search.embedders.base import EmbedderRegistry
 from agentic_search.embedders.local import HashEmbedder
 from agentic_search.roles.executor import Executor
@@ -135,3 +136,31 @@ async def test_policy_withholds_content_in_outputs(docs_backend):
     c = call("lexical_search", source="docs", text="headache")
     res, _, _ = await run(ex, c, model_id="cloud")
     assert "withheld" in res.outputs[c.id] and "Aspirin" not in res.outputs[c.id]
+
+
+class SlowEmbedder:
+    """Embedder that takes 1 second to embed, for testing timeouts."""
+
+    def __init__(self, dim: int):
+        self.id = "hash"
+        self.modalities = {Modality.TEXT}
+        self._dim = dim
+
+    @property
+    def dim(self) -> int:
+        return self._dim
+
+    async def embed(self, items, purpose):
+        await asyncio.sleep(1)
+        return [np.zeros(self._dim, dtype=np.float32) for _ in items]
+
+
+async def test_embedder_timeout(docs_backend):
+    m = await docs_backend.discover()
+    coll = m.resolve_collection(None)
+    emb_field = coll.field("embedding")
+    slow = SlowEmbedder(emb_field.vector_dim)
+    ex = Executor({"docs": docs_backend}, {"docs": m}, EmbedderRegistry([slow]),
+                  call_timeout=0.05)
+    res, _, _ = await run(ex, call("vector_search", source="docs", field="embedding", hyde_text="x"))
+    assert res.errors[0].kind == "timeout" and "embedding" in res.errors[0].message
