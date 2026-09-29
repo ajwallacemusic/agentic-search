@@ -18,6 +18,7 @@ from agentic_search.core.types import (
     Eq,
     Exists,
     In,
+    Lexical,
     Not,
     Or,
     Range,
@@ -41,8 +42,8 @@ def test_filter_dsl():
 
 def test_password_registration():
     """Verify that constructor registers the password for scrubbing."""
-    # Create backend with a test password
-    backend = OpenSearchBackend("os", "http://admin:secretpw5@127.0.0.1:9200")
+    # Create backend with a test password (side effect: registers the password)
+    _ = OpenSearchBackend("os", "http://admin:secretpw5@127.0.0.1:9200")
 
     # Verify that the password is registered (scrubbing should hide it)
     scrubbed = scrub("leak secretpw5 here")
@@ -64,6 +65,8 @@ async def test_opensearch_connection_error_surfaces_as_backend_error():
 
         # Verify that the error message is a BackendError type
         assert isinstance(excinfo.value, BackendError)
+        # Verify password is not leaked in the error message after scrubbing
+        assert "secretpw5" not in scrub(str(excinfo.value))
     finally:
         await backend.close()
 
@@ -169,5 +172,107 @@ async def test_empty_metrics_aggregate_raises_backend_error():
             await backend.execute(op)
 
         assert "at least one metric" in str(excinfo.value)
+    finally:
+        await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_response_shape_wrapping_lexical_missing_hits():
+    """Verify that Lexical search with malformed response (missing 'hits') raises BackendError."""
+    # Create a mock client that returns a response without 'hits' key
+    mock_client = MagicMock()
+    mock_client.cat = MagicMock()
+    mock_client.indices = MagicMock()
+    mock_client.cat.indices = AsyncMock(return_value=[{"index": "test_index"}])
+    mock_client.indices.get_mapping = AsyncMock(return_value={
+        "test_index": {"mappings": {"properties": {"title": {"type": "text"}}}}
+    })
+    mock_client.count = AsyncMock(return_value={"count": 10})
+    mock_client.search = AsyncMock(return_value={})  # Missing 'hits' key
+    mock_client.close = AsyncMock()
+
+    backend = OpenSearchBackend("os", "http://admin:pw@127.0.0.1:9200", client=mock_client)
+
+    try:
+        await backend.discover()
+
+        op = Lexical(source="test", collection="test_index", text="search term")
+        with pytest.raises(BackendError) as excinfo:
+            await backend.execute(op)
+
+        assert "unexpected OpenSearch response" in str(excinfo.value)
+    finally:
+        await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_response_shape_wrapping_aggregate_missing_aggregations():
+    """Verify that Aggregate with malformed response (missing 'aggregations') raises BackendError."""
+    # Create a mock client that returns a response without 'aggregations' key
+    mock_client = MagicMock()
+    mock_client.cat = MagicMock()
+    mock_client.indices = MagicMock()
+    mock_client.cat.indices = AsyncMock(return_value=[{"index": "test_index"}])
+    mock_client.indices.get_mapping = AsyncMock(return_value={
+        "test_index": {"mappings": {"properties": {"name": {"type": "keyword"}}}}
+    })
+    mock_client.count = AsyncMock(return_value={"count": 10})
+    # Return proper response for sampling, but then no aggregations for the aggregate call
+    call_count = 0
+    async def mock_search(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        if "aggs" in kwargs.get("body", {}) and "s0" in kwargs["body"]["aggs"]:
+            # Sampling call - return proper response
+            return {
+                "hits": {"hits": []},
+                "aggregations": {"s0": {"buckets": []}}
+            }
+        else:
+            # Aggregate call - return missing aggregations
+            return {"hits": {"hits": []}}
+
+    mock_client.search = AsyncMock(side_effect=mock_search)
+    mock_client.close = AsyncMock()
+
+    backend = OpenSearchBackend("os", "http://admin:pw@127.0.0.1:9200", client=mock_client)
+
+    try:
+        await backend.discover()
+
+        op = Aggregate.model_construct(
+            source="test",
+            collection="test_index",
+            group_by=["name"],
+            metrics=["count"]
+        )
+        with pytest.raises(BackendError) as excinfo:
+            await backend.execute(op)
+
+        assert "unexpected OpenSearch response" in str(excinfo.value)
+    finally:
+        await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_constructor_error_monkeypatched_async_opensearch(monkeypatch):
+    """Verify that AsyncOpenSearch constructor errors become BackendError."""
+    # Monkeypatch AsyncOpenSearch to raise ValueError
+    def mock_async_opensearch(*args, **kwargs):
+        raise ValueError("bad url")
+
+    # Need to monkeypatch at the point of import in opensearch.py
+    monkeypatch.setattr(
+        "agentic_search.backends.opensearch._require_opensearch",
+        lambda: mock_async_opensearch
+    )
+
+    backend = OpenSearchBackend("os", "http://admin:pw@127.0.0.1:9200")
+
+    try:
+        with pytest.raises(BackendError) as excinfo:
+            await backend.discover()
+
+        assert "ValueError" in str(excinfo.value) or "bad url" in str(excinfo.value)
     finally:
         await backend.close()
