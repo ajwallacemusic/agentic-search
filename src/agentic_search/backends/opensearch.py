@@ -93,7 +93,8 @@ def filter_dsl(f: Filter) -> dict[str, Any]:
     if isinstance(f, Exists):
         return {"exists": {"field": f.field}}
     if isinstance(f, Contains):
-        return {"wildcard": {f.field: {"value": f"*{f.value}*", "case_insensitive": True}}}
+        value = f.value.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
+        return {"wildcard": {f.field: {"value": f"*{value}*", "case_insensitive": True}}}
     raise BackendError(f"unsupported filter node {type(f).__name__}")
 
 

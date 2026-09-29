@@ -14,9 +14,9 @@ dependencies = [
 anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.50"]
 local = ["sentence-transformers>=3.0", "pillow>=10"]
-postgres = ["psycopg[binary,pool]>=3.2", "sqlglot>=25"]
-mysql = ["aiomysql>=0.2", "sqlglot>=25"]
-bigquery = ["google-cloud-bigquery>=3.25", "sqlglot>=25"]
+postgres = ["psycopg[binary,pool]>=3.2", "sqlglot>=25,<31"]
+mysql = ["aiomysql>=0.2", "sqlglot>=25,<31"]
+bigquery = ["google-cloud-bigquery>=3.25", "sqlglot>=25,<31"]
 opensearch = ["opensearch-py[async]>=2.6"]
 
 [dependency-groups]
@@ -26,7 +26,7 @@ dev = [
   "ruff>=0.6",
   "anthropic>=0.40",
   "openai>=1.50",
-  "sqlglot>=25",
+  "sqlglot>=25,<31",
   "psycopg[binary,pool]>=3.2",
   "aiomysql>=0.2",
   "google-cloud-bigquery>=3.25",

@@ -205,3 +205,18 @@ def test_opensearch_from_validation():
     body = guard_opensearch('{"query": {}, "from": 100, "size": 50}', 100)
     assert body["from"] == 100
     assert body["size"] == 50
+
+
+def test_sql_output_drops_comments():
+    out = guard_sql("SELECT id /* hi */ FROM docs -- trailing", "postgres", 10)
+    assert "/*" not in out and "hi" not in out and "trailing" not in out
+
+
+@pytest.mark.parametrize("body", [
+    '{"query": {"terms": {"id": {"index": "secrets", "id": "1", "path": "ids"}}}}',
+    '{"query": {"more_like_this": {"fields": ["body"], "like": [{"_index": "other", "_id": "1"}]}}}',
+    '{"query": {"percolate": {"field": "q", "index": "other", "id": "1"}}}',
+])
+def test_opensearch_rejects_cross_index_reads(body):
+    with pytest.raises(NativeQueryRejected, match="index"):
+        guard_opensearch(body, 10)

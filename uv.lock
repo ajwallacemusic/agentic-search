@@ -74,9 +74,9 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rank-bm25", specifier = ">=0.2.2" },
     { name = "sentence-transformers", marker = "extra == 'local'", specifier = ">=3.0" },
-    { name = "sqlglot", marker = "extra == 'bigquery'", specifier = ">=25" },
-    { name = "sqlglot", marker = "extra == 'mysql'", specifier = ">=25" },
-    { name = "sqlglot", marker = "extra == 'postgres'", specifier = ">=25" },
+    { name = "sqlglot", marker = "extra == 'bigquery'", specifier = ">=25,<31" },
+    { name = "sqlglot", marker = "extra == 'mysql'", specifier = ">=25,<31" },
+    { name = "sqlglot", marker = "extra == 'postgres'", specifier = ">=25,<31" },
 ]
 provides-extras = ["anthropic", "openai", "local", "postgres", "mysql", "bigquery", "opensearch"]
 
@@ -91,7 +91,7 @@ dev = [
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "ruff", specifier = ">=0.6" },
-    { name = "sqlglot", specifier = ">=25" },
+    { name = "sqlglot", specifier = ">=25,<31" },
 ]
 
 [[package]]

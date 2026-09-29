@@ -55,7 +55,7 @@ def guard_sql(query: str, dialect: str, max_rows: int) -> str:
             current = int(literal.this)
     if current is None or current > max_rows:
         stmt = stmt.limit(max_rows)
-    return stmt.sql(dialect=dialect)
+    return stmt.sql(dialect=dialect, comments=False)
 
 
 _CYPHER_WRITE = re.compile(
@@ -208,6 +208,9 @@ def guard_opensearch(body_json: str, max_rows: int) -> dict[str, Any]:
     scripted = [k for k in _walk_keys(body) if "script" in k.lower()]
     if scripted:
         raise NativeQueryRejected(f"scripts are not allowed ({scripted[0]})")
+    # terms lookup, more_like_this, percolate etc. can read documents from other indices
+    if any(k in ("index", "_index") for k in _walk_keys(body)):
+        raise NativeQueryRejected("references to other indices (index/_index) are not allowed")
 
     # Validate and cap size: must be int (not bool), >= 0, and <= max_rows
     size = body.get("size")

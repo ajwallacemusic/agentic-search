@@ -40,6 +40,11 @@ def test_filter_dsl():
     assert filter_dsl(Range(field="year")) == {"match_all": {}}
 
 
+def test_contains_escapes_wildcards():
+    assert filter_dsl(Contains(field="title", value="a*b?c\\")) == \
+        {"wildcard": {"title": {"value": "*a\\*b\\?c\\\\*", "case_insensitive": True}}}
+
+
 def test_password_registration():
     """Verify that constructor registers the password for scrubbing."""
     # Create backend with a test password (side effect: registers the password)
