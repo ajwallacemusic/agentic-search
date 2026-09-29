@@ -51,3 +51,33 @@ async def test_postgres_missing_extra_raises_backend_error(monkeypatch):
     )
 
     await backend.close()
+
+
+def test_percent_encoded_password_is_registered():
+    PostgresBackend("pg", "postgresql://u:p%40ssw0rd-pg9@h/db")
+    assert "p@ssw0rd-pg9" not in scrub("auth failed: p@ssw0rd-pg9")
+
+
+@pytest.mark.asyncio
+async def test_pool_open_cancelled_closes_pool(monkeypatch):
+    import asyncio
+
+    import agentic_search.backends.postgres as pg
+
+    closed = []
+
+    class FakePool:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def open(self, wait, timeout):
+            raise asyncio.CancelledError()
+
+        async def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(pg, "_require_psycopg", lambda: (None, None, FakePool))
+    backend = PostgresBackend("pg", "postgresql://u:p@h/db")
+    with pytest.raises(asyncio.CancelledError):
+        await backend._get_pool()
+    assert closed == [True] and backend._pool is None

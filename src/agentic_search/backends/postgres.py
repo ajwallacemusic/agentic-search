@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from agentic_search.backends.base import BackendError
 from agentic_search.backends.sql import Params, quote_ident, vector_literal, where_clause
@@ -56,6 +56,7 @@ class PostgresBackend(SqlBackend):
             raise ValueError(f"invalid text_search_config {text_search_config!r}")
         register_secret(dsn)
         register_secret(urlparse(dsn).password)
+        register_secret(unquote(urlparse(dsn).password or ""))
         self.dsn = dsn
         self.schema = schema
         self.ts_config = text_search_config
@@ -81,12 +82,14 @@ class PostgresBackend(SqlBackend):
                                            open=False, configure=configure)
                 try:
                     await pool.open(wait=True, timeout=self.connect_timeout_s)
-                except Exception as exc:
+                except BaseException as exc:  # incl. CancelledError: don't leak a half-open pool
                     try:
                         await pool.close()
                     except Exception:
                         pass
                     self._pool = None
+                    if not isinstance(exc, Exception):
+                        raise
                     raise BackendError(f"{type(exc).__name__}: {exc}") from exc
                 self._pool = pool
             return self._pool
