@@ -68,3 +68,22 @@ async def test_error_lines_in_digest():
     res.errors.append(ToolError(call_id=bad.id, kind="validation", message="unknown source 'x'"))
     out = await Analyzer(None).analyze(s, [*calls, bad], res, digest_model_id="d")
     assert "ERROR [validation] unknown source 'x'" in out.digest
+
+
+async def test_hook_blocking_fails_open():
+    from agentic_search.core.hooks import Hooks
+
+    class BlockingHook(Hooks):
+        async def before_model_call(self, model_id: str, payload):
+            if model_id == "keyword-judge":
+                raise PermissionError("judge access denied")
+            return payload
+
+    s, calls, res = setup_state()
+    a = Analyzer(KeywordJudge(["fever"]), hooks=BlockingHook())
+    # Should not raise; analyze must fail open
+    out = await a.analyze(s, calls, res, digest_model_id="driver")
+    assert out.n_new_relevant is None
+    assert all(s.pool[k].unjudged_reason.startswith("judge failed") for k in res.new_keys)
+    assert len(s.trace.of_type("judge_error")) == 1
+    assert "PermissionError" in s.trace.of_type("judge_error")[0].data["error"]

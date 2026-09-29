@@ -53,10 +53,10 @@ class Analyzer:
         decider = self.decider
         for start in range(0, len(pending), self.batch_size):
             batch = pending[start:start + self.batch_size]
-            hits = self.policy.redact([state.pool[k].hit for k in batch], decider.id)
-            hits = await self.hooks.before_model_call(decider.id, hits)
-            t0 = time.perf_counter()
             try:
+                hits = self.policy.redact([state.pool[k].hit for k in batch], decider.id)
+                hits = await self.hooks.before_model_call(decider.id, hits)
+                t0 = time.perf_counter()
                 result = await asyncio.wait_for(decider.judge(state.question, hits), self.timeout)
             except NotImplementedError:
                 self._can_judge = False
