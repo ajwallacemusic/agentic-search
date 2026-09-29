@@ -121,7 +121,10 @@ def parse_call(call: ToolCall, question: Query) -> QueryOp | DiscoverRequest:
     op_type = TOOL_OPS[call.name][0]
     args.pop("vector", None)  # only the executor sets query vectors
     args.pop("type", None)
-    if op_type == "vector" and args.pop("use_question_image", False):
+    args.pop("content", None)  # query content comes only from hyde_text or the question's image
+    flag = args.pop("use_question_image", False)
+    use_image = flag is True or (isinstance(flag, str) and flag.strip().lower() == "true")
+    if op_type == "vector" and use_image:
         images = question.images()
         if not images:
             raise ValueError("use_question_image was set but the question has no image")

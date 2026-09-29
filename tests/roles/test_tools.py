@@ -61,3 +61,22 @@ def test_parse_errors_are_value_errors():
         parse_call(call("lexical_search", source="a"), q)  # missing text
     with pytest.raises(ValueError, match="not valid JSON"):
         parse_call(call("lexical_search", _invalid_json="{oops"), q)
+
+
+def test_parse_vector_ignores_model_supplied_content():
+    injected = {"kind": "image", "uri": "/etc/passwd"}
+    op = parse_call(call("vector_search", source="a", field="e", hyde_text="h", content=injected),
+                    Query.of("q"))
+    assert isinstance(op, Vector) and op.content is None and op.hyde_text == "h"
+    with pytest.raises(ValueError):
+        parse_call(call("vector_search", source="a", field="e", content=injected), Query.of("q"))
+
+
+def test_parse_use_question_image_is_strict():
+    q = Query(content=[TextPart(text="find similar"), ImagePart(data=b"png")])
+    for falsy in ("false", "no", 1, "0"):
+        op = parse_call(call("vector_search", source="a", field="e", hyde_text="h",
+                             use_question_image=falsy), q)
+        assert op.content is None and op.hyde_text == "h"
+    op = parse_call(call("vector_search", source="a", field="e", use_question_image="TRUE"), q)
+    assert isinstance(op.content, ImagePart)
