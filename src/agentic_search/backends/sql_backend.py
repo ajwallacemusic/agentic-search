@@ -46,6 +46,7 @@ from agentic_search.core.types import (
 METRICS = ("cosine", "l2", "ip")
 _WORD = re.compile(r"\w+")
 SAMPLE_DISTINCT_MAX = 20
+SAMPLE_SCAN_MAX = 10_000
 EXACT_COUNT_BELOW = 100_000
 
 
@@ -169,7 +170,7 @@ class SqlBackend:
         tables = await self._ensure_tables()
         description = self.description
         if self.skipped:
-            note = f"Skipped (no primary key / id column): {', '.join(self.skipped)}."
+            note = f"Skipped tables: {', '.join(self.skipped)}."
             description = f"{description} {note}" if description else note
         return Manifest(source=self.name, backend_type=self.backend_type,
                         capabilities=self.capabilities(), description=description,
@@ -326,9 +327,13 @@ class SqlBackend:
             return None
         col = quote_ident(column, self.dialect)
         p = Params(self.dialect)
-        rows = await self._query(
-            f"SELECT DISTINCT {col} AS v FROM {self._table_ref(table)} WHERE {col} IS NOT NULL "
-            f"LIMIT {p.add(SAMPLE_DISTINCT_MAX + 1)}", p.values)
+        sql = (f"SELECT DISTINCT v FROM (SELECT {col} AS v FROM {self._table_ref(table)} "
+               f"WHERE {col} IS NOT NULL LIMIT {p.add(SAMPLE_SCAN_MAX)}) s "
+               f"LIMIT {p.add(SAMPLE_DISTINCT_MAX + 1)}")
+        try:
+            rows = await self._query(sql, p.values)
+        except BackendError:
+            return None  # best effort: unsortable types, timeouts etc. must not sink discovery
         values = [r["v"] for r in rows]
         return values if len(values) <= SAMPLE_DISTINCT_MAX else None
 

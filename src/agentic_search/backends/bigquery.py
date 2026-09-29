@@ -136,11 +136,12 @@ class BigQueryBackend(SqlBackend):
         except Exception as exc:
             raise BackendError(f"{type(exc).__name__}: {exc}") from exc
         tables: dict[str, TableInfo] = {}
+        skipped: list[str] = []
         for tname, meta in listed:
             names = [f.name for f in meta.schema]
             id_col = self.id_columns.get(tname) or self._primary_key(meta) or ("id" if "id" in names else None)
             if id_col is None:
-                self.skipped.append(tname)
+                skipped.append(f"{tname} (no primary key / id column)")
                 continue
             overrides = self.text_column_overrides.get(tname)
             fields = []
@@ -162,6 +163,7 @@ class BigQueryBackend(SqlBackend):
                                         sample_values=samples, **field_flags(ftype)))
             tables[tname] = TableInfo(name=tname, id_column=id_col, fields=fields,
                                       count=int(meta.num_rows) if meta.num_rows is not None else None)
+        self.skipped = skipped
         return tables
 
     @staticmethod

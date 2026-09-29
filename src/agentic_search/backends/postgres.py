@@ -146,10 +146,11 @@ class PostgresBackend(SqlBackend):
             if self.table_names is None or r["table_name"] in self.table_names:
                 by_table.setdefault(r["table_name"], []).append(r)
         tables: dict[str, TableInfo] = {}
+        skipped: list[str] = []
         for tname, rows in by_table.items():
             id_col = self.id_columns.get(tname) or pk_of.get(tname)
             if id_col is None:
-                self.skipped.append(tname)
+                skipped.append(f"{tname} (no primary key / id column)")
                 continue
             fields = []
             for r in rows:
@@ -161,12 +162,13 @@ class PostgresBackend(SqlBackend):
                     continue
                 ftype = _TYPES.get(r["data_type"], FieldType.KEYWORD)
                 samples = None
-                if ftype in (FieldType.KEYWORD, FieldType.BOOL) and name != id_col:
+                if r["data_type"] in _TYPES and ftype in (FieldType.KEYWORD, FieldType.BOOL) and name != id_col:
                     samples = await self._samples(tname, name)
                 fields.append(FieldSpec(name=name, type=ftype, sample_values=samples, **field_flags(ftype)))
             est = est_of.get(tname)
             tables[tname] = TableInfo(name=tname, id_column=id_col, fields=fields,
                                       count=await self._count(tname, est if est and est > 0 else None))
+        self.skipped = skipped
         return tables
 
     # ---- lexical / vector ------------------------------------------------------

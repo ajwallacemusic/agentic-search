@@ -196,3 +196,14 @@ async def test_live_bigquery():
     assert m.resolve_collection("docs") is not None
     hits = await b.execute(Lexical(source="bq", collection="docs", text="headache", limit=5))
     assert isinstance(hits, list)
+
+
+async def test_skipped_is_not_duplicated_on_rediscovery():
+    class NoId(FakeClient):
+        def get_table(self, ref):
+            return FakeTable([bigquery.SchemaField("title", "STRING")])
+
+    b = make(NoId())
+    await b._discover_tables()
+    await b._discover_tables()
+    assert [s.split(" ")[0] for s in b.skipped] == ["docs"]

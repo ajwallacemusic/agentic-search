@@ -129,10 +129,11 @@ class MySQLBackend(SqlBackend):
             if self.table_names is None or r["table_name"] in self.table_names:
                 by_table.setdefault(r["table_name"], []).append(r)
         tables: dict[str, TableInfo] = {}
+        skipped: list[str] = []
         for tname, rows in by_table.items():
             id_col = self.id_columns.get(tname) or pk_of.get(tname)
             if id_col is None:
-                self.skipped.append(tname)
+                skipped.append(f"{tname} (no primary key / id column)")
                 continue
             fulltext = list(ft_of.get(tname, {}).values())
             ft_cols = {c for idx in fulltext for c in idx}
@@ -143,15 +144,17 @@ class MySQLBackend(SqlBackend):
                     ftype = FieldType.BOOL
                 else:
                     ftype = _TYPES.get(r["data_type"], FieldType.KEYWORD)
+                mapped = r["data_type"] in _TYPES
                 flags = field_flags(ftype)
                 flags["searchable"] = name in ft_cols
                 samples = None
-                if ftype in (FieldType.KEYWORD, FieldType.BOOL) and name != id_col:
+                if mapped and ftype in (FieldType.KEYWORD, FieldType.BOOL) and name != id_col:
                     samples = await self._samples(tname, name)
                 fields.append(FieldSpec(name=name, type=ftype, sample_values=samples, **flags))
             est = est_of.get(tname)
             tables[tname] = TableInfo(name=tname, id_column=id_col, fields=fields, fulltext=fulltext,
                                       count=await self._count(tname, int(est) if est else None))
+        self.skipped = skipped
         return tables
 
     # ---- lexical ---------------------------------------------------------------
