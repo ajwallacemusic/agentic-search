@@ -44,6 +44,7 @@ class ScriptedDriver:
         self.tools_seen: list[list[ToolSpec]] = []
         self.delegate_outputs: list[list[str]] = []
         self.delegate_context: str | None = None
+        self.delegate_question: Query | None = None
 
     async def plan(self, view: PlannerView, tools: list[ToolSpec]) -> PlanResult:
         self.views.append(view)
@@ -55,7 +56,7 @@ class ScriptedDriver:
     async def run_delegate(self, question: Query, tools: list[ToolSpec], runtime: ToolRuntime,
                            budget: Budget, context: str = "") -> DelegateResult:
         self.tools_seen.append(tools)
-        self.delegate_context = context
+        self.delegate_question, self.delegate_context = question, context
         for calls in self.delegate_calls:
             self.delegate_outputs.append(await runtime.call(calls))
         return DelegateResult(ranked_keys=list(self.delegate_keys))

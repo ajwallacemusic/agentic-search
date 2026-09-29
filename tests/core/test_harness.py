@@ -5,7 +5,7 @@ from agentic_search.backends.files import FilesBackend
 from agentic_search.core.harness import HarnessError
 from agentic_search.core.hooks import Hooks
 from agentic_search.core.types import StopReason
-from agentic_search.models.base import Action
+from agentic_search.models.base import Action, DelegateRequest
 from agentic_search.testing import (
     FailingDecider,
     KeywordJudge,
@@ -118,6 +118,38 @@ async def test_hooks_see_every_model_call(docs_backend):
     await make(docs_backend, driver, analyzer=KeywordJudge(["x"]), hooks=hooks).search("q")
     assert {"scripted-driver", "keyword-judge", "hash"} <= set(hooks.models)
     assert {"setup", "plan", "tool_call", "finalize"} <= set(hooks.events)
+
+
+async def test_model_mode_hooks_delegate_question_context_and_outputs(docs_backend):
+    class Replacing(Hooks):
+        async def before_model_call(self, model_id, payload):
+            if isinstance(payload, DelegateRequest):
+                return DelegateRequest(question=Query.of("REDACTED Q"), context="REDACTED CTX")
+            if isinstance(payload, list) and all(isinstance(o, str) for o in payload):
+                return ["REDACTED OUT"] * len(payload)
+            return payload
+
+    driver = ScriptedDriver(delegate_calls=[[lex("headache", id="a")]], delegate_keys=["docs:d1"])
+    await make(docs_backend, driver, hooks=Replacing()).search("secret question", mode="model")
+    assert driver.delegate_question.as_text() == "REDACTED Q"
+    assert driver.delegate_context == "REDACTED CTX"
+    assert driver.delegate_outputs == [["REDACTED OUT"]]
+
+
+async def test_model_mode_raising_output_hook_withholds_content(docs_backend):
+    class Raising(Hooks):
+        async def before_model_call(self, model_id, payload):
+            if isinstance(payload, list):
+                raise PermissionError("blocked")
+            return payload
+
+    driver = ScriptedDriver(delegate_calls=[[lex("headache", id="a"), lex("fever", id="b")]],
+                            delegate_keys=["docs:d1"])
+    res = await make(docs_backend, driver, hooks=Raising()).search("q", mode="model")
+    [outputs] = driver.delegate_outputs
+    assert len(outputs) == 2 and all(o.startswith("[withheld by hook]") for o in outputs)
+    assert not any("Aspirin" in o or "docs:d1" in o for o in outputs)
+    assert "PermissionError" in res.trace.of_type("hook_error")[0].data["error"]
 
 
 class BrokenBackend:

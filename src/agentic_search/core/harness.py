@@ -14,7 +14,15 @@ from agentic_search.core.hooks import Hooks, SourcePolicy
 from agentic_search.core.state import Candidate, SearchState, Trace, Usage
 from agentic_search.core.types import Budget, Hit, Manifest, Query, StopReason
 from agentic_search.embedders.base import Embedder, EmbedderRegistry
-from agentic_search.models.base import Action, Decider, Driver, ToolCall, ToolSpec, TurnSummary
+from agentic_search.models.base import (
+    Action,
+    Decider,
+    DelegateRequest,
+    Driver,
+    ToolCall,
+    ToolSpec,
+    TurnSummary,
+)
 from agentic_search.roles.analyzer import Analyzer
 from agentic_search.roles.controller import Controller
 from agentic_search.roles.executor import Executor
@@ -64,8 +72,10 @@ class SearchResult(BaseModel):
 class _DelegateRuntime:
     """ToolRuntime for model-centric drivers: executes calls, enforces budgets, records the trace."""
 
-    def __init__(self, state: SearchState, executor: Executor, controller: Controller, model_id: str):
+    def __init__(self, state: SearchState, executor: Executor, controller: Controller, model_id: str,
+                 hooks: Hooks):
         self.state, self.executor, self.controller, self.model_id = state, executor, controller, model_id
+        self.hooks = hooks
         self.exhausted: StopReason | None = None
 
     async def call(self, calls: list[ToolCall]) -> list[str]:
@@ -89,7 +99,13 @@ class _DelegateRuntime:
             state.usage.turns += 1
             state.turn += 1
             outputs = result.outputs
-        return [outputs.get(c.id, message) for c in calls]
+        texts = [outputs.get(c.id, message) for c in calls]
+        try:
+            return list(await self.hooks.before_model_call(self.model_id, texts))
+        except Exception as exc:
+            state.trace.add("hook_error", state.turn, model=self.model_id, n=len(calls),
+                            error=f"{type(exc).__name__}: {str(exc)[:300]}")
+            return [f"[withheld by hook] {type(exc).__name__}" for _ in calls]
 
 
 class Harness:
@@ -221,10 +237,12 @@ class Harness:
     async def _run_delegate(self, state: SearchState, executor: Executor, analyzer: Analyzer,
                             controller: Controller,
                             tools: list[ToolSpec]) -> tuple[StopReason, list[str] | None]:
-        runtime = _DelegateRuntime(state, executor, controller, self.driver.id)
+        runtime = _DelegateRuntime(state, executor, controller, self.driver.id, self.hooks)
+        request = DelegateRequest(question=state.question, context=render_manifests(state.manifests))
+        request = await self.hooks.before_model_call(self.driver.id, request)
         t0 = time.perf_counter()
-        result = await self.driver.run_delegate(state.question, tools, runtime, state.budget,
-                                                context=render_manifests(state.manifests))
+        result = await self.driver.run_delegate(request.question, tools, runtime, state.budget,
+                                                context=request.context)
         state.usage.add_model(result.usage)
         ranked = [k for k in dict.fromkeys(result.ranked_keys) if k in state.pool]
         unknown = [k for k in result.ranked_keys if k not in state.pool]

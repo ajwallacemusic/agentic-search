@@ -88,6 +88,13 @@ class DelegateResult(BaseModel):
     note: str | None = None
 
 
+class DelegateRequest(BaseModel):
+    """What a delegate-mode driver receives up front; passed through Hooks.before_model_call."""
+
+    question: Query
+    context: str = ""
+
+
 class ToolRuntime(Protocol):
     """Executes tool calls for a delegate-mode driver; returns one text result per call."""
 
