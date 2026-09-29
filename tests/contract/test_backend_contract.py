@@ -8,6 +8,7 @@ import pytest
 from agentic_search import Harness
 from agentic_search.backends.base import Backend, BackendError, UnsupportedOperation
 from agentic_search.backends.files import FilesBackend
+from agentic_search.backends.sql_backend import SqlBackend
 from agentic_search.core.types import (
     Aggregate,
     Capability,
@@ -150,11 +151,6 @@ async def test_native_read_only(backend):
 
 
 async def test_sql_sessions_are_read_only(backend):
-    try:
-        from agentic_search.backends.sql_backend import SqlBackend
-    except ImportError:
-        pytest.skip("sql_backend not yet available")
-
     if not isinstance(backend, SqlBackend):
         pytest.skip("not a SQL backend")
     await backend.discover()
