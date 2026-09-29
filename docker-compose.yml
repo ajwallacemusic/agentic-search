@@ -1,0 +1,36 @@
+# Test services for the backend contract suite: `docker compose up -d --wait`, then
+# `AGENTIC_SEARCH_INTEGRATION=1 uv run pytest -m integration`.
+name: agentic-search-test
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: agentic
+      POSTGRES_DB: agentic
+    ports: ["55432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agentic"]
+      interval: 2s
+      retries: 30
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: agentic
+      MYSQL_DATABASE: agentic
+    ports: ["53306:3306"]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -pagentic --silent"]
+      interval: 2s
+      retries: 60
+  opensearch:
+    image: opensearchproject/opensearch:2.17.1
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports: ["59200:9200"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 3s
+      retries: 60

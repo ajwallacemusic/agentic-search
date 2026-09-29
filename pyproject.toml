@@ -14,6 +14,10 @@ dependencies = [
 anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.50"]
 local = ["sentence-transformers>=3.0", "pillow>=10"]
+postgres = ["psycopg[binary,pool]>=3.2", "sqlglot>=25"]
+mysql = ["aiomysql>=0.2", "sqlglot>=25"]
+bigquery = ["google-cloud-bigquery>=3.25", "sqlglot>=25"]
+opensearch = ["opensearch-py[async]>=2.6"]
 
 [dependency-groups]
 dev = [
@@ -22,6 +26,11 @@ dev = [
   "ruff>=0.6",
   "anthropic>=0.40",
   "openai>=1.50",
+  "sqlglot>=25",
+  "psycopg[binary,pool]>=3.2",
+  "aiomysql>=0.2",
+  "google-cloud-bigquery>=3.25",
+  "opensearch-py[async]>=2.6",
 ]
 
 [build-system]
@@ -37,8 +46,12 @@ testpaths = ["tests"]
 markers = [
   "live: calls real network services (skipped by default)",
   "slow: downloads or runs local models",
+  "integration: needs docker compose services (AGENTIC_SEARCH_INTEGRATION=1)",
 ]
-addopts = "-m 'not live and not slow'"
+addopts = "-m 'not live and not slow and not integration'"
+filterwarnings = [
+  "ignore:enable_cleanup_closed ignored:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100
