@@ -28,6 +28,21 @@ _CONFIG = re.compile(r"^[a-z_]+$")
 _DIM = re.compile(r"^vector\((\d+)\)$")
 
 
+def _require_psycopg() -> tuple[Any, Any, Any]:
+    """Import psycopg, psycopg.rows.dict_row, and AsyncConnectionPool.
+
+    Raises BackendError if any import fails (e.g., missing postgres extra).
+    Returns (psycopg module, dict_row, AsyncConnectionPool).
+    """
+    try:
+        import psycopg
+        from psycopg.rows import dict_row
+        from psycopg_pool import AsyncConnectionPool
+        return psycopg, dict_row, AsyncConnectionPool
+    except ImportError as exc:
+        raise BackendError("PostgresBackend needs the `postgres` extra: pip install 'agentic-search[postgres]'") from exc
+
+
 class PostgresBackend(SqlBackend):
     dialect = "postgres"
     backend_type = "postgres"
@@ -53,10 +68,7 @@ class PostgresBackend(SqlBackend):
     async def _get_pool(self) -> Any:
         async with self._pool_lock:
             if self._pool is None:
-                try:
-                    from psycopg_pool import AsyncConnectionPool
-                except ImportError as exc:
-                    raise BackendError("PostgresBackend needs the `postgres` extra: pip install 'agentic-search[postgres]'") from exc
+                _, _, AsyncConnectionPool = _require_psycopg()
 
                 timeout_ms = self.statement_timeout_ms
 
@@ -70,15 +82,17 @@ class PostgresBackend(SqlBackend):
                 try:
                     await pool.open(wait=True, timeout=self.connect_timeout_s)
                 except Exception as exc:
-                    await pool.close()
+                    try:
+                        await pool.close()
+                    except Exception:
+                        pass
                     self._pool = None
                     raise BackendError(f"{type(exc).__name__}: {exc}") from exc
                 self._pool = pool
             return self._pool
 
     async def _query(self, sql: str, params: list[Any] | None) -> list[dict[str, Any]]:
-        import psycopg
-        from psycopg.rows import dict_row
+        psycopg, dict_row, _ = _require_psycopg()
 
         try:
             pool = await self._get_pool()
@@ -88,8 +102,6 @@ class PostgresBackend(SqlBackend):
                     return list(await cur.fetchall()) if cur.description else []
         except psycopg.Error as exc:
             raise BackendError(f"{type(exc).__name__}: {exc}") from exc
-        except BackendError:
-            raise
 
     async def close(self) -> None:
         if self._pool is not None:
