@@ -72,6 +72,13 @@ Set `native_query: true` on a backend to let the planner run read-only native SQ
 they pass `backends/native_guard.py` (single SELECT, no DML/DDL/locks/scripts, row cap) first.
 Vector columns need `embedders: {<table>.<column>: <embedder id>}` so queries are embedded with the
 same model as the stored vectors. DSNs and passwords are masked in errors and traces.
+In a source with several tables/indices, hit ids are `<collection>/<primary key>`; tables with a
+composite primary key are skipped unless `id_columns` names a column for them.
+
+**Connect with a read-only role/user.** Grant the credentials you configure only `SELECT` (or
+search/read) on the tables and indices you expose. The native-query guard and the read-only
+sessions are defence in depth, not a substitute: the guard's function check is a denylist and
+cannot anticipate every side-effecting function or extension.
 
 ```yaml
 backends:
