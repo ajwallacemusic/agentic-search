@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from agentic_search.core.hooks import Hooks, SourcePolicy
 from agentic_search.core.state import Candidate, SearchState
 from agentic_search.core.types import ModelUsage
-from agentic_search.models.base import Decider, ToolCall
+from agentic_search.models.base import Decider, JudgeRequest, ToolCall
 from agentic_search.roles.executor import ExecResult
 
 
@@ -55,9 +55,11 @@ class Analyzer:
             batch = pending[start:start + self.batch_size]
             try:
                 hits = self.policy.redact([state.pool[k].hit for k in batch], decider.id)
-                hits = await self.hooks.before_model_call(decider.id, hits)
+                request = await self.hooks.before_model_call(
+                    decider.id, JudgeRequest(question=state.question, hits=hits))
                 t0 = time.perf_counter()
-                result = await asyncio.wait_for(decider.judge(state.question, hits), self.timeout)
+                result = await asyncio.wait_for(decider.judge(request.question, request.hits),
+                                                self.timeout)
             except NotImplementedError:
                 self._can_judge = False
                 for k in pending[start:]:

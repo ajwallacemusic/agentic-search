@@ -87,3 +87,27 @@ async def test_hook_blocking_fails_open():
     assert all(s.pool[k].unjudged_reason.startswith("judge failed") for k in res.new_keys)
     assert len(s.trace.of_type("judge_error")) == 1
     assert "PermissionError" in s.trace.of_type("judge_error")[0].data["error"]
+
+
+async def test_judge_question_passes_through_hook():
+    from agentic_search.core.hooks import Hooks
+    from agentic_search.models.base import JudgeRequest
+
+    class ReplaceQuestion(Hooks):
+        async def before_model_call(self, model_id, payload):
+            assert isinstance(payload, JudgeRequest)
+            return payload.model_copy(update={"question": Query.of("REDACTED")})
+
+    class RecordingJudge(KeywordJudge):
+        def __init__(self):
+            super().__init__(["fever"])
+            self.questions = []
+
+        async def judge(self, question, hits):
+            self.questions.append(question.as_text())
+            return await super().judge(question, hits)
+
+    s, calls, res = setup_state()
+    judge = RecordingJudge()
+    out = await Analyzer(judge, hooks=ReplaceQuestion()).analyze(s, calls, res, digest_model_id="d")
+    assert judge.questions == ["REDACTED"] and out.n_new_relevant == 1

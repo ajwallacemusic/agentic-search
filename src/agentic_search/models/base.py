@@ -88,6 +88,13 @@ class DelegateResult(BaseModel):
     note: str | None = None
 
 
+class JudgeRequest(BaseModel):
+    """What a judge receives; passed through Hooks.before_model_call."""
+
+    question: Query
+    hits: list[Hit]
+
+
 class DelegateRequest(BaseModel):
     """What a delegate-mode driver receives up front; passed through Hooks.before_model_call."""
 
