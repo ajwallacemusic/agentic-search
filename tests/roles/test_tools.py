@@ -1,7 +1,13 @@
 import pytest
 
 from agentic_search.core.types import (
-    Capability, ImagePart, Lexical, Manifest, Query, TextPart, Vector,
+    Capability,
+    ImagePart,
+    Lexical,
+    Manifest,
+    Query,
+    TextPart,
+    Vector,
 )
 from agentic_search.roles.tools import DiscoverRequest, build_tool_specs, parse_call
 from agentic_search.testing import call

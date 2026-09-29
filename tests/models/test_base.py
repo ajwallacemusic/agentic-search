@@ -3,10 +3,20 @@ from pydantic import ValidationError
 
 from agentic_search.core.types import Budget, Hit, Query, TextPart
 from agentic_search.models.base import (
-    Action, Decider, Decision, Driver, Judgment, PlannerView,
+    Action,
+    Decider,
+    Decision,
+    Driver,
+    Judgment,
+    PlannerView,
 )
 from agentic_search.testing import (
-    EchoDriver, FailingDecider, KeywordJudge, ScriptedController, ScriptedDriver, call,
+    EchoDriver,
+    FailingDecider,
+    KeywordJudge,
+    ScriptedController,
+    ScriptedDriver,
+    call,
 )
 
 

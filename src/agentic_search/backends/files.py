@@ -14,13 +14,35 @@ import numpy as np
 from rank_bm25 import BM25Okapi
 
 from agentic_search.backends.base import (
-    BackendError, DiscoverDetail, UnsupportedOperation, rrf_merge,
+    BackendError,
+    DiscoverDetail,
+    UnsupportedOperation,
+    rrf_merge,
 )
 from agentic_search.backends.filters import matches
 from agentic_search.core.types import (
-    Aggregate, Capability, CollectionInfo, Content, Document, Fetch, FieldSpec, FieldType, Filter,
-    FilterOnly, Hit, Hybrid, ImagePart, Lexical, Manifest, Modality, QueryOp, Regex,
-    StructuredPart, TextPart, Vector, text_of,
+    Aggregate,
+    Capability,
+    CollectionInfo,
+    Content,
+    Document,
+    Fetch,
+    FieldSpec,
+    FieldType,
+    Filter,
+    FilterOnly,
+    Hit,
+    Hybrid,
+    ImagePart,
+    Lexical,
+    Manifest,
+    Modality,
+    QueryOp,
+    Regex,
+    StructuredPart,
+    TextPart,
+    Vector,
+    text_of,
 )
 from agentic_search.embedders.base import Embedder, cosine_scores, normalize_rows, supports
 

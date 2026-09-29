@@ -5,7 +5,11 @@ import pytest
 
 from agentic_search.core.types import ImagePart, Modality, TextPart
 from agentic_search.embedders.base import (
-    CachedEmbedder, EmbedderRegistry, cosine_scores, normalize_rows, supports,
+    CachedEmbedder,
+    EmbedderRegistry,
+    cosine_scores,
+    normalize_rows,
+    supports,
 )
 from agentic_search.embedders.local import HashEmbedder
 

@@ -6,7 +6,12 @@ import json
 
 from agentic_search.core.types import Content, Hit, ImagePart, Query, TextPart
 from agentic_search.models.base import (
-    Action, ControllerView, Decision, JudgeResult, Judgment, ToolSpec,
+    Action,
+    ControllerView,
+    Decision,
+    JudgeResult,
+    Judgment,
+    ToolSpec,
 )
 from agentic_search.models.llm import ChatMessage, LLMClient
 

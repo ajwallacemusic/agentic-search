@@ -7,8 +7,17 @@ from typing import Any
 
 from agentic_search.core.types import Budget, Hit, ModelUsage, Query
 from agentic_search.models.base import (
-    Action, ControllerView, Decision, DelegateResult, JudgeResult, Judgment, PlannerView,
-    PlanResult, ToolCall, ToolRuntime, ToolSpec,
+    Action,
+    ControllerView,
+    Decision,
+    DelegateResult,
+    JudgeResult,
+    Judgment,
+    PlannerView,
+    PlanResult,
+    ToolCall,
+    ToolRuntime,
+    ToolSpec,
 )
 
 _ids = itertools.count(1)

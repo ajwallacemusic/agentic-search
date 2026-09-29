@@ -10,8 +10,20 @@ from agentic_search.backends.filters import filter_fields
 from agentic_search.core.hooks import Hooks, SourcePolicy
 from agentic_search.core.state import CandidatePool, Trace
 from agentic_search.core.types import (
-    Aggregate, FieldType, Hit, Hybrid, Lexical, Manifest, Query, QueryOp, Regex, TextPart,
-    ToolError, Vector, modality_of, required_capabilities,
+    Aggregate,
+    FieldType,
+    Hit,
+    Hybrid,
+    Lexical,
+    Manifest,
+    Query,
+    QueryOp,
+    Regex,
+    TextPart,
+    ToolError,
+    Vector,
+    modality_of,
+    required_capabilities,
 )
 from agentic_search.embedders.base import EmbedderRegistry
 from agentic_search.models.base import ToolCall

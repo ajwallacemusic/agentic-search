@@ -3,8 +3,19 @@ import pytest
 from agentic_search.backends.base import Backend, BackendError, UnsupportedOperation, rrf_merge
 from agentic_search.backends.files import FilesBackend, infer_field_type
 from agentic_search.core.types import (
-    Aggregate, Capability, Eq, Fetch, FieldType, FilterOnly, Hybrid, Lexical, Regex, StructuredPart,
-    TextPart, Traverse, Vector,
+    Aggregate,
+    Capability,
+    Eq,
+    Fetch,
+    FieldType,
+    FilterOnly,
+    Hybrid,
+    Lexical,
+    Regex,
+    StructuredPart,
+    TextPart,
+    Traverse,
+    Vector,
 )
 from agentic_search.embedders.local import HashEmbedder
 

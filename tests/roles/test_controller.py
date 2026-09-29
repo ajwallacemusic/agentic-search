@@ -1,9 +1,9 @@
+from agentic_search.core.hooks import Hooks
 from agentic_search.core.state import SearchState
 from agentic_search.core.types import Budget, Hit, Query, StopReason
 from agentic_search.models.base import Action, TurnSummary
 from agentic_search.roles.controller import Controller
 from agentic_search.testing import FailingDecider, KeywordJudge, ScriptedController
-from agentic_search.core.hooks import Hooks
 
 
 def state(budget=None, history=(), relevant=None):

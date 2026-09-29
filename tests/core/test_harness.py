@@ -7,7 +7,11 @@ from agentic_search.core.hooks import Hooks
 from agentic_search.core.types import StopReason
 from agentic_search.models.base import Action
 from agentic_search.testing import (
-    FailingDecider, KeywordJudge, ScriptedController, ScriptedDriver, call,
+    FailingDecider,
+    KeywordJudge,
+    ScriptedController,
+    ScriptedDriver,
+    call,
 )
 
 
