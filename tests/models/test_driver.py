@@ -72,14 +72,15 @@ async def test_delegate_loop_until_finish():
 async def test_delegate_forces_finish_after_budget_turns():
     client = FakeLLMClient([
         ChatResponse(tool_calls=[tc(1)]),
-        ChatResponse(tool_calls=[tc(2)]),
-        ChatResponse(tool_calls=[tc(3, name="finish", ranked_keys=["a", 7])]),
+        ChatResponse(tool_calls=[tc(2, name="finish", ranked_keys=["a", 7])]),
     ])
-    res = await ToolCallingDriver(client).run_delegate(Query.of("q"), TOOLS, Runtime(),
+    rt = Runtime()
+    res = await ToolCallingDriver(client).run_delegate(Query.of("q"), TOOLS, rt,
                                                         Budget(max_turns=1))
     assert res.ranked_keys == ["a", "7"]
-    assert client.requests[2]["tool_choice"] == "finish"
-    assert client.requests[2]["tools"] == [FINISH_TOOL]
+    assert len(rt.batches) == 1
+    assert client.requests[1]["tool_choice"] == "finish"
+    assert client.requests[1]["tools"] == [FINISH_TOOL]
 
 
 async def test_delegate_stops_when_model_stops_calling_tools():

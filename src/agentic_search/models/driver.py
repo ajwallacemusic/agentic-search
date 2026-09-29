@@ -101,7 +101,7 @@ class ToolCallingDriver:
         messages = [ChatMessage(role="user", content=self._with_images(opening, question))]
         usage = ModelUsage()
         all_tools = [*tools, FINISH_TOOL]
-        for _ in range(budget.max_turns + 1):
+        for _ in range(budget.max_turns):
             resp = await self.client.chat(system, messages, tools=all_tools, max_tokens=self.max_tokens)
             usage = usage.plus(resp.usage)
             finish = next((c for c in resp.tool_calls if c.name == FINISH_TOOL.name), None)
@@ -114,7 +114,7 @@ class ToolCallingDriver:
             messages.append(ChatMessage(role="assistant", content=resp.text, tool_calls=calls))
             outputs = await runtime.call(calls)
             messages.extend(ChatMessage(role="tool", tool_call_id=c.id, content=o)
-                            for c, o in zip(calls, outputs))
+                            for c, o in zip(calls, outputs, strict=True))
         resp = await self.client.chat(system, messages, tools=[FINISH_TOOL],
                                       tool_choice=FINISH_TOOL.name, max_tokens=self.max_tokens)
         usage = usage.plus(resp.usage)
