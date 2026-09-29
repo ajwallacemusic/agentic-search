@@ -51,6 +51,9 @@ class Runtime:
     def report_usage(self, usage):
         self.usages.append(usage)
 
+    def budget_exhausted(self):
+        return False
+
     async def call(self, calls):
         self.batches.append(calls)
         return [f"result for {c.id}" for c in calls]
@@ -91,3 +94,22 @@ async def test_delegate_stops_when_model_stops_calling_tools():
     client = FakeLLMClient([ChatResponse(text="nothing to do")])
     res = await ToolCallingDriver(client).run_delegate(Query.of("q"), TOOLS, Runtime(), Budget())
     assert res.ranked_keys == [] and res.note == "nothing to do"
+
+
+class ExhaustedAfterFirstBatch(Runtime):
+    def budget_exhausted(self):
+        return len(self.batches) >= 1
+
+
+async def test_delegate_stops_calling_model_once_budget_exhausted():
+    client = FakeLLMClient([
+        ChatResponse(tool_calls=[tc(1)]),
+        ChatResponse(tool_calls=[tc(2, name="finish", ranked_keys=["k"])]),
+        ChatResponse(tool_calls=[tc(3)]),
+        ChatResponse(tool_calls=[tc(4)]),
+    ])
+    rt = ExhaustedAfterFirstBatch()
+    res = await ToolCallingDriver(client).run_delegate(Query.of("q"), TOOLS, rt, Budget(max_turns=4))
+    assert len(client.requests) == 2 and len(rt.batches) == 1
+    assert client.requests[1]["tool_choice"] == "finish"
+    assert res.ranked_keys == ["k"]

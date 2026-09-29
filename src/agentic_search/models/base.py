@@ -110,6 +110,11 @@ class ToolRuntime(Protocol):
 
     def report_usage(self, usage: ModelUsage) -> None: ...
 
+    def budget_exhausted(self) -> bool:
+        """True once the harness has refused tool calls for budget reasons; drivers stop calling
+        the model and finish."""
+        ...
+
 
 @runtime_checkable
 class Driver(Protocol):

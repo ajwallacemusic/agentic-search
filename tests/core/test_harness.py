@@ -183,6 +183,22 @@ async def test_model_mode_enforces_cost_budget_without_double_counting(docs_back
     assert res.usage.input_tokens == 30 and res.usage.output_tokens == 15
 
 
+async def test_model_mode_cost_budget_cuts_off_model_calls(docs_backend):
+    from agentic_search.core.types import ModelUsage
+    from agentic_search.models.driver import ToolCallingDriver
+    from agentic_search.models.llm import ChatResponse
+    from agentic_search.testing import FakeLLMClient
+
+    usage = ModelUsage(cost_usd=0.3)
+    client = FakeLLMClient([ChatResponse(tool_calls=[lex(t, id=t)], usage=usage)
+                            for t in ("headache", "fever", "pain", "castles", "press")])
+    res = await make(docs_backend, ToolCallingDriver(client)).search(
+        "q", mode="model", budget=Budget(max_cost_usd=0.5, max_turns=4))
+    assert len(client.requests) == 3  # two tool turns, then the forced finish — not max_turns
+    assert client.requests[2]["tool_choice"] == "finish"
+    assert res.stop_reason is StopReason.BUDGET_COST
+
+
 async def test_controller_digest_rendered_for_controller_model(docs_backend):
     driver = ScriptedDriver([[lex("headache")], [lex("castles")]])
     ctrl = ScriptedController([Action.CONTINUE, Action.STOP])

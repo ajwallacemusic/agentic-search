@@ -121,6 +121,8 @@ class ToolCallingDriver:
             outputs = await runtime.call(calls)
             messages.extend(ChatMessage(role="tool", tool_call_id=c.id, content=o)
                             for c, o in zip(calls, outputs, strict=True))
+            if runtime.budget_exhausted():
+                break
         resp = await self.client.chat(system, messages, tools=[FINISH_TOOL],
                                       tool_choice=FINISH_TOOL.name, max_tokens=self.max_tokens)
         usage = usage.plus(resp.usage)
