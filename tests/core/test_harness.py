@@ -174,6 +174,18 @@ async def test_model_mode_enforces_cost_budget_without_double_counting(docs_back
     assert res.usage.input_tokens == 30 and res.usage.output_tokens == 15
 
 
+async def test_controller_digest_rendered_for_controller_model(docs_backend):
+    driver = ScriptedDriver([[lex("headache")], [lex("castles")]])
+    ctrl = ScriptedController([Action.CONTINUE, Action.STOP])
+    h = make(docs_backend, driver, controller=ctrl,
+             source_policy={"docs": {"scripted-driver"}})
+    await h.search("q")
+    assert "Aspirin" in driver.views[1].digest
+    assert ctrl.views and all("Aspirin" not in v.digest and "Acetaminophen" not in v.digest
+                              for v in ctrl.views)
+    assert "withheld" in ctrl.views[0].digest
+
+
 class BrokenBackend:
     name, backend_type = "broken", "x"
 

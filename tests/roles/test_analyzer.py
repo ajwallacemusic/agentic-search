@@ -59,6 +59,7 @@ async def test_batching_and_policy():
     # KeywordJudge is not allowed to see source s, so it sees empty content
     assert out.n_new_relevant == 0
     assert "withheld" in out.digest
+    assert "no keyword" not in out.digest  # the judge rationale is withheld with the body
 
 
 async def test_error_lines_in_digest():

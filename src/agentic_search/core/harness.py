@@ -239,7 +239,10 @@ class Harness:
                 n_new=analysis.n_new, n_new_relevant=analysis.n_new_relevant, top_keys=top))
             if single_pass:
                 return StopReason.SINGLE_PASS
-            decision = await controller.decide(state)
+            ctrl_digest = None
+            if self.controller_decider is not None:
+                ctrl_digest = analyzer.render_digest(state, calls, result, self.controller_decider.id)
+            decision = await controller.decide(state, digest=ctrl_digest)
             state.usage.add_model(decision.usage)
             if decision.action is Action.STOP:
                 return StopReason.CONTROLLER_STOP

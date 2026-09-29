@@ -73,14 +73,16 @@ class Controller:
                 return Decision(action=Action.STOP, note="top results stable")
         return Decision(action=Action.CONTINUE, note="new results found; keep exploring")
 
-    async def decide(self, state: SearchState) -> Decision:
+    async def decide(self, state: SearchState, *, digest: str | None = None) -> Decision:
+        """`digest` is the turn digest rendered for this controller's decider (default state.digest)."""
         by = "heuristic"
         if self.decider is None or not self._can_decide:
             decision = self.heuristic(state)
         else:
             decider = self.decider
             view = ControllerView(question=state.question, turn=state.turn, history=state.history,
-                                  digest=state.digest, total_relevant=self.total_relevant(state),
+                                  digest=state.digest if digest is None else digest,
+                                  total_relevant=self.total_relevant(state),
                                   budget_remaining=self.budget_remaining(state))
             try:
                 view = await self.hooks.before_model_call(decider.id, view)

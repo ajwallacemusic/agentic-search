@@ -91,12 +91,13 @@ class Analyzer:
         usage = await self.judge_keys(state, result.new_keys)
         judged_new = [state.pool[k] for k in result.new_keys if state.pool[k].judged]
         n_rel = sum(self.is_relevant(c) for c in judged_new) if judged_new else None
-        digest = self._digest(state, calls, result, digest_model_id)
+        digest = self.render_digest(state, calls, result, digest_model_id)
         return AnalysisResult(n_new=len(result.new_keys), n_new_relevant=n_rel, digest=digest,
                               usage=usage)
 
-    def _digest(self, state: SearchState, calls: list[ToolCall], result: ExecResult,
-                model_id: str) -> str:
+    def render_digest(self, state: SearchState, calls: list[ToolCall], result: ExecResult,
+                      model_id: str) -> str:
+        """The turn digest as `model_id` may see it (source policy applied)."""
         pool = state.pool
         new = [pool[k] for k in result.new_keys]
         relevant = [c for c in new if self.is_relevant(c)]
@@ -137,10 +138,8 @@ class Analyzer:
 
     def _line(self, cand: Candidate, model_id: str) -> str:
         h = cand.hit
-        if self.policy.allows(h.source, model_id):
-            body = h.snippet(self.snippet_chars)
-        else:
-            body = "(content withheld by source policy)"
+        allowed = self.policy.allows(h.source, model_id)
+        body = h.snippet(self.snippet_chars) if allowed else "(content withheld by source policy)"
         p = f" p={cand.p_relevant:.2f}" if cand.judged and cand.p_relevant is not None else ""
-        why = f" ({cand.rationale})" if cand.rationale else ""
+        why = f" ({cand.rationale})" if cand.rationale and allowed else ""
         return f"- {h.key}{p}: {body}{why}"
