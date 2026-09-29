@@ -186,6 +186,47 @@ async def test_client_construction_failure_on_query(monkeypatch):
         await b.execute(Regex(source="bq", pattern="asp"))
 
 
+async def test_real_query_has_job_timeout():
+    configs = []
+
+    class Recording(FakeClient):
+        def query(self, sql, job_config):
+            configs.append(job_config)
+            return super().query(sql, job_config)
+
+    await make(Recording(), job_timeout_ms="5000").execute(Regex(source="bq", pattern="asp"))
+    dry, real = configs
+    assert int(real.job_timeout_ms) == 5000 and not real.dry_run  # stored as an int64 string
+    b = BigQueryBackend("bq", "proj", "ds", client=FakeClient())
+    assert b.job_timeout_ms == 60_000
+
+
+async def test_close_closes_client():
+    closed = []
+
+    class Closable(FakeClient):
+        def close(self):
+            closed.append(True)
+
+    b = make(Closable())
+    await b.close()
+    assert closed == [True] and b._client is None
+    await b.close()  # no client: no-op
+    assert closed == [True]
+
+
+@pytest.mark.parametrize("project,dataset", [
+    ("proj`; DROP", "ds"), ("proj", "ds.other`"), ("", "ds"), ("proj", "d-s"), ("proj", ""),
+])
+def test_project_and_dataset_are_validated(project, dataset):
+    with pytest.raises(ValueError):
+        BigQueryBackend("bq", project, dataset)
+
+
+def test_domain_scoped_project_is_accepted():
+    assert BigQueryBackend("bq", "example.com:my-proj", "my_ds").project == "example.com:my-proj"
+
+
 @pytest.mark.live
 async def test_live_bigquery():
     project, dataset = os.environ.get("GOOGLE_CLOUD_PROJECT"), os.environ.get("AGENTIC_SEARCH_BQ_DATASET")

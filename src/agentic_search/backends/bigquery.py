@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import re
 from typing import Any
 
 from agentic_search.backends.base import BackendError
@@ -22,6 +23,8 @@ _TYPES = {
     "JSON": FieldType.JSON, "RECORD": FieldType.JSON, "STRUCT": FieldType.JSON,
 }
 _DISTANCE = {"cosine": "COSINE", "l2": "EUCLIDEAN", "ip": "DOT_PRODUCT"}
+_PROJECT = re.compile(r"[A-Za-z0-9:._-]+")  # incl. domain-scoped "example.com:proj"
+_DATASET = re.compile(r"[A-Za-z0-9_]+")
 
 
 def _require_bigquery() -> tuple[Any, Any]:
@@ -48,11 +51,16 @@ class BigQueryBackend(SqlBackend):
                  max_bytes_billed: int = 1_000_000_000, location: str | None = None,
                  text_columns: dict[str, list[str]] | None = None,
                  vector_dims: dict[str, int] | None = None, sample_values: bool = False,
-                 **kwargs: Any):
+                 job_timeout_ms: int = 60_000, **kwargs: Any):
         super().__init__(name, sample_values=sample_values, **kwargs)
+        if not _PROJECT.fullmatch(project):
+            raise ValueError(f"invalid BigQuery project {project!r}")
+        if not _DATASET.fullmatch(dataset):
+            raise ValueError(f"invalid BigQuery dataset {dataset!r}")
         self.project = project
         self.dataset = dataset
         self.max_bytes_billed = int(max_bytes_billed)
+        self.job_timeout_ms = int(job_timeout_ms)
         self.location = location
         self.text_column_overrides = text_columns or {}
         self.vector_dims = vector_dims or {}
@@ -63,6 +71,11 @@ class BigQueryBackend(SqlBackend):
             bigquery, _ = _require_bigquery()
             self._client = bigquery.Client(project=self.project, location=self.location)
         return self._client
+
+    async def close(self) -> None:
+        if self._client is not None:
+            client, self._client = self._client, None
+            await asyncio.to_thread(client.close)
 
     def _table_ref(self, table: str) -> str:
         quote_ident(table, "bigquery")  # validate
@@ -106,7 +119,8 @@ class BigQueryBackend(SqlBackend):
                 raise BackendError(f"query would scan {scanned} bytes, above the "
                                    f"{self.max_bytes_billed}-byte cap")
             job = client.query(sql, job_config=bigquery.QueryJobConfig(
-                query_parameters=query_params, maximum_bytes_billed=self.max_bytes_billed))
+                query_parameters=query_params, maximum_bytes_billed=self.max_bytes_billed,
+                job_timeout_ms=self.job_timeout_ms))
             return [dict(row.items()) for row in job.result()]
         except BackendError:
             raise
