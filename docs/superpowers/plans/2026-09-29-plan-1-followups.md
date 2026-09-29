@@ -25,3 +25,15 @@ the named plan ships the feature that exposes them.
 - Config: missing keys raise raw `KeyError`; duplicate embedder ids overwrite.
 - Clients: empty `choices` → IndexError (OpenAI-compat); empty assistant message → `content: []` (Anthropic).
 - Various test-coverage gaps noted in task reviews (filters edge cases, executor branches, analyzer timeout/partial batch).
+
+## Status after Plan 2 (2026-09-29)
+- Done in Plan 2: secret scrubbing; delegate model-spend cutoff.
+- Still required for Plan 3: hooked backend embeddings.
+
+## Plan 2 follow-ups (carry into Plan 3)
+- Postgres lexical search recomputes `to_tsvector(...)` per row (no index use); support a stored/discovered tsvector column.
+- BigQuery verified only against a fake client; run `test_live_bigquery` against a real dataset.
+- BigQuery composite primary keys (table_constraints) still use the first column.
+- `ValueError` from backend constructor validation (BigQuery project/dataset, Postgres text_search_config) is not converted to `ConfigError`.
+- `strip_collection` cannot distinguish a raw pk that itself starts with "<collection>/" (namespaced form works).
+- Minor: remaining deferred items are listed in the Plan 2 ledger summary (final message of the run).
