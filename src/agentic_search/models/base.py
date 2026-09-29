@@ -103,9 +103,12 @@ class DelegateRequest(BaseModel):
 
 
 class ToolRuntime(Protocol):
-    """Executes tool calls for a delegate-mode driver; returns one text result per call."""
+    """Executes tool calls for a delegate-mode driver; returns one text result per call.
+    Drivers call report_usage after every model response so cost/token budgets apply mid-run."""
 
     async def call(self, calls: list[ToolCall]) -> list[str]: ...
+
+    def report_usage(self, usage: ModelUsage) -> None: ...
 
 
 @runtime_checkable

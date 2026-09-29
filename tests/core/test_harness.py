@@ -152,6 +152,28 @@ async def test_model_mode_raising_output_hook_withholds_content(docs_backend):
     assert "PermissionError" in res.trace.of_type("hook_error")[0].data["error"]
 
 
+async def test_model_mode_enforces_cost_budget_without_double_counting(docs_backend):
+    from agentic_search.core.types import ModelUsage
+    from agentic_search.models.driver import ToolCallingDriver
+    from agentic_search.models.llm import ChatResponse
+    from agentic_search.testing import FakeLLMClient
+
+    usage = ModelUsage(input_tokens=10, output_tokens=5, cost_usd=0.3)
+    client = FakeLLMClient([
+        ChatResponse(tool_calls=[lex("headache", id="a")], usage=usage),
+        ChatResponse(tool_calls=[lex("fever", id="b")], usage=usage),
+        ChatResponse(tool_calls=[call("finish", id="f", ranked_keys=["docs:d1"])], usage=usage),
+    ])
+    h = make(docs_backend, ToolCallingDriver(client))
+    res = await h.search("q", mode="model", budget=Budget(max_cost_usd=0.5))
+    second_batch_tool_msg = client.requests[2]["messages"][-1]
+    assert second_batch_tool_msg.role == "tool"
+    assert second_batch_tool_msg.content.startswith("[budget] budget_cost")
+    assert res.stop_reason is StopReason.BUDGET_COST
+    assert res.usage.cost_usd == pytest.approx(0.9)
+    assert res.usage.input_tokens == 30 and res.usage.output_tokens == 15
+
+
 class BrokenBackend:
     name, backend_type = "broken", "x"
 

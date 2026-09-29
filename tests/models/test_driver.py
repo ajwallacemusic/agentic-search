@@ -46,6 +46,10 @@ async def test_plan_includes_question_images_when_supported():
 class Runtime:
     def __init__(self):
         self.batches = []
+        self.usages = []
+
+    def report_usage(self, usage):
+        self.usages.append(usage)
 
     async def call(self, calls):
         self.batches.append(calls)
@@ -78,7 +82,7 @@ async def test_delegate_forces_finish_after_budget_turns():
     res = await ToolCallingDriver(client).run_delegate(Query.of("q"), TOOLS, rt,
                                                         Budget(max_turns=1))
     assert res.ranked_keys == ["a", "7"]
-    assert len(rt.batches) == 1
+    assert len(rt.batches) == 1 and len(rt.usages) == 2
     assert client.requests[1]["tool_choice"] == "finish"
     assert client.requests[1]["tools"] == [FINISH_TOOL]
 

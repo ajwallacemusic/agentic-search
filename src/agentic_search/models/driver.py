@@ -109,6 +109,7 @@ class ToolCallingDriver:
         for _ in range(budget.max_turns):
             resp = await self.client.chat(system, messages, tools=all_tools, max_tokens=self.max_tokens)
             usage = usage.plus(resp.usage)
+            runtime.report_usage(resp.usage)
             finish = next((c for c in resp.tool_calls if c.name == FINISH_TOOL.name), None)
             if finish is not None:
                 return DelegateResult(ranked_keys=_finish_keys(finish), usage=usage,
@@ -123,6 +124,7 @@ class ToolCallingDriver:
         resp = await self.client.chat(system, messages, tools=[FINISH_TOOL],
                                       tool_choice=FINISH_TOOL.name, max_tokens=self.max_tokens)
         usage = usage.plus(resp.usage)
+        runtime.report_usage(resp.usage)
         finish = next((c for c in resp.tool_calls if c.name == FINISH_TOOL.name), None)
         keys: list[Any] = _finish_keys(finish) if finish is not None else []
         return DelegateResult(ranked_keys=keys, usage=usage, note=resp.text or None)

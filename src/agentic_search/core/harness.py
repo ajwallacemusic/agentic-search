@@ -12,7 +12,7 @@ from agentic_search.backends.base import Backend
 from agentic_search.core.annotations import apply_annotations
 from agentic_search.core.hooks import Hooks, SourcePolicy
 from agentic_search.core.state import Candidate, SearchState, Trace, Usage
-from agentic_search.core.types import Budget, Hit, Manifest, Query, StopReason
+from agentic_search.core.types import Budget, Hit, Manifest, ModelUsage, Query, StopReason
 from agentic_search.embedders.base import Embedder, EmbedderRegistry
 from agentic_search.models.base import (
     Action,
@@ -77,6 +77,18 @@ class _DelegateRuntime:
         self.state, self.executor, self.controller, self.model_id = state, executor, controller, model_id
         self.hooks = hooks
         self.exhausted: StopReason | None = None
+        self.reported = ModelUsage()
+
+    def report_usage(self, usage: ModelUsage) -> None:
+        self.state.usage.add_model(usage)
+        self.reported = self.reported.plus(usage)
+
+    def unreported(self, total: ModelUsage) -> ModelUsage:
+        """The part of a driver's final usage total not already reported mid-run."""
+        r = self.reported
+        return ModelUsage(input_tokens=max(0, total.input_tokens - r.input_tokens),
+                          output_tokens=max(0, total.output_tokens - r.output_tokens),
+                          cost_usd=max(0.0, total.cost_usd - r.cost_usd))
 
     async def call(self, calls: list[ToolCall]) -> list[str]:
         state = self.state
@@ -243,7 +255,7 @@ class Harness:
         t0 = time.perf_counter()
         result = await self.driver.run_delegate(request.question, tools, runtime, state.budget,
                                                 context=request.context)
-        state.usage.add_model(result.usage)
+        state.usage.add_model(runtime.unreported(result.usage))
         ranked = [k for k in dict.fromkeys(result.ranked_keys) if k in state.pool]
         unknown = [k for k in result.ranked_keys if k not in state.pool]
         state.trace.add("delegate", state.turn, duration_ms=(time.perf_counter() - t0) * 1000,
