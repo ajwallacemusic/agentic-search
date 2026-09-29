@@ -61,10 +61,7 @@ class BigQueryBackend(SqlBackend):
     def _get_client(self) -> Any:
         if self._client is None:
             bigquery, _ = _require_bigquery()
-            try:
-                self._client = bigquery.Client(project=self.project, location=self.location)
-            except Exception as exc:
-                raise BackendError(f"{type(exc).__name__}: {exc}") from exc
+            self._client = bigquery.Client(project=self.project, location=self.location)
         return self._client
 
     def _table_ref(self, table: str) -> str:
@@ -99,9 +96,9 @@ class BigQueryBackend(SqlBackend):
     def _run(self, sql: str, params: list[Any] | None) -> list[dict[str, Any]]:
         bigquery, exceptions = _require_bigquery()
 
-        client = self._get_client()
-        query_params = self._parameters(params or [])
         try:
+            client = self._get_client()
+            query_params = self._parameters(params or [])
             dry = client.query(sql, job_config=bigquery.QueryJobConfig(
                 dry_run=True, use_query_cache=False, query_parameters=query_params))
             scanned = dry.total_bytes_processed or 0

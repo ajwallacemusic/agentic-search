@@ -168,6 +168,24 @@ async def test_non_google_exceptions_in_discover():
         await b.discover()
 
 
+async def test_client_construction_failure_on_query(monkeypatch):
+    """Test that client construction failure during query() is wrapped as BackendError."""
+    # Pre-populate discovery with a fake client, then set _client to None
+    # and mock Client constructor to raise RuntimeError
+    client = FakeClient()
+    b = make(client)
+    await b.discover()  # Populate _tables with the fake client
+
+    # Now set _client to None and patch Client constructor to fail
+    b._client = None
+    def raising_client(*args, **kwargs):
+        raise RuntimeError("no creds at query time")
+
+    monkeypatch.setattr("google.cloud.bigquery.Client", raising_client)
+    with pytest.raises(BackendError, match="no creds at query time"):
+        await b.execute(Regex(source="bq", pattern="asp"))
+
+
 @pytest.mark.live
 async def test_live_bigquery():
     project, dataset = os.environ.get("GOOGLE_CLOUD_PROJECT"), os.environ.get("AGENTIC_SEARCH_BQ_DATASET")
