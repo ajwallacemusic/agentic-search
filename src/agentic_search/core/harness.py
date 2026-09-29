@@ -242,6 +242,10 @@ class Harness:
                 n_new=analysis.n_new, n_new_relevant=analysis.n_new_relevant, top_keys=top))
             if single_pass:
                 return StopReason.SINGLE_PASS
+            reason = controller.budget_stop(state)
+            if reason is not None:
+                state.trace.add("budget", state.turn, reason=reason.value)
+                return reason
             ctrl_digest = None
             if self.controller_decider is not None:
                 ctrl_digest = analyzer.render_digest(state, calls, result, self.controller_decider.id)

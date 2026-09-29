@@ -66,6 +66,15 @@ async def test_controller_decider(docs_backend):
     assert res.stop_reason is StopReason.CONTROLLER_STOP and len(driver.views) == 2
 
 
+async def test_controller_not_consulted_after_last_budgeted_turn(docs_backend):
+    driver = ScriptedDriver([[lex("headache")], [lex("pain")]])
+    ctrl = ScriptedController([Action.CONTINUE])
+    res = await make(docs_backend, driver, controller=ctrl).search("q", budget=Budget(max_turns=1))
+    assert res.stop_reason is StopReason.BUDGET_TURNS
+    assert ctrl.views == [] and len(driver.views) == 1
+    assert res.trace.of_type("budget") and not res.trace.of_type("decision")
+
+
 async def test_model_mode_delegate(docs_backend):
     driver = ScriptedDriver(delegate_calls=[[lex("headache", id="a")]],
                             delegate_keys=["docs:d4", "docs:d1", "docs:nope"])
