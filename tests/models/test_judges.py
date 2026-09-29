@@ -79,3 +79,21 @@ async def test_end_to_end_with_llm_driver_and_judge(docs_backend):
     h = Harness([docs_backend], ToolCallingDriver(driver_client), analyzer=LLMJudge(judge_client))
     res = await h.search("what treats headache?")
     assert set(res.keys()) == {"docs:d1", "docs:d4"} and all(r.judged for r in res.hits)
+
+
+async def test_cross_encoder_lazy_load_happens_once_under_concurrency(monkeypatch):
+    import asyncio
+    import time
+
+    loads = []
+
+    def fake_default_scorer(self):
+        loads.append(1)
+        time.sleep(0.05)  # slow model load, run in a worker thread
+        return lambda pairs: [0.5] * len(pairs)
+
+    monkeypatch.setattr(CrossEncoderJudge, "_default_scorer", fake_default_scorer)
+    j = CrossEncoderJudge("m")
+    r1, r2 = await asyncio.gather(j.judge(Query.of("q"), HITS), j.judge(Query.of("q"), HITS))
+    assert len(loads) == 1
+    assert [x.p_relevant for x in r1.judgments] == [0.5, 0.5] == [x.p_relevant for x in r2.judgments]

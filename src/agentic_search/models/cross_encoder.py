@@ -22,6 +22,7 @@ class CrossEncoderJudge:
         self.snippet_chars = snippet_chars
         self.apply_sigmoid = apply_sigmoid
         self.id = id or f"cross-encoder:{model_name}"
+        self._load_lock = asyncio.Lock()
 
     def _default_scorer(self) -> Scorer:
         from sentence_transformers import CrossEncoder
@@ -32,9 +33,12 @@ class CrossEncoderJudge:
         if not hits:
             return JudgeResult(judgments=[])
         if self._scorer is None:
-            self._scorer = await asyncio.to_thread(self._default_scorer)
+            async with self._load_lock:
+                if self._scorer is None:
+                    self._scorer = await asyncio.to_thread(self._default_scorer)
+        scorer = self._scorer
         pairs = [(question.as_text(), h.snippet(self.snippet_chars)) for h in hits]
-        scores = await asyncio.to_thread(self._scorer, pairs)
+        scores = await asyncio.to_thread(scorer, pairs)
         out = []
         for h, raw in zip(hits, scores):
             s = float(raw)
