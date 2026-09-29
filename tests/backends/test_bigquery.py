@@ -124,13 +124,8 @@ async def test_regex_fetch_aggregate_native_sql():
 
 async def test_missing_bigquery_extra_on_discover(monkeypatch):
     """Test that discover() raises BackendError when bigquery module is not available."""
-    from agentic_search.backends import bigquery as bq_module
-
-    def mock_require_bigquery():
-        msg = "BigQueryBackend needs the `bigquery` extra: pip install 'agentic-search[bigquery]'"
-        raise BackendError(msg)
-
-    monkeypatch.setattr(bq_module, "_require_bigquery", mock_require_bigquery)
+    import sys
+    monkeypatch.setitem(sys.modules, "google.cloud.bigquery", None)
     b = BigQueryBackend("bq", "proj", "ds")
     with pytest.raises(BackendError, match="bigquery.*extra"):
         await b.discover()
@@ -147,11 +142,8 @@ async def test_client_construction_failure_on_discover(monkeypatch):
         await b.discover()
 
 
-async def test_non_google_exceptions_in_query(monkeypatch):
+async def test_non_google_exceptions_in_query():
     """Test that non-Google exceptions in query() are wrapped as BackendError."""
-    def raising_query(*args, **kwargs):
-        raise RuntimeError("refresh failed")
-
     class FakeClientRaisingQuery(FakeClient):
         def query(self, sql, job_config):
             if not job_config.dry_run:
@@ -164,7 +156,7 @@ async def test_non_google_exceptions_in_query(monkeypatch):
         await b.execute(Regex(source="bq", pattern="asp"))
 
 
-async def test_non_google_exceptions_in_discover(monkeypatch):
+async def test_non_google_exceptions_in_discover():
     """Test that non-Google exceptions in list_tables() are wrapped as BackendError."""
     class FakeClientRaisingListTables(FakeClient):
         def list_tables(self, dataset):

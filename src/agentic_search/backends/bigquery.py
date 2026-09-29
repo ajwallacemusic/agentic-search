@@ -6,6 +6,7 @@ run in a worker thread."""
 from __future__ import annotations
 
 import asyncio
+import importlib
 from typing import Any
 
 from agentic_search.backends.base import BackendError
@@ -30,8 +31,8 @@ def _require_bigquery() -> tuple[Any, Any]:
     Returns (bigquery module, google.api_core.exceptions module).
     """
     try:
-        from google.api_core import exceptions
-        from google.cloud import bigquery
+        bigquery = importlib.import_module("google.cloud.bigquery")
+        exceptions = importlib.import_module("google.api_core.exceptions")
         return bigquery, exceptions
     except ImportError as exc:
         msg = "BigQueryBackend needs the `bigquery` extra: pip install 'agentic-search[bigquery]'"
@@ -129,7 +130,7 @@ class BigQueryBackend(SqlBackend):
         return [(n, client.get_table(f"{self.project}.{self.dataset}.{n}")) for n in names]
 
     async def _discover_tables(self) -> dict[str, TableInfo]:
-        _, exceptions = _require_bigquery()
+        _require_bigquery()
 
         try:
             listed = await asyncio.to_thread(self._list_tables)
