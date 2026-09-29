@@ -135,9 +135,9 @@ class PostgresBackend(SqlBackend):
         estimates = await self._query(
             "SELECT c.relname AS table_name, c.reltuples::bigint AS est FROM pg_class c "
             "JOIN pg_namespace n ON c.relnamespace = n.oid WHERE n.nspname = %s", [self.schema])
-        pk_of: dict[str, str] = {}
+        pk_of: dict[str, list[str]] = {}
         for r in pks:
-            pk_of.setdefault(r["table_name"], r["column_name"])
+            pk_of.setdefault(r["table_name"], []).append(r["column_name"])
         dim_of = {(r["table_name"], r["column_name"]): int(m.group(1))
                   for r in dims if (m := _DIM.match(r["fmt"]))}
         est_of = {r["table_name"]: r["est"] for r in estimates}
@@ -148,9 +148,8 @@ class PostgresBackend(SqlBackend):
         tables: dict[str, TableInfo] = {}
         skipped: list[str] = []
         for tname, rows in by_table.items():
-            id_col = self.id_columns.get(tname) or pk_of.get(tname)
+            id_col = self.id_columns.get(tname) or self._single_pk(tname, pk_of.get(tname), skipped)
             if id_col is None:
-                skipped.append(f"{tname} (no primary key / id column)")
                 continue
             fields = []
             for r in rows:

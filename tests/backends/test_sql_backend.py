@@ -93,3 +93,26 @@ async def test_skipped_is_not_duplicated_on_rediscovery(backend):
     await b._discover_tables()
     await b._discover_tables()
     assert [s.split(" ")[0] for s in b.skipped] == ["nopk"]
+
+
+@pytest.mark.parametrize("backend", ["pg", "my"])
+async def test_composite_primary_key_is_skipped_unless_id_column_given(backend):
+    def make(**kw):
+        if backend == "pg":
+            b = PostgresBackend("pg", "postgresql://u:p@h/db", **kw)
+            cols = [{"table_name": "pairs", "column_name": c, "data_type": "text", "udt_name": "text"}
+                    for c in ("a", "b")]
+            b._query = _fake_query({"information_schema.columns": cols, "PRIMARY KEY": pks}, [])
+        else:
+            b = MySQLBackend("my", "mysql://u:p@h/db", **kw)
+            cols = [{"table_name": "pairs", "column_name": c, "data_type": "text", "column_type": "text"}
+                    for c in ("a", "b")]
+            b._query = _fake_query({"information_schema.COLUMNS": cols, "KEY_COLUMN_USAGE": pks}, [])
+        return b
+
+    pks = [{"table_name": "pairs", "column_name": "a"}, {"table_name": "pairs", "column_name": "b"}]
+    b = make()
+    assert await b._discover_tables() == {}
+    assert b.skipped == ["pairs (composite primary key; set id_columns)"]
+    b = make(id_columns={"pairs": "b"})
+    assert (await b._discover_tables())["pairs"].id_column == "b"

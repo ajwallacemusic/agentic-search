@@ -117,9 +117,9 @@ class MySQLBackend(SqlBackend):
         estimates = await self._query(
             "SELECT TABLE_NAME AS table_name, TABLE_ROWS AS est FROM information_schema.TABLES "
             "WHERE TABLE_SCHEMA = DATABASE()", None)
-        pk_of: dict[str, str] = {}
+        pk_of: dict[str, list[str]] = {}
         for r in pks:
-            pk_of.setdefault(r["table_name"], r["column_name"])
+            pk_of.setdefault(r["table_name"], []).append(r["column_name"])
         ft_of: dict[str, dict[str, list[str]]] = {}
         for r in fts:
             ft_of.setdefault(r["table_name"], {}).setdefault(r["index_name"], []).append(r["column_name"])
@@ -131,9 +131,8 @@ class MySQLBackend(SqlBackend):
         tables: dict[str, TableInfo] = {}
         skipped: list[str] = []
         for tname, rows in by_table.items():
-            id_col = self.id_columns.get(tname) or pk_of.get(tname)
+            id_col = self.id_columns.get(tname) or self._single_pk(tname, pk_of.get(tname), skipped)
             if id_col is None:
-                skipped.append(f"{tname} (no primary key / id column)")
                 continue
             fulltext = list(ft_of.get(tname, {}).values())
             ft_cols = {c for idx in fulltext for c in idx}

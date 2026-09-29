@@ -12,7 +12,9 @@ from agentic_search.backends.base import (
     BackendError,
     DiscoverDetail,
     UnsupportedOperation,
+    routed_collection,
     rrf_merge,
+    strip_collection,
 )
 from agentic_search.backends.native_guard import guard_sql
 from agentic_search.backends.sql import (
@@ -180,7 +182,8 @@ class SqlBackend:
         tables = await self._ensure_tables()
         if isinstance(op, Native):
             return await self._native(op, tables)
-        table = self._resolve(op.collection, tables)
+        collection = routed_collection(op, tables) if isinstance(op, Fetch) else op.collection
+        table = self._resolve(collection, tables)
         limit = min(op.limit, self.max_rows)
         if isinstance(op, Lexical):
             if op.fields and not set(op.fields) <= set(table.searchable_columns):
@@ -218,13 +221,18 @@ class SqlBackend:
     def _select(self, table: TableInfo) -> str:
         return ", ".join(quote_ident(c, self.dialect) for c in table.select_columns)
 
+    def _doc_id(self, pk: str, table: str) -> str:
+        """Bare primary key for single-table sources, `<table>/<pk>` when there are several."""
+        return f"{table}/{pk}" if len(self._tables or {}) > 1 else pk
+
     def _hits(self, rows: list[dict[str, Any]], table: TableInfo) -> list[Hit]:
         hits = []
         for row in rows:
             score = row.pop("_score", None)
-            hits.append(row_to_hit(row, source=self.name, id_column=table.id_column,
-                                   text_columns=table.text_columns,
-                                   score=float(score) if score is not None else None))
+            hit = row_to_hit(row, source=self.name, id_column=table.id_column,
+                             text_columns=table.text_columns,
+                             score=float(score) if score is not None else None)
+            hits.append(hit.model_copy(update={"doc_id": self._doc_id(hit.doc_id, table.name)}))
         return hits
 
     def _vector(self, column: str, vector: list[float] | None, table: TableInfo, op_filter: Any,
@@ -291,12 +299,14 @@ class SqlBackend:
         return hits
 
     async def _fetch(self, op: Fetch, table: TableInfo) -> list[Hit]:
+        multi = len(self._tables or {}) > 1
+        pks = [strip_collection(i, table.name) if multi else i for i in op.doc_ids]
         p = Params(self.dialect)
-        ids = ", ".join(p.add(str(i)) for i in op.doc_ids)
+        ids = ", ".join(p.add(pk) for pk in pks)
         id_expr = self._as_text(quote_ident(table.id_column, self.dialect))
         sql = (f"SELECT {self._select(table)} FROM {self._table_ref(table.name)} "
                f"WHERE {id_expr} IN ({ids})")
-        order = {doc_id: i for i, doc_id in enumerate(op.doc_ids)}
+        order = {self._doc_id(pk, table.name): i for i, pk in enumerate(pks)}
         hits = self._hits(await self._query(sql, p.values), table)
         return sorted(hits, key=lambda h: order.get(h.doc_id, len(order)))
 
@@ -311,8 +321,11 @@ class SqlBackend:
         hits = []
         for i, row in enumerate(await self._query(sql, None)):
             id_col = table.id_column if table and table.id_column in row else None
-            hits.append(row_to_hit(row, source=self.name, id_column=id_col, text_columns=[],
-                                   fallback_id=f"native:{i}"))
+            hit = row_to_hit(row, source=self.name, id_column=id_col, text_columns=[],
+                             fallback_id=f"native:{i}")
+            if table and id_col:
+                hit = hit.model_copy(update={"doc_id": self._doc_id(hit.doc_id, table.name)})
+            hits.append(hit)
         return hits
 
     # ---- discovery helpers ----------------------------------------------------
@@ -321,6 +334,17 @@ class SqlBackend:
         return FieldSpec(name=column, type=FieldType.VECTOR, vector_dim=dim,
                          vector_metric=self.vector_metric,
                          embedder_id=self.embedders.get(f"{table}.{column}"))
+
+    @staticmethod
+    def _single_pk(table: str, pk: list[str] | None, skipped: list[str]) -> str | None:
+        """The table's primary-key column, or None (noted in `skipped`) if it has none or several."""
+        if not pk:
+            skipped.append(f"{table} (no primary key / id column)")
+            return None
+        if len(pk) > 1:
+            skipped.append(f"{table} (composite primary key; set id_columns)")
+            return None
+        return pk[0]
 
     async def _samples(self, table: str, column: str) -> list[Any] | None:
         if not self.sample_values:

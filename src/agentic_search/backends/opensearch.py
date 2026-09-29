@@ -12,7 +12,9 @@ from agentic_search.backends.base import (
     BackendError,
     DiscoverDetail,
     UnsupportedOperation,
+    routed_collection,
     rrf_merge,
+    strip_collection,
 )
 from agentic_search.backends.native_guard import guard_opensearch
 from agentic_search.backends.sql import dumps, jsonable, parse_metric
@@ -247,7 +249,10 @@ class OpenSearchBackend:
         if not content:
             content = [StructuredPart(data=metadata)]
         s = raw.get("_score") if score is None else score
-        return Hit(doc_id=str(raw["_id"]), source=self.name, content=content, metadata=metadata,
+        doc_id = str(raw["_id"])
+        if len(self._indices or {}) > 1:
+            doc_id = f"{coll.name}/{doc_id}"  # ids are only unique per index
+        return Hit(doc_id=doc_id, source=self.name, content=content, metadata=metadata,
                    raw_score=float(s) if s is not None else None)
 
     def _source_filter(self, coll: CollectionInfo) -> dict[str, Any]:
@@ -291,7 +296,8 @@ class OpenSearchBackend:
         indices = await self._ensure_indices()
         if isinstance(op, Native):
             return await self._native(op, indices)
-        coll = self._resolve(op.collection, indices)
+        coll = self._resolve(routed_collection(op, indices) if isinstance(op, Fetch) else op.collection,
+                             indices)
         limit = min(op.limit, self.max_rows)
         if isinstance(op, Lexical):
             return await self._search(coll, self._lexical_body(op, coll, limit))
@@ -316,7 +322,8 @@ class OpenSearchBackend:
         if isinstance(op, Aggregate):
             return await self._aggregate(op, coll, limit)
         if isinstance(op, Fetch):
-            resp = await self._call("mget", index=coll.name, body={"ids": op.doc_ids},
+            ids = [strip_collection(i, coll.name) for i in op.doc_ids] if len(indices) > 1 else op.doc_ids
+            resp = await self._call("mget", index=coll.name, body={"ids": ids},
                                     _source_excludes=self._source_filter(coll).get("excludes"))
             return [self._hit(d, coll) for d in resp["docs"] if d.get("found")]
         raise UnsupportedOperation(f"opensearch backend does not support {op.type}")
