@@ -5,6 +5,9 @@ Examples:
   uv run --extra local python scripts/eval_beir.py --embedder st:BAAI/bge-small-en-v1.5 \
       --driver anthropic:claude-sonnet-5-5 --judge llm --modes bm25,retrieval,harness,model --limit 50
   uv run python scripts/eval_beir.py --driver openai:Qwen/Qwen3-8B --modes harness  # OPENAI_BASE_URL=...
+
+The `retrieval` mode is an unjudged baseline (ranked by fused backend scores): --judge applies only
+to harness and model modes unless --rerank-retrieval is given.
 """
 
 from __future__ import annotations
@@ -57,6 +60,11 @@ def make_judge(spec: str, client):
     raise SystemExit(f"unknown judge {spec!r} (none | llm | cross_encoder[:model])")
 
 
+def analyzer_for(mode: str, judge, *, rerank_retrieval: bool):
+    """The retrieval baseline stays unjudged unless --rerank-retrieval is set."""
+    return None if mode == "retrieval" and not rerank_retrieval else judge
+
+
 async def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--dataset", default="nfcorpus")
@@ -64,6 +72,8 @@ async def main() -> None:
     p.add_argument("--modes", default="bm25,retrieval,harness")
     p.add_argument("--driver", default="anthropic:claude-sonnet-5-5")
     p.add_argument("--judge", default="llm")
+    p.add_argument("--rerank-retrieval", action="store_true",
+                   help="also apply --judge to the retrieval mode (default: unjudged baseline)")
     p.add_argument("--embedder", default="none")
     p.add_argument("--limit", type=int, default=50)
     p.add_argument("--max-turns", type=int, default=4)
@@ -89,8 +99,10 @@ async def main() -> None:
         else:
             from agentic_search.models.driver import ToolCallingDriver
             client = client or make_client(args.driver)
+            analyzer = analyzer_for(mode, make_judge(args.judge, client),
+                                    rerank_retrieval=args.rerank_retrieval)
             harness = Harness([backend], ToolCallingDriver(client), embedders=embedders,
-                              analyzer=make_judge(args.judge, client), mode=mode, budget=budget)
+                              analyzer=analyzer, mode=mode, budget=budget)
         report = await run_eval(harness, ds, name=f"{ds.name}/{mode}", query_ids=qids,
                                 concurrency=args.concurrency)
         print(report.table(), flush=True)

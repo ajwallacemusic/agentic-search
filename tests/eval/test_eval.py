@@ -53,3 +53,18 @@ async def test_run_eval_bm25_baseline(beir_dir):
     assert report.mean("ndcg") == pytest.approx((0.8597 + 1.0) / 2, abs=1e-3)
     assert "bm25" in report.table() and "nDCG@10" in report.table()
     assert all(r.error is None for r in report.runs)
+
+
+def test_eval_script_retrieval_baseline_is_unjudged_unless_reranked():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "eval_beir.py"
+    spec = importlib.util.spec_from_file_location("eval_beir", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    judge = object()
+    assert mod.analyzer_for("retrieval", judge, rerank_retrieval=False) is None
+    assert mod.analyzer_for("retrieval", judge, rerank_retrieval=True) is judge
+    assert mod.analyzer_for("harness", judge, rerank_retrieval=False) is judge
+    assert mod.analyzer_for("model", judge, rerank_retrieval=False) is judge
