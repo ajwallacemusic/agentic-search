@@ -1,14 +1,6 @@
-import pytest
 
-from agentic_search.core.secrets import clear_secrets, register_secret, scrub, scrub_data
+from agentic_search.core.secrets import register_secret, scrub, scrub_data
 from agentic_search.core.state import Trace
-
-
-@pytest.fixture(autouse=True)
-def _clean():
-    clear_secrets()
-    yield
-    clear_secrets()
 
 
 def test_scrub_registered_values_and_url_userinfo():
