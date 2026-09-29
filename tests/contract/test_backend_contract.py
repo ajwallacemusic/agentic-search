@@ -15,6 +15,7 @@ from agentic_search.core.types import (
     Eq,
     Fetch,
     FilterOnly,
+    Hybrid,
     Lexical,
     Native,
     Range,
@@ -125,6 +126,17 @@ async def test_vector(backend):
     hits = await backend.execute(Vector(source=backend.name, collection="docs", field="embedding",
                                         hyde_text="x", vector=q, limit=3))
     assert hits[0].doc_id in {"d1", "d4"}
+
+
+async def test_hybrid(backend):
+    m = await backend.discover()
+    if Capability.HYBRID not in m.capabilities:
+        pytest.skip("no hybrid support")
+    [q] = await corpus.EMBEDDER.embed([TextPart(text="headache fever")], "query")
+    hits = await backend.execute(Hybrid(source=backend.name, collection="docs", text="headache",
+                                        field="embedding", vector=q, limit=3))
+    assert hits and hits[0].doc_id in {"d1", "d4"}
+    assert all(h.raw_score is not None for h in hits)
 
 
 async def test_regex_fetch_aggregate(backend):
