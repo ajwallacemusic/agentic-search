@@ -17,7 +17,7 @@ class NativeQueryRejected(BackendError):
 
 
 _SQL_FUNC_DENYLIST = re.compile(
-    r"^(pg_(sleep|advisory|try_advisory|read|ls|stat_file|terminate|cancel|reload|rotate|switch|promote|create|drop|logical)|"
+    r"^(pg_(sleep|advisory|try_advisory|read|ls|stat_file|terminate|cancel|reload|rotate|switch|promote|create|drop|logical|notify)|"
     r"lo_|set_config|dblink|nextval|setval|get_lock|release_lock|is_used_lock|sleep|benchmark|load_file|sys_exec|sys_eval|xp_|query_to_xml)",
     re.IGNORECASE
 )
@@ -66,75 +66,94 @@ _CYPHER_ALLOWED_PROCS = {"db.index.fulltext.querynodes", "db.index.vector.queryn
 
 
 def _cypher_code(query: str) -> str:
-    """Scan query left-to-right, reject comments, return sanitized code with string/backtick placeholders."""
+    """Scan query left-to-right, reject comments, return sanitized code with string/backtick placeholders.
+
+    Tracks: single/double-quoted strings (with backslash escapes), backtick identifiers (doubled backticks).
+    Rejects comments (// and /*) and unterminated literals.
+    """
     result = []
     i = 0
+    in_string = None  # None, "'", '"', or "`"
+
     while i < len(query):
         ch = query[i]
 
-        # Handle single-quoted strings
+        # Inside single-quoted string: handle backslash escapes and closing quote
+        if in_string == "'":
+            if ch == "\\":
+                i += 2  # Skip escaped char
+            elif ch == "'":
+                result.append("''")
+                in_string = None
+                i += 1
+            else:
+                i += 1
+            continue
+
+        # Inside double-quoted string: handle backslash escapes and closing quote
+        if in_string == '"':
+            if ch == "\\":
+                i += 2  # Skip escaped char
+            elif ch == '"':
+                result.append('""')
+                in_string = None
+                i += 1
+            else:
+                i += 1
+            continue
+
+        # Inside backtick identifier: Cypher uses doubled backticks, NOT backslash escapes
+        if in_string == "`":
+            if ch == "`":
+                # Check if next char is also a backtick (escape sequence)
+                if i + 1 < len(query) and query[i + 1] == "`":
+                    i += 2  # Consume both backticks, stay inside
+                else:
+                    result.append("`x`")
+                    in_string = None
+                    i += 1
+            else:
+                i += 1
+            continue
+
+        # Outside strings: detect string/backtick starts
         if ch == "'":
             result.append("''")
+            in_string = "'"
             i += 1
-            while i < len(query):
-                if query[i] == "\\":
-                    i += 2  # Skip escaped char
-                elif query[i] == "'":
-                    i += 1
-                    break
-                else:
-                    i += 1
-            if i > len(query):
-                raise NativeQueryRejected("unterminated single-quoted string in native Cypher")
             continue
 
-        # Handle double-quoted strings
         if ch == '"':
             result.append('""')
+            in_string = '"'
             i += 1
-            while i < len(query):
-                if query[i] == "\\":
-                    i += 2  # Skip escaped char
-                elif query[i] == '"':
-                    i += 1
-                    break
-                else:
-                    i += 1
-            if i > len(query):
-                raise NativeQueryRejected("unterminated double-quoted string in native Cypher")
             continue
 
-        # Handle backtick identifiers
         if ch == "`":
             result.append("`x`")
+            in_string = "`"
             i += 1
-            while i < len(query):
-                if query[i] == "\\":
-                    i += 2  # Skip escaped char
-                elif query[i] == "`":
-                    i += 1
-                    break
-                else:
-                    i += 1
-            if i > len(query):
-                raise NativeQueryRejected("unterminated backtick identifier in native Cypher")
             continue
 
-        # Handle line comments
+        # Outside strings: reject comments
         if i + 1 < len(query) and query[i:i+2] == "//":
             raise NativeQueryRejected("comments are not allowed in native Cypher")
 
-        # Handle block comments
         if i + 1 < len(query) and query[i:i+2] == "/*":
             raise NativeQueryRejected("comments are not allowed in native Cypher")
 
         result.append(ch)
         i += 1
 
+    # Check for unterminated string or backtick at end of input
+    if in_string is not None:
+        raise NativeQueryRejected("unterminated string or identifier in native Cypher")
+
     return "".join(result)
 
 
 _CYPHER_LIMIT = re.compile(r"\bLIMIT\s+(\d+)\s*;?\s*$", re.IGNORECASE)
+_CYPHER_RETURN = re.compile(r"\bRETURN\b", re.IGNORECASE)
 
 
 def guard_cypher(query: str, max_rows: int) -> str:
@@ -157,6 +176,9 @@ def guard_cypher(query: str, max_rows: int) -> str:
         limit_value = min(original_limit, max_rows)
         # Remove the original LIMIT from the query as we'll wrap it
         q = q[:limit_match.start()].rstrip()
+    # If the query doesn't have RETURN (e.g., procedure-only CALL), add it
+    if not _CYPHER_RETURN.search(q):
+        q = f"{q} RETURN *"
     return f"CALL {{ {q} }} RETURN * LIMIT {limit_value}"
 
 
@@ -194,10 +216,10 @@ def guard_opensearch(body_json: str, max_rows: int) -> dict[str, Any]:
     else:
         body["size"] = max_rows
 
-    # Validate from parameter
+    # Validate from parameter: must be int (not bool), and non-negative
     from_val = body.get("from")
     if from_val is not None:
-        if not isinstance(from_val, int) or from_val < 0:
+        if not isinstance(from_val, int) or isinstance(from_val, bool) or from_val < 0:
             raise NativeQueryRejected("from must be a non-negative integer")
         # Cap from + size at 10000 to prevent deep pagination DoS
         if from_val + body["size"] > 10000:

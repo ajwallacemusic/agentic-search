@@ -73,6 +73,10 @@ def test_sql_rejects_side_effecting_functions():
     with pytest.raises(NativeQueryRejected, match="function.*not allowed"):
         guard_sql("SELECT SLEEP(10)", "mysql", 10)
 
+    # Postgres notify
+    with pytest.raises(NativeQueryRejected, match="function.*not allowed"):
+        guard_sql("SELECT pg_notify('channel','message')", "postgres", 10)
+
     # But ordinary functions should pass
     assert guard_sql("SELECT count(*), lower(title) FROM docs", "postgres", 50)
     assert guard_sql("SELECT COUNT(*) FROM docs", "mysql", 50)
@@ -120,6 +124,36 @@ def test_cypher_parameterized_limit():
     assert "CALL {" in result and "} RETURN * LIMIT 10" in result
 
 
+def test_cypher_backtick_escaping():
+    """Test that backtick identifiers use doubling, not backslash escapes."""
+    # Backtick bypass: in Cypher, backticks doubled mean literal backtick, no backslash escape
+    # This query has a SET statement hidden by a fake escaped backtick
+    with pytest.raises(NativeQueryRejected, match="SET"):
+        guard_cypher("MATCH (n) WITH n AS `a\` SET n.x=1 RETURN n AS `b`", 5)
+
+    # Doubled backticks should work (escaped backtick in identifier name)
+    result = guard_cypher("MATCH (n) RETURN n AS `we``ird`", 5)
+    assert "CALL {" in result
+
+
+def test_cypher_unterminated_literals():
+    """Test that unterminated strings and backticks are rejected."""
+    with pytest.raises(NativeQueryRejected, match="unterminated"):
+        guard_cypher("MATCH (n) RETURN n 'abc SET n.x=1", 5)
+
+    with pytest.raises(NativeQueryRejected, match="unterminated"):
+        guard_cypher('MATCH (n) RETURN n "abc SET n.x=1', 5)
+
+    with pytest.raises(NativeQueryRejected, match="unterminated"):
+        guard_cypher("MATCH (n) RETURN n `abc SET n.x=1", 5)
+
+
+def test_cypher_procedure_without_return():
+    """Test that procedure-only calls get RETURN * added."""
+    result = guard_cypher("CALL db.labels() YIELD label", 5)
+    assert result == "CALL { CALL db.labels() YIELD label RETURN * } RETURN * LIMIT 5"
+
+
 def test_opensearch_guard():
     body = guard_opensearch('{"query": {"term": {"type": "drug"}}, "size": 500}', 50)
     assert body == {"query": {"term": {"type": "drug"}}, "size": 50}
@@ -155,9 +189,13 @@ def test_opensearch_from_validation():
     with pytest.raises(NativeQueryRejected, match="non-negative"):
         guard_opensearch('{"query": {}, "from": -1}', 50)
 
-    # Non-integer from should be rejected
+    # Non-integer from should be rejected (including bool)
     with pytest.raises(NativeQueryRejected, match="non-negative"):
         guard_opensearch('{"query": {}, "from": "abc"}', 50)
+
+    # Boolean from should be rejected
+    with pytest.raises(NativeQueryRejected, match="non-negative"):
+        guard_opensearch('{"query": {}, "from": true}', 50)
 
     # Large from + size should be rejected (from + size <= 10000)
     with pytest.raises(NativeQueryRejected, match="exceeds maximum"):
