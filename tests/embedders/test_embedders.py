@@ -72,6 +72,15 @@ async def test_cached_embedder_caches_query_text():
     assert c.id == "count" and c.dim == 2
 
 
+async def test_cached_embedder_deduplicates_missing():
+    """Test that duplicate uncached texts hit the inner embedder once."""
+    inner = CountingEmbedder()
+    c = CachedEmbedder(inner, maxsize=10)
+    # Embed duplicate texts: ["a", "a"] should result in one inner call
+    result = await c.embed([TextPart(text="a"), TextPart(text="a")], "query")
+    assert result == [[1.0, 1.0], [1.0, 1.0]] and inner.calls == 1
+
+
 async def test_cached_embedder_lru_eviction():
     """Test LRU eviction: with maxsize=2, embedding 'a','b','c' evicts 'a'; re-embedding 'a' triggers inner call."""
     inner = CountingEmbedder()
@@ -96,33 +105,66 @@ async def test_cached_embedder_lru_eviction():
 
 
 async def test_cached_embedder_concurrent_safe():
-    """Test concurrent safety: inner embedder that awaits; multiple coroutines should not raise KeyError."""
-    class AsyncSlowEmbedder:
-        id = "async_slow"
+    """Test concurrent safety: eviction race during await doesn't cause KeyError.
+
+    Uses explicit synchronization to guarantee the race condition happens:
+    - Pre-seeds cache with 'cached'
+    - Call 1 awaits inner embed for 'new' then tries to read both texts
+    - Call 2 starts during Call 1's await and adds 'evict' which evicts 'cached' due to maxsize=1
+
+    With the old code, Call 1 would KeyError when trying to read evicted 'cached' from cache
+    after the await and cache update. With the fix, it uses the local dict captured before
+    await, so both 'cached' and 'new' are read from the local dict, not the shared cache.
+    """
+    call1_started = asyncio.Event()
+    call1_can_proceed = asyncio.Event()
+
+    class ControlledEmbedder:
+        id = "controlled"
         modalities = {Modality.TEXT}
         dim = 2
 
         async def embed(self, items, purpose):
-            await asyncio.sleep(0)  # Yield control to allow concurrent operations
-            return [[float(len(i.text)), 1.0] for i in items]
+            # Only control Call 1's embed of 'new'; other calls proceed immediately
+            texts = tuple(i.text for i in items)
+            if texts == ("new",):
+                # Call 1 is requesting 'new'; signal Call 2 and wait for permission
+                call1_started.set()
+                await call1_can_proceed.wait()
+            else:
+                # All other calls proceed immediately with a minimal sleep
+                await asyncio.sleep(0)
 
-    inner = AsyncSlowEmbedder()
+            # Return distinguishing vectors based on text length and first char code
+            return [[float(len(i.text)), float(ord(i.text[0]))] for i in items]
+
+    inner = ControlledEmbedder()
     c = CachedEmbedder(inner, maxsize=1)
 
-    # Run multiple concurrent embed calls with overlapping texts
-    # With maxsize=1, this would cause eviction during awaits in the old implementation
-    results = await asyncio.gather(
-        c.embed([TextPart(text="x")], "query"),
-        c.embed([TextPart(text="y")], "query"),
-        c.embed([TextPart(text="x")], "query"),  # 'x' again
-        c.embed([TextPart(text="y")], "query"),  # 'y' again
-    )
+    # Pre-seed cache with 'cached'
+    await c.embed([TextPart(text="cached")], "query")
 
-    # Verify results are correct
-    assert results[0] == [[1.0, 1.0]]  # 'x'
-    assert results[1] == [[1.0, 1.0]]  # 'y'
-    assert results[2] == [[1.0, 1.0]]  # 'x' again
-    assert results[3] == [[1.0, 1.0]]  # 'y' again
+    async def call1():
+        # This will find 'cached' in cache and request 'new', which will block in the embedder
+        return await c.embed([TextPart(text="cached"), TextPart(text="new")], "query")
+
+    async def call2():
+        # Wait for Call 1 to start awaiting
+        await call1_started.wait()
+        # Now issue a request that will cause eviction
+        result = await c.embed([TextPart(text="evict")], "query")
+        # Release Call 1 to proceed
+        call1_can_proceed.set()
+        return result
+
+    results = await asyncio.gather(call1(), call2())
+
+    # Call 1 should return correct vectors for 'cached' and 'new' (not KeyError)
+    # 'cached': [6.0, 99.0], 'new': [3.0, 110.0]
+    assert results[0] == [[6.0, 99.0], [3.0, 110.0]]
+    # Call 2 should return correct vector for 'evict'
+    # 'evict': [5.0, 101.0]
+    assert results[1] == [[5.0, 101.0]]
 
 
 async def test_cached_embedder_inner_wrong_count():

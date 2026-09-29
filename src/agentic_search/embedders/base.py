@@ -89,8 +89,8 @@ class CachedEmbedder:
         # Capture cache hits into local dict BEFORE await (safe under concurrent use)
         found = {t: self._cache[t] for t in texts if t in self._cache}
 
-        # Compute missing texts
-        missing = [t for t in texts if t not in found]
+        # Compute missing texts (deduplicated)
+        missing = list(dict.fromkeys(t for t in texts if t not in found))
 
         # Fetch missing vectors from inner embedder
         if missing:
