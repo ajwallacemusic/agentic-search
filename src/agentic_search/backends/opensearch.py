@@ -124,7 +124,7 @@ class OpenSearchBackend:
             try:
                 self._client = AsyncOpenSearch(hosts=[self.url], verify_certs=self.verify_certs,
                                                ssl_show_warn=False)
-            except (ValueError, Exception) as exc:
+            except Exception as exc:
                 raise BackendError(f"{type(exc).__name__}: {exc}") from exc
         return self._client
 

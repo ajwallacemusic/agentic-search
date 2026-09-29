@@ -256,12 +256,16 @@ async def test_response_shape_wrapping_aggregate_missing_aggregations():
 
 @pytest.mark.asyncio
 async def test_constructor_error_monkeypatched_async_opensearch(monkeypatch):
-    """Verify that AsyncOpenSearch constructor errors become BackendError."""
-    # Monkeypatch AsyncOpenSearch to raise ValueError
-    def mock_async_opensearch(*args, **kwargs):
-        raise ValueError("bad url")
+    """Verify that AsyncOpenSearch constructor errors are wrapped by _get_client.
 
-    # Need to monkeypatch at the point of import in opensearch.py
+    Uses RuntimeError to test that _get_client's wrapper catches non-ValueError exceptions
+    that would not be caught by _call's specific exception handlers.
+    """
+    # Monkeypatch AsyncOpenSearch to raise RuntimeError (not caught by _call's ValueError handler)
+    def mock_async_opensearch(*args, **kwargs):
+        raise RuntimeError("bad init")
+
+    # Monkeypatch at the point of import in opensearch.py
     monkeypatch.setattr(
         "agentic_search.backends.opensearch._require_opensearch",
         lambda: mock_async_opensearch
@@ -273,6 +277,9 @@ async def test_constructor_error_monkeypatched_async_opensearch(monkeypatch):
         with pytest.raises(BackendError) as excinfo:
             await backend.discover()
 
-        assert "ValueError" in str(excinfo.value) or "bad url" in str(excinfo.value)
+        # Verify error message contains "RuntimeError" and the original error text
+        assert "RuntimeError" in str(excinfo.value) and "bad init" in str(excinfo.value), (
+            f"BackendError should wrap RuntimeError with message, got: {excinfo.value}"
+        )
     finally:
         await backend.close()
