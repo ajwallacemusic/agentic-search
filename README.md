@@ -49,12 +49,38 @@ Or from YAML: `from agentic_search.config import load_harness`. The spec §7 sho
 - **Driver**: plans and calls tools (`ToolCallingDriver` over `AnthropicClient` or `OpenAICompatClient`).
 - **Analyzer decider**: judges relevance (`LLMJudge`, `CrossEncoderJudge`, TypeSafe System One in Plan 3).
 - **Controller decider**: continue/refine/broaden/stop (`LLMJudge`, or the built-in heuristic).
-- **Backends**: `FilesBackend` now. SQL, OpenSearch, graph and vector stores come in Plans 2–3.
+- **Backends**: files, Postgres + pgvector, MySQL, BigQuery and OpenSearch (see below). Graph and
+  vector stores (Neo4j, Milvus) come in Plan 3.
 - **Hooks / SourcePolicy**: every model-bound payload passes through `Hooks.before_model_call`:
   the planner view, judge requests (question + hits), the controller view, embedder queries, and in
   model mode the delegate question/context and every tool output (a raising hook withholds that
   output). Per-source `allowed_models` withholds raw content from other models; each model's
   digest is rendered for that model.
+
+## Backends
+
+| type | install extra | lexical | vector | notes |
+|---|---|---|---|---|
+| `files` | – | BM25 | local index | directory or in-memory documents |
+| `postgres` / `pgvector` | `postgres` | tsvector + `websearch_to_tsquery` | pgvector `<=>`/`<->`/`<#>` | read-only sessions, statement timeout |
+| `mysql` | `mysql` | FULLTEXT (natural language) | – | lexical needs a FULLTEXT index; READ ONLY sessions |
+| `bigquery` | `bigquery` | term match (`CONTAINS_SUBSTR`) | `VECTOR_SEARCH` | every query dry-run; refused above `max_bytes_billed` |
+| `opensearch` | `opensearch` | `multi_match` | k-NN (`knn_vector`) | search APIs only |
+
+All backends support filters, regex, aggregates (`count`, `sum|avg|min|max:<column>`) and fetch.
+Set `native_query: true` on a backend to let the planner run read-only native SQL / search bodies;
+they pass `backends/native_guard.py` (single SELECT, no DML/DDL/locks/scripts, row cap) first.
+Vector columns need `embedders: {<table>.<column>: <embedder id>}` so queries are embedded with the
+same model as the stored vectors. DSNs and passwords are masked in errors and traces.
+
+```yaml
+backends:
+  - {name: notes, type: pgvector, dsn_env: NOTES_DSN, tables: [notes],
+     embedders: {notes.embedding: "st:BAAI/bge-small-en-v1.5"}, native_query: true}
+  - {name: orders, type: mysql, dsn_env: ORDERS_DSN}
+  - {name: warehouse, type: bigquery, project: my-proj, dataset: clinical, max_bytes_billed: 500000000}
+  - {name: search, type: opensearch, url_env: SEARCH_URL, indices: [articles]}
+```
 
 ## Evaluate
 
@@ -69,5 +95,7 @@ the keys the model ranked, so its recall@100 is structurally lower than modes th
 ## Develop
 
 ```bash
-uv sync && uv run pytest
+uv sync && uv run pytest                      # unit tests, no services
+docker compose up -d --wait                   # Postgres+pgvector, MySQL, OpenSearch
+AGENTIC_SEARCH_INTEGRATION=1 uv run pytest -m integration   # backend contract suite
 ```

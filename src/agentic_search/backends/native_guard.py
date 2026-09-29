@@ -223,6 +223,6 @@ def guard_opensearch(body_json: str, max_rows: int) -> dict[str, Any]:
             raise NativeQueryRejected("from must be a non-negative integer")
         # Cap from + size at 10000 to prevent deep pagination DoS
         if from_val + body["size"] > 10000:
-            raise NativeQueryRejected(f"from + size exceeds maximum (10000)")
+            raise NativeQueryRejected("from + size exceeds maximum (10000)")
 
     return body

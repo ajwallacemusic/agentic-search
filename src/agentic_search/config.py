@@ -82,6 +82,44 @@ def _files(cfg: dict[str, Any], ctx: BuildContext) -> Any:
                         description=cfg.get("description"))
 
 
+_SQL_KEYS = ("tables", "id_columns", "embedders", "vector_metric", "native_query", "description",
+             "max_rows", "sample_values")
+
+
+def _backend_kwargs(cfg: dict[str, Any], ctx: BuildContext, keys: tuple[str, ...]) -> dict[str, Any]:
+    """Pass through known keys; check that `embedders: {table.column: id}` names known embedders."""
+    unknown = sorted(set((cfg.get("embedders") or {}).values()) - set(ctx.embedders))
+    if unknown:
+        raise ConfigError(f"backend {cfg['name']!r} references unknown embedder(s) {unknown}")
+    return {k: cfg[k] for k in keys if k in cfg}
+
+
+def _postgres(cfg: dict[str, Any], ctx: BuildContext) -> Any:
+    from agentic_search.backends.postgres import PostgresBackend
+    return PostgresBackend(cfg["name"], cfg["dsn"],
+                           **_backend_kwargs(cfg, ctx, _SQL_KEYS + ("schema", "text_search_config",
+                                                                    "pool_size", "statement_timeout_ms")))
+
+
+def _mysql(cfg: dict[str, Any], ctx: BuildContext) -> Any:
+    from agentic_search.backends.mysql import MySQLBackend
+    return MySQLBackend(cfg["name"], cfg["dsn"], **_backend_kwargs(cfg, ctx, _SQL_KEYS + ("pool_size",)))
+
+
+def _bigquery(cfg: dict[str, Any], ctx: BuildContext) -> Any:
+    from agentic_search.backends.bigquery import BigQueryBackend
+    return BigQueryBackend(cfg["name"], cfg["project"], cfg["dataset"],
+                           **_backend_kwargs(cfg, ctx, _SQL_KEYS + ("max_bytes_billed", "location",
+                                                                    "text_columns", "vector_dims")))
+
+
+def _opensearch(cfg: dict[str, Any], ctx: BuildContext) -> Any:
+    from agentic_search.backends.opensearch import OpenSearchBackend
+    return OpenSearchBackend(cfg["name"], cfg["url"], **_backend_kwargs(
+        cfg, ctx, ("indices", "embedders", "native_query", "description", "max_rows",
+                   "verify_certs", "sample_values")))
+
+
 def _hash(cfg: dict[str, Any], ctx: BuildContext) -> Any:
     from agentic_search.embedders.local import HashEmbedder
     return HashEmbedder(dim=int(cfg.get("dim", 256)), id=cfg.get("id", "hash"))
@@ -123,6 +161,11 @@ def _llm_judge(cfg: dict[str, Any], ctx: BuildContext) -> Any:
 
 for _kind, _type, _factory in [
     ("backend", "files", _files),
+    ("backend", "postgres", _postgres),
+    ("backend", "pgvector", _postgres),
+    ("backend", "mysql", _mysql),
+    ("backend", "bigquery", _bigquery),
+    ("backend", "opensearch", _opensearch),
     ("embedder", "hash", _hash),
     ("embedder", "sentence_transformers", _sentence_transformers),
     ("client", "anthropic", _anthropic),

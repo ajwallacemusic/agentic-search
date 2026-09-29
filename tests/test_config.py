@@ -78,3 +78,39 @@ def test_register_custom_type(tmp_path):
     assert made == [{"type": "custom-test", "x": 1}]
     with pytest.raises(ValueError):
         register("gizmo", "x", lambda c, ctx: None)
+
+
+async def test_build_sql_and_search_backends(tmp_path, monkeypatch):
+    from agentic_search.backends.bigquery import BigQueryBackend
+    from agentic_search.backends.mysql import MySQLBackend
+    from agentic_search.backends.opensearch import OpenSearchBackend
+    from agentic_search.backends.postgres import PostgresBackend
+    from agentic_search.core.secrets import scrub
+
+    monkeypatch.setenv("PG_DSN", "postgresql://app:pg-pass-123@db:5432/app")
+    h = build_harness({
+        "embedders": [{"type": "hash", "id": "hash64", "dim": 64}],
+        "backends": [
+            {"name": "pg", "type": "pgvector", "dsn_env": "PG_DSN", "tables": ["docs"],
+             "embedders": {"docs.embedding": "hash64"}, "native_query": True},
+            {"name": "my", "type": "mysql", "dsn": "mysql://u:my-pass-456@h:3306/app"},
+            {"name": "bq", "type": "bigquery", "project": "p", "dataset": "d", "max_bytes_billed": 10},
+            {"name": "os", "type": "opensearch", "url": "https://admin:os-pass-789@search:9200",
+             "indices": ["docs"], "embedders": {"docs.embedding": "hash64"}},
+        ],
+        "driver": {"type": "openai_compat", "model": "local", "base_url": "http://localhost:8000/v1"},
+    }, base_dir=tmp_path)
+    b = h.backends
+    assert isinstance(b["pg"], PostgresBackend) and b["pg"].native_query and b["pg"].table_names == ["docs"]
+    assert isinstance(b["my"], MySQLBackend) and isinstance(b["os"], OpenSearchBackend)
+    assert isinstance(b["bq"], BigQueryBackend) and b["bq"].max_bytes_billed == 10
+    leaked = "pg-pass-123 my-pass-456 os-pass-789 https://admin:os-pass-789@search:9200"
+    assert all(s not in scrub(leaked) for s in ("pg-pass-123", "my-pass-456", "os-pass-789"))
+
+
+def test_backend_embedder_reference_must_exist(tmp_path):
+    with pytest.raises(ConfigError, match="unknown embedder"):
+        build_harness({"backends": [{"name": "pg", "type": "postgres", "dsn": "postgresql://x@h/db",
+                                     "embedders": {"docs.embedding": "nope"}}],
+                       "driver": {"type": "openai_compat", "model": "m", "base_url": "http://x/v1"}},
+                      base_dir=tmp_path)
