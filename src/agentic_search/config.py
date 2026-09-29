@@ -58,7 +58,10 @@ def build(kind: str, cfg: dict[str, Any], ctx: BuildContext) -> Any:
     factory = _REGISTRIES[kind].get(type_)  # type: ignore[arg-type]
     if factory is None:
         raise ConfigError(f"unknown {kind} type {type_!r}; known: {sorted(_REGISTRIES[kind])}")
-    return factory(cfg, ctx)
+    try:
+        return factory(cfg, ctx)
+    except KeyError as exc:
+        raise ConfigError(f"{kind} {type_!r} config is missing required key {exc}") from exc
 
 
 def _price(cfg: dict[str, Any]) -> tuple[float, float] | None:
@@ -103,14 +106,15 @@ def _postgres(cfg: dict[str, Any], ctx: BuildContext) -> Any:
 
 def _mysql(cfg: dict[str, Any], ctx: BuildContext) -> Any:
     from agentic_search.backends.mysql import MySQLBackend
-    return MySQLBackend(cfg["name"], cfg["dsn"], **_backend_kwargs(cfg, ctx, _SQL_KEYS + ("pool_size",)))
+    return MySQLBackend(cfg["name"], cfg["dsn"], **_backend_kwargs(cfg, ctx, _SQL_KEYS + ("pool_size", "statement_timeout_ms")))
 
 
 def _bigquery(cfg: dict[str, Any], ctx: BuildContext) -> Any:
     from agentic_search.backends.bigquery import BigQueryBackend
     return BigQueryBackend(cfg["name"], cfg["project"], cfg["dataset"],
                            **_backend_kwargs(cfg, ctx, _SQL_KEYS + ("max_bytes_billed", "location",
-                                                                    "text_columns", "vector_dims")))
+                                                                    "text_columns", "vector_dims",
+                                                                    "job_timeout_ms")))
 
 
 def _opensearch(cfg: dict[str, Any], ctx: BuildContext) -> Any:

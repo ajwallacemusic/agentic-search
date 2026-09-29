@@ -63,7 +63,7 @@ Or from YAML: `from agentic_search.config import load_harness`. The spec §7 sho
 |---|---|---|---|---|
 | `files` | – | BM25 | local index | directory or in-memory documents |
 | `postgres` / `pgvector` | `postgres` | tsvector + `websearch_to_tsquery` | pgvector `<=>`/`<->`/`<#>` | read-only sessions, statement timeout |
-| `mysql` | `mysql` | FULLTEXT (natural language) | – | lexical needs a FULLTEXT index; READ ONLY sessions |
+| `mysql` | `mysql` | FULLTEXT (natural language) | – | lexical needs a FULLTEXT index; READ ONLY sessions, `max_execution_time` |
 | `bigquery` | `bigquery` | term match (`CONTAINS_SUBSTR`) | `VECTOR_SEARCH` | every query dry-run; refused above `max_bytes_billed` |
 | `opensearch` | `opensearch` | `multi_match` | k-NN (`knn_vector`) | search APIs only |
 

@@ -108,6 +108,21 @@ async def test_build_sql_and_search_backends(tmp_path, monkeypatch):
     assert all(s not in scrub(leaked) for s in ("pg-pass-123", "my-pass-456", "os-pass-789"))
 
 
+def test_missing_required_key_is_a_config_error(tmp_path):
+    with pytest.raises(ConfigError, match="backend 'postgres' config is missing required key 'dsn'"):
+        build_harness({"backends": [{"name": "pg", "type": "postgres"}],
+                       "driver": {"type": "openai_compat", "model": "m", "base_url": "http://x/v1"}},
+                      base_dir=tmp_path)
+
+
+def test_timeouts_pass_through(tmp_path):
+    h = build_harness({
+        "backends": [{"name": "my", "type": "mysql", "dsn": "mysql://u:p@h/db", "statement_timeout_ms": 1234},
+                     {"name": "bq", "type": "bigquery", "project": "p", "dataset": "d", "job_timeout_ms": 4321}],
+        "driver": {"type": "openai_compat", "model": "m", "base_url": "http://x/v1"}}, base_dir=tmp_path)
+    assert h.backends["my"].statement_timeout_ms == 1234 and h.backends["bq"].job_timeout_ms == 4321
+
+
 def test_backend_embedder_reference_must_exist(tmp_path):
     with pytest.raises(ConfigError, match="unknown embedder"):
         build_harness({"backends": [{"name": "pg", "type": "postgres", "dsn": "postgresql://x@h/db",
