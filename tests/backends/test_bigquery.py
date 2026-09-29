@@ -122,6 +122,20 @@ async def test_regex_fetch_aggregate_native_sql():
         await b.execute(Native(source="bq", dialect="sql", query="DELETE FROM `proj.ds.docs` WHERE TRUE"))
 
 
+async def test_missing_bigquery_extra_on_discover(monkeypatch):
+    """Test that discover() raises BackendError when bigquery module is not available."""
+    from agentic_search.backends import bigquery as bq_module
+
+    def mock_require_bigquery():
+        msg = "BigQueryBackend needs the `bigquery` extra: pip install 'agentic-search[bigquery]'"
+        raise BackendError(msg)
+
+    monkeypatch.setattr(bq_module, "_require_bigquery", mock_require_bigquery)
+    b = BigQueryBackend("bq", "proj", "ds")
+    with pytest.raises(BackendError, match="bigquery.*extra"):
+        await b.discover()
+
+
 async def test_client_construction_failure_on_discover(monkeypatch):
     """Test that discover() raises BackendError when client construction fails."""
     def raising_client(*args, **kwargs):
@@ -130,6 +144,35 @@ async def test_client_construction_failure_on_discover(monkeypatch):
     monkeypatch.setattr("google.cloud.bigquery.Client", raising_client)
     b = BigQueryBackend("bq", "proj", "ds")
     with pytest.raises(BackendError, match="no creds"):
+        await b.discover()
+
+
+async def test_non_google_exceptions_in_query(monkeypatch):
+    """Test that non-Google exceptions in query() are wrapped as BackendError."""
+    def raising_query(*args, **kwargs):
+        raise RuntimeError("refresh failed")
+
+    class FakeClientRaisingQuery(FakeClient):
+        def query(self, sql, job_config):
+            if not job_config.dry_run:
+                raise RuntimeError("refresh failed")
+            return super().query(sql, job_config)
+
+    client = FakeClientRaisingQuery()
+    b = make(client)
+    with pytest.raises(BackendError, match="refresh failed"):
+        await b.execute(Regex(source="bq", pattern="asp"))
+
+
+async def test_non_google_exceptions_in_discover(monkeypatch):
+    """Test that non-Google exceptions in list_tables() are wrapped as BackendError."""
+    class FakeClientRaisingListTables(FakeClient):
+        def list_tables(self, dataset):
+            raise RuntimeError("boom")
+
+    client = FakeClientRaisingListTables()
+    b = make(client)
+    with pytest.raises(BackendError, match="boom"):
         await b.discover()
 
 

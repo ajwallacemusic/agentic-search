@@ -34,7 +34,8 @@ def _require_bigquery() -> tuple[Any, Any]:
         from google.cloud import bigquery
         return bigquery, exceptions
     except ImportError as exc:
-        raise BackendError("BigQueryBackend needs the `bigquery` extra: pip install 'agentic-search[bigquery]'") from exc
+        msg = "BigQueryBackend needs the `bigquery` extra: pip install 'agentic-search[bigquery]'"
+        raise BackendError(msg) from exc
 
 
 class BigQueryBackend(SqlBackend):
@@ -109,7 +110,9 @@ class BigQueryBackend(SqlBackend):
             job = client.query(sql, job_config=bigquery.QueryJobConfig(
                 query_parameters=query_params, maximum_bytes_billed=self.max_bytes_billed))
             return [dict(row.items()) for row in job.result()]
-        except exceptions.GoogleAPIError as exc:
+        except BackendError:
+            raise
+        except Exception as exc:
             raise BackendError(f"{type(exc).__name__}: {exc}") from exc
 
     async def _query(self, sql: str, params: list[Any] | None) -> list[dict[str, Any]]:
@@ -130,7 +133,9 @@ class BigQueryBackend(SqlBackend):
 
         try:
             listed = await asyncio.to_thread(self._list_tables)
-        except exceptions.GoogleAPIError as exc:
+        except BackendError:
+            raise
+        except Exception as exc:
             raise BackendError(f"{type(exc).__name__}: {exc}") from exc
         tables: dict[str, TableInfo] = {}
         for tname, meta in listed:
