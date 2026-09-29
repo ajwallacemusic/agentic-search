@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, Field, PrivateAttr
 
+from agentic_search.core.secrets import scrub_data
 from agentic_search.core.types import Budget, Hit, Manifest, ModelUsage, OpRef, Query, ToolError
 from agentic_search.models.base import Decision, TurnSummary
 
@@ -31,7 +32,7 @@ class Trace(BaseModel):
     def add(self, type: str, turn: int, *, duration_ms: float | None = None,
             **data: Any) -> TraceEvent:
         event = TraceEvent(type=type, turn=turn, at_ms=(time.monotonic() - self._t0) * 1000,
-                           duration_ms=duration_ms, data=data)
+                           duration_ms=duration_ms, data=scrub_data(data))
         self.events.append(event)
         if self._listener is not None:
             self._listener(event)

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from agentic_search.backends.base import Backend
 from agentic_search.backends.filters import filter_fields
 from agentic_search.core.hooks import Hooks, SourcePolicy
+from agentic_search.core.secrets import scrub
 from agentic_search.core.state import CandidatePool, Trace
 from agentic_search.core.types import (
     Aggregate,
@@ -49,7 +50,7 @@ class _Outcome:
 
 
 def _short(exc: BaseException) -> str:
-    return str(exc)[:500]
+    return scrub(str(exc))[:500]
 
 
 class Executor:

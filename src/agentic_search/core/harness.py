@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from agentic_search.backends.base import Backend
 from agentic_search.core.annotations import apply_annotations
 from agentic_search.core.hooks import Hooks, SourcePolicy
+from agentic_search.core.secrets import scrub
 from agentic_search.core.state import Candidate, SearchState, Trace, Usage
 from agentic_search.core.types import Budget, Hit, Manifest, ModelUsage, Query, StopReason
 from agentic_search.embedders.base import Embedder, EmbedderRegistry
@@ -166,7 +167,7 @@ class Harness:
                 return_exceptions=True)
             for name, res in zip(names, results):
                 if isinstance(res, BaseException):
-                    self.setup_errors[name] = f"{type(res).__name__}: {res}"
+                    self.setup_errors[name] = scrub(f"{type(res).__name__}: {res}")
                     continue
                 self.manifests[name] = apply_annotations(res, self.annotations.get(name))
             if not self.manifests:

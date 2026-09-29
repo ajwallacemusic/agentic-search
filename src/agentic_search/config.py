@@ -10,6 +10,7 @@ from typing import Any, Callable
 import yaml
 
 from agentic_search.core.harness import Harness, HarnessSettings
+from agentic_search.core.secrets import register_secret
 from agentic_search.core.types import Budget
 from agentic_search.embedders.base import Embedder
 
@@ -42,6 +43,7 @@ def resolve_env(cfg: Any) -> Any:
                 if v not in os.environ:
                     raise ConfigError(f"environment variable {v!r} (for {k!r}) is not set")
                 out[k[: -len("_env")]] = os.environ[v]
+                register_secret(os.environ[v])
             else:
                 out[k] = resolve_env(v)
         return out
