@@ -35,6 +35,8 @@ def test_quote_ident():
     assert quote_ident("year", "bigquery") == "`year`"
     with pytest.raises(BackendError):
         quote_ident('x"; DROP TABLE t; --', "postgres")
+    with pytest.raises(BackendError):
+        quote_ident("year\n", "postgres")
 
 
 def test_params_styles():

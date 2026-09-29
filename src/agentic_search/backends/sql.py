@@ -34,7 +34,7 @@ AGG_FUNCS = {"sum": "SUM", "avg": "AVG", "min": "MIN", "max": "MAX"}
 
 def quote_ident(name: str, dialect: Dialect) -> str:
     """Quote a column/table name after checking it is a plain identifier (no injection surface)."""
-    if not _IDENT.match(name):
+    if not _IDENT.fullmatch(name):
         raise BackendError(f"invalid identifier {name!r}")
     if dialect == "postgres":
         return f'"{name}"'

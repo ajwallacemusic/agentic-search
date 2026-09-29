@@ -281,6 +281,8 @@ class SqlBackend:
         unknown = set(op.group_by) - table.columns
         if unknown:
             raise BackendError(f"unknown columns {sorted(unknown)}")
+        if not op.metrics:
+            raise BackendError("at least one metric is required")
         groups = [quote_ident(g, self.dialect) for g in op.group_by]
         metrics = [parse_metric(m, table.columns, self.dialect) for m in op.metrics]
         p = Params(self.dialect)

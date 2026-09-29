@@ -116,3 +116,15 @@ async def test_composite_primary_key_is_skipped_unless_id_column_given(backend):
     assert b.skipped == ["pairs (composite primary key; set id_columns)"]
     b = make(id_columns={"pairs": "b"})
     assert (await b._discover_tables())["pairs"].id_column == "b"
+
+
+async def test_aggregate_needs_a_metric():
+    from agentic_search.backends.sql_backend import TableInfo
+    from agentic_search.core.types import Aggregate, FieldSpec, FieldType
+
+    b = DistinctFails()
+    b._tables = {"t": TableInfo(name="t", id_column="id",
+                                fields=[FieldSpec(name="id", type=FieldType.KEYWORD),
+                                        FieldSpec(name="kind", type=FieldType.KEYWORD)])}
+    with pytest.raises(BackendError, match="at least one metric"):
+        await b.execute(Aggregate(source="fake", group_by=["kind"], metrics=[]))
