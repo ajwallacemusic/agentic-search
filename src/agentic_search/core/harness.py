@@ -47,6 +47,7 @@ class HarnessSettings(BaseModel):
     judge_batch_size: int = 16
     decider_timeout: float = 60.0
     min_new_relevant: int = 1
+    discover_timeout: float | None = 300.0
 
 
 class RankedHit(BaseModel):
@@ -159,8 +160,10 @@ class Harness:
             if self._ready:
                 return self.manifests
             names = list(self.backends)
-            results = await asyncio.gather(*(self.backends[n].discover("full") for n in names),
-                                           return_exceptions=True)
+            timeout = self.settings.discover_timeout
+            results = await asyncio.gather(
+                *(asyncio.wait_for(self.backends[n].discover("full"), timeout) for n in names),
+                return_exceptions=True)
             for name, res in zip(names, results):
                 if isinstance(res, BaseException):
                     self.setup_errors[name] = f"{type(res).__name__}: {res}"

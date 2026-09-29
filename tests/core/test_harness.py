@@ -210,6 +210,23 @@ async def test_setup_errors(docs_backend):
         await Harness([BrokenBackend()], ScriptedDriver([])).search("q")
 
 
+async def test_setup_discover_timeout(docs_backend):
+    import asyncio
+
+    from agentic_search.core.harness import HarnessSettings
+
+    class SlowBackend(BrokenBackend):
+        name = "slow"
+
+        async def discover(self, detail="full", collection=None):
+            await asyncio.sleep(5)
+
+    h = Harness([docs_backend, SlowBackend()], ScriptedDriver([]),
+                settings=HarnessSettings(discover_timeout=0.01))
+    await asyncio.wait_for(h.setup(), 1.0)
+    assert h.setup_errors["slow"].startswith("TimeoutError") and set(h.manifests) == {"docs"}
+
+
 async def test_sources_and_config_errors(docs_backend, medical_docs):
     h = make(docs_backend, ScriptedDriver([]))
     with pytest.raises(HarnessError):
