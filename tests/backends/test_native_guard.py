@@ -39,17 +39,85 @@ def test_sql_limits():
         guard_sql("SELEC nonsense((", "postgres", 10)
 
 
+def test_sql_rejects_side_effecting_functions():
+    """Test that dangerous functions are rejected."""
+    # Postgres sleep function
+    with pytest.raises(NativeQueryRejected, match="function.*not allowed"):
+        guard_sql("SELECT pg_sleep(100)", "postgres", 10)
+
+    # Postgres advisory lock
+    with pytest.raises(NativeQueryRejected, match="function.*not allowed"):
+        guard_sql("SELECT pg_advisory_lock(1)", "postgres", 10)
+
+    # Postgres set_config
+    with pytest.raises(NativeQueryRejected, match="function.*not allowed"):
+        guard_sql("SELECT set_config('default_transaction_read_only','off',false)", "postgres", 10)
+
+    # Postgres dblink
+    with pytest.raises(NativeQueryRejected, match="function.*not allowed"):
+        guard_sql("SELECT dblink_exec('x','delete from t')", "postgres", 10)
+
+    # Postgres large object import
+    with pytest.raises(NativeQueryRejected, match="function.*not allowed"):
+        guard_sql("SELECT lo_import('/etc/passwd')", "postgres", 10)
+
+    # Postgres sequence manipulation
+    with pytest.raises(NativeQueryRejected, match="function.*not allowed"):
+        guard_sql("SELECT nextval('s')", "postgres", 10)
+
+    # MySQL GET_LOCK
+    with pytest.raises(NativeQueryRejected, match="function.*not allowed"):
+        guard_sql("SELECT GET_LOCK('a', 10)", "mysql", 10)
+
+    # MySQL SLEEP
+    with pytest.raises(NativeQueryRejected, match="function.*not allowed"):
+        guard_sql("SELECT SLEEP(10)", "mysql", 10)
+
+    # But ordinary functions should pass
+    assert guard_sql("SELECT count(*), lower(title) FROM docs", "postgres", 50)
+    assert guard_sql("SELECT COUNT(*) FROM docs", "mysql", 50)
+
+
 def test_cypher_guard():
-    assert guard_cypher("MATCH (n:Drug) RETURN n", 20) == "MATCH (n:Drug) RETURN n LIMIT 20"
-    assert guard_cypher("MATCH (n) RETURN n LIMIT 5;", 20) == "MATCH (n) RETURN n LIMIT 5"
-    assert guard_cypher("MATCH (n) RETURN n LIMIT 500", 20) == "MATCH (n) RETURN n LIMIT 20"
-    assert guard_cypher("MATCH (n) WHERE n.name = 'set' RETURN n.offset", 5).endswith("LIMIT 5")
-    assert guard_cypher("CALL db.index.fulltext.queryNodes('i', 'x') YIELD node RETURN node", 5)
+    # Test basic queries wrapped in CALL
+    assert guard_cypher("MATCH (n:Drug) RETURN n", 20) == "CALL { MATCH (n:Drug) RETURN n } RETURN * LIMIT 20"
+    assert guard_cypher("MATCH (n) RETURN n LIMIT 5;", 20) == "CALL { MATCH (n) RETURN n } RETURN * LIMIT 5"
+    assert guard_cypher("MATCH (n) RETURN n LIMIT 500", 20) == "CALL { MATCH (n) RETURN n } RETURN * LIMIT 20"
+    assert guard_cypher("MATCH (n) WHERE n.name = 'set' RETURN n.offset", 5).endswith("RETURN * LIMIT 5")
+    result = guard_cypher("CALL db.index.fulltext.queryNodes('i', 'x') YIELD node RETURN node", 5)
+    assert result  # Just verify it doesn't raise
     for bad in ("MATCH (n) DETACH DELETE n", "MERGE (n:X)", "MATCH (n) SET n.x = 1",
                 "CALL dbms.components()", "MATCH (n) RETURN n; MATCH (m) DELETE m",
                 "LOAD CSV FROM 'x' AS row RETURN row"):
         with pytest.raises(NativeQueryRejected):
             guard_cypher(bad, 5)
+
+
+def test_cypher_comment_bypasses():
+    """Test that comments cannot be used to hide write keywords."""
+    # Line comment bypass attempt
+    with pytest.raises(NativeQueryRejected, match="comments are not allowed"):
+        guard_cypher("MATCH (n) // it's\nSET n.x=1 //'\nRETURN n", 5)
+
+    # Block comment bypass attempt with quotes
+    with pytest.raises(NativeQueryRejected, match="comments are not allowed"):
+        guard_cypher("MATCH (n) /* ' */ SET n.x=1 /* ' */ RETURN n", 5)
+
+    # Comment-only query
+    with pytest.raises(NativeQueryRejected, match="comments are not allowed"):
+        guard_cypher("/* just a comment */", 5)
+
+
+def test_cypher_union_wrapped():
+    """Test that UNION queries are wrapped and capped correctly."""
+    result = guard_cypher("MATCH (n) RETURN n UNION SELECT 1", 10)
+    assert "CALL {" in result and "} RETURN * LIMIT 10" in result
+
+
+def test_cypher_parameterized_limit():
+    """Test that parameterized LIMIT is handled via wrapping."""
+    result = guard_cypher("MATCH (n) RETURN n LIMIT $x", 10)
+    assert "CALL {" in result and "} RETURN * LIMIT 10" in result
 
 
 def test_opensearch_guard():
@@ -60,3 +128,42 @@ def test_opensearch_guard():
                 '{"query": {}, "index": "x"}'):
         with pytest.raises(NativeQueryRejected):
             guard_opensearch(bad, 50)
+
+
+def test_opensearch_size_validation():
+    """Test strict validation of size parameter."""
+    # Negative size should be rejected or capped to max_rows
+    body = guard_opensearch('{"query": {}, "size": -1}', 50)
+    assert body["size"] == 50
+
+    # Boolean size should be rejected or capped to max_rows
+    body = guard_opensearch('{"query": {}, "size": true}', 50)
+    assert body["size"] == 50
+
+    # Size within bounds should be preserved
+    body = guard_opensearch('{"query": {}, "size": 30}', 50)
+    assert body["size"] == 30
+
+    # No size should default to max_rows
+    body = guard_opensearch('{"query": {}}', 50)
+    assert body["size"] == 50
+
+
+def test_opensearch_from_validation():
+    """Test validation of from parameter to prevent deep pagination DoS."""
+    # Negative from should be rejected
+    with pytest.raises(NativeQueryRejected, match="non-negative"):
+        guard_opensearch('{"query": {}, "from": -1}', 50)
+
+    # Non-integer from should be rejected
+    with pytest.raises(NativeQueryRejected, match="non-negative"):
+        guard_opensearch('{"query": {}, "from": "abc"}', 50)
+
+    # Large from + size should be rejected (from + size <= 10000)
+    with pytest.raises(NativeQueryRejected, match="exceeds maximum"):
+        guard_opensearch('{"query": {}, "from": 9999, "size": 100}', 50)
+
+    # Valid from should pass
+    body = guard_opensearch('{"query": {}, "from": 100, "size": 50}', 100)
+    assert body["from"] == 100
+    assert body["size"] == 50

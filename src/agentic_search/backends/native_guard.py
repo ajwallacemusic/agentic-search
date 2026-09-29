@@ -16,6 +16,13 @@ class NativeQueryRejected(BackendError):
     """The native query is not a single read-only statement."""
 
 
+_SQL_FUNC_DENYLIST = re.compile(
+    r"^(pg_(sleep|advisory|try_advisory|read|ls|stat_file|terminate|cancel|reload|rotate|switch|promote|create|drop|logical)|"
+    r"lo_|set_config|dblink|nextval|setval|get_lock|release_lock|is_used_lock|sleep|benchmark|load_file|sys_exec|sys_eval|xp_|query_to_xml)",
+    re.IGNORECASE
+)
+
+
 def guard_sql(query: str, dialect: str, max_rows: int) -> str:
     """Allow exactly one SELECT/set-operation with no DML/DDL/locking; cap or add LIMIT."""
     import sqlglot
@@ -35,6 +42,11 @@ def guard_sql(query: str, dialect: str, max_rows: int) -> str:
     for node in stmt.walk():
         if isinstance(node, forbidden):
             raise NativeQueryRejected(f"{type(node).__name__.upper()} is not allowed in native SQL")
+        # Check for side-effecting functions
+        if isinstance(node, exp.Func):
+            func_name = node.name if isinstance(node, exp.Anonymous) else node.sql_name()
+            if _SQL_FUNC_DENYLIST.match(func_name):
+                raise NativeQueryRejected(f"function {func_name} is not allowed in native SQL")
     limit = stmt.args.get("limit")
     current = None
     if limit is not None:
@@ -51,13 +63,83 @@ _CYPHER_WRITE = re.compile(
 _CYPHER_CALL = re.compile(r"\bCALL\s+([A-Za-z0-9_.]+)", re.IGNORECASE)
 _CYPHER_ALLOWED_PROCS = {"db.index.fulltext.querynodes", "db.index.vector.querynodes",
                          "db.labels", "db.relationshiptypes", "db.propertykeys"}
+
+
+def _cypher_code(query: str) -> str:
+    """Scan query left-to-right, reject comments, return sanitized code with string/backtick placeholders."""
+    result = []
+    i = 0
+    while i < len(query):
+        ch = query[i]
+
+        # Handle single-quoted strings
+        if ch == "'":
+            result.append("''")
+            i += 1
+            while i < len(query):
+                if query[i] == "\\":
+                    i += 2  # Skip escaped char
+                elif query[i] == "'":
+                    i += 1
+                    break
+                else:
+                    i += 1
+            if i > len(query):
+                raise NativeQueryRejected("unterminated single-quoted string in native Cypher")
+            continue
+
+        # Handle double-quoted strings
+        if ch == '"':
+            result.append('""')
+            i += 1
+            while i < len(query):
+                if query[i] == "\\":
+                    i += 2  # Skip escaped char
+                elif query[i] == '"':
+                    i += 1
+                    break
+                else:
+                    i += 1
+            if i > len(query):
+                raise NativeQueryRejected("unterminated double-quoted string in native Cypher")
+            continue
+
+        # Handle backtick identifiers
+        if ch == "`":
+            result.append("`x`")
+            i += 1
+            while i < len(query):
+                if query[i] == "\\":
+                    i += 2  # Skip escaped char
+                elif query[i] == "`":
+                    i += 1
+                    break
+                else:
+                    i += 1
+            if i > len(query):
+                raise NativeQueryRejected("unterminated backtick identifier in native Cypher")
+            continue
+
+        # Handle line comments
+        if i + 1 < len(query) and query[i:i+2] == "//":
+            raise NativeQueryRejected("comments are not allowed in native Cypher")
+
+        # Handle block comments
+        if i + 1 < len(query) and query[i:i+2] == "/*":
+            raise NativeQueryRejected("comments are not allowed in native Cypher")
+
+        result.append(ch)
+        i += 1
+
+    return "".join(result)
+
+
 _CYPHER_LIMIT = re.compile(r"\bLIMIT\s+(\d+)\s*;?\s*$", re.IGNORECASE)
-_CYPHER_STRING = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
 
 
 def guard_cypher(query: str, max_rows: int) -> str:
-    """Reject write clauses and non-allowlisted procedures; cap or add a trailing LIMIT."""
-    code = _CYPHER_STRING.sub("''", query)  # ignore keywords inside string literals
+    """Reject write clauses and non-allowlisted procedures; wrap and cap with LIMIT."""
+    code = _cypher_code(query)
     if ";" in code.strip().rstrip(";"):
         raise NativeQueryRejected("native Cypher must be exactly one statement")
     match = _CYPHER_WRITE.search(code)
@@ -67,12 +149,15 @@ def guard_cypher(query: str, max_rows: int) -> str:
         if proc.lower() not in _CYPHER_ALLOWED_PROCS:
             raise NativeQueryRejected(f"procedure {proc} is not allowed in native Cypher")
     q = query.strip().rstrip(";").rstrip()
-    limit = _CYPHER_LIMIT.search(q)
-    if limit is None:
-        return f"{q} LIMIT {max_rows}"
-    if int(limit.group(1)) > max_rows:
-        return q[: limit.start()] + f"LIMIT {max_rows}"
-    return q
+    # Extract existing LIMIT to use minimum of original and max_rows
+    limit_match = _CYPHER_LIMIT.search(q)
+    limit_value = max_rows
+    if limit_match:
+        original_limit = int(limit_match.group(1))
+        limit_value = min(original_limit, max_rows)
+        # Remove the original LIMIT from the query as we'll wrap it
+        q = q[:limit_match.start()].rstrip()
+    return f"CALL {{ {q} }} RETURN * LIMIT {limit_value}"
 
 
 _DSL_TOP_KEYS = {"query", "size", "from", "_source", "sort", "aggs", "aggregations",
@@ -88,7 +173,7 @@ def _walk_keys(value: Any) -> list[str]:
 
 
 def guard_opensearch(body_json: str, max_rows: int) -> dict[str, Any]:
-    """Accept only a search body with known top-level keys, no scripts; cap size."""
+    """Accept only a search body with known top-level keys, no scripts; cap size and from."""
     try:
         body = json.loads(body_json)
     except json.JSONDecodeError as exc:
@@ -101,6 +186,21 @@ def guard_opensearch(body_json: str, max_rows: int) -> dict[str, Any]:
     scripted = [k for k in _walk_keys(body) if "script" in k.lower()]
     if scripted:
         raise NativeQueryRejected(f"scripts are not allowed ({scripted[0]})")
+
+    # Validate and cap size: must be int (not bool), >= 0, and <= max_rows
     size = body.get("size")
-    body["size"] = max_rows if not isinstance(size, int) or size > max_rows else size
+    if isinstance(size, int) and not isinstance(size, bool) and size >= 0 and size <= max_rows:
+        body["size"] = size
+    else:
+        body["size"] = max_rows
+
+    # Validate from parameter
+    from_val = body.get("from")
+    if from_val is not None:
+        if not isinstance(from_val, int) or from_val < 0:
+            raise NativeQueryRejected("from must be a non-negative integer")
+        # Cap from + size at 10000 to prevent deep pagination DoS
+        if from_val + body["size"] > 10000:
+            raise NativeQueryRejected(f"from + size exceeds maximum (10000)")
+
     return body
