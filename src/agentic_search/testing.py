@@ -116,3 +116,22 @@ class FailingDecider:
 
     async def decide(self, view: ControllerView) -> Decision:
         raise RuntimeError("decide exploded")
+
+
+class FakeLLMClient:
+    """LLMClient that replays scripted ChatResponses and records every request."""
+
+    def __init__(self, responses: list[Any], *, id: str = "fake-llm", supports_images: bool = False):
+        self.responses = list(responses)
+        self.id = id
+        self.supports_images = supports_images
+        self.requests: list[dict[str, Any]] = []
+
+    async def chat(self, system: str, messages: list[Any], *, tools: list[ToolSpec] | None = None,
+                   tool_choice: str | None = None, max_tokens: int = 4096) -> Any:
+        self.requests.append({"system": system,
+                              "messages": [m.model_copy(deep=True) for m in messages],
+                              "tools": tools, "tool_choice": tool_choice})
+        if not self.responses:
+            raise AssertionError("FakeLLMClient ran out of scripted responses")
+        return self.responses.pop(0)
