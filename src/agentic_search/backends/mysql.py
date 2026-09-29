@@ -43,7 +43,8 @@ class MySQLBackend(SqlBackend):
     backend_type = "mysql"
     native_dialects = ("sql", "mysql")
 
-    def __init__(self, name: str, dsn: str, *, pool_size: int = 4, connect_timeout_s: float = 10, **kwargs: Any):
+    def __init__(self, name: str, dsn: str, *, pool_size: int = 4, connect_timeout_s: float = 10,
+                 statement_timeout_ms: int = 30_000, **kwargs: Any):
         super().__init__(name, **kwargs)
         parsed = urlparse(dsn)
         if parsed.scheme not in ("mysql", "mysql+aiomysql") or not parsed.path.strip("/"):
@@ -57,6 +58,7 @@ class MySQLBackend(SqlBackend):
         }
         self.pool_size = pool_size
         self.connect_timeout_s = connect_timeout_s
+        self.statement_timeout_ms = int(statement_timeout_ms)
         self._pool: Any = None
         self._pool_lock = asyncio.Lock()
 
@@ -68,7 +70,9 @@ class MySQLBackend(SqlBackend):
                 try:
                     self._pool = await aiomysql.create_pool(
                         minsize=1, maxsize=self.pool_size, autocommit=True, charset="utf8mb4",
-                        connect_timeout=self.connect_timeout_s, init_command="SET SESSION TRANSACTION READ ONLY",
+                        connect_timeout=self.connect_timeout_s,
+                        init_command=("SET SESSION transaction_read_only=ON, "
+                                      f"max_execution_time={self.statement_timeout_ms}"),
                         **self._conn_args)
                 except Exception as exc:
                     self._pool = None

@@ -64,3 +64,21 @@ async def test_mysql_missing_extra_raises_backend_error(monkeypatch):
     )
 
     await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_sessions_are_read_only_with_server_side_timeout(monkeypatch):
+    import aiomysql
+
+    seen = {}
+
+    async def fake_create_pool(**kwargs):
+        seen.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(aiomysql, "create_pool", fake_create_pool)
+    backend = MySQLBackend("my", "mysql://u:p@h/db", statement_timeout_ms="5000")
+    assert backend.statement_timeout_ms == 5000
+    await backend._get_pool()
+    assert seen["init_command"] == "SET SESSION transaction_read_only=ON, max_execution_time=5000"
+    assert MySQLBackend("my", "mysql://u:p@h/db").statement_timeout_ms == 30_000
