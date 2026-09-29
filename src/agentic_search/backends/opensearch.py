@@ -58,16 +58,16 @@ _TYPES = {
 SAMPLE_DISTINCT_MAX = 20
 
 
-def _require_opensearch() -> tuple[Any, Any]:
-    """Import opensearchpy.AsyncOpenSearch and opensearchpy.exceptions.
+def _require_opensearch() -> Any:
+    """Import opensearchpy.AsyncOpenSearch.
 
     Raises BackendError if import fails (e.g., missing opensearch extra).
-    Returns (AsyncOpenSearch, exceptions module).
+    Returns AsyncOpenSearch class.
     """
     try:
         from opensearchpy import AsyncOpenSearch
-        import opensearchpy.exceptions as exceptions
-        return AsyncOpenSearch, exceptions
+
+        return AsyncOpenSearch
     except ImportError as exc:
         raise BackendError("OpenSearchBackend needs the `opensearch` extra: pip install 'agentic-search[opensearch]'") from exc
 
@@ -120,22 +120,30 @@ class OpenSearchBackend:
 
     def _get_client(self) -> Any:
         if self._client is None:
-            AsyncOpenSearch, _ = _require_opensearch()
-            self._client = AsyncOpenSearch(hosts=[self.url], verify_certs=self.verify_certs,
-                                           ssl_show_warn=False)
+            AsyncOpenSearch = _require_opensearch()
+            try:
+                self._client = AsyncOpenSearch(hosts=[self.url], verify_certs=self.verify_certs,
+                                               ssl_show_warn=False)
+            except (ValueError, Exception) as exc:
+                raise BackendError(f"{type(exc).__name__}: {exc}") from exc
         return self._client
 
     async def _call(self, fn: str, **kwargs: Any) -> Any:
-        _, exceptions = _require_opensearch()
-
-        client = self._get_client()
-        target: Any = client
-        for part in fn.split("."):
-            target = getattr(target, part)
         try:
+            client = self._get_client()
+            target: Any = client
+            for part in fn.split("."):
+                target = getattr(target, part)
             return await target(**kwargs)
-        except (exceptions.OpenSearchException, OSError, asyncio.TimeoutError) as exc:
+        except BackendError:
+            raise
+        except (OSError, asyncio.TimeoutError, ValueError) as exc:
             raise BackendError(f"{type(exc).__name__}: {exc}") from exc
+        except Exception as exc:
+            # Catch opensearchpy exceptions without requiring the module (for injected clients)
+            if type(exc).__module__.startswith("opensearchpy"):
+                raise BackendError(f"{type(exc).__name__}: {exc}") from exc
+            raise
 
     async def close(self) -> None:
         if self._client is not None:
@@ -248,8 +256,11 @@ class OpenSearchBackend:
 
     async def _search(self, coll: CollectionInfo, body: dict[str, Any]) -> list[Hit]:
         body = {**body, "_source": self._source_filter(coll)}
-        resp = await self._call("search", index=coll.name, body=body)
-        return [self._hit(h, coll) for h in resp["hits"]["hits"]]
+        try:
+            resp = await self._call("search", index=coll.name, body=body)
+            return [self._hit(h, coll) for h in resp["hits"]["hits"]]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise BackendError(f"unexpected OpenSearch response: {exc}") from exc
 
     def _with_filter(self, query: dict[str, Any], f: Filter | None) -> dict[str, Any]:
         if f is None:
@@ -315,6 +326,8 @@ class OpenSearchBackend:
         unknown = set(op.group_by) - columns
         if unknown:
             raise BackendError(f"unknown fields {sorted(unknown)}")
+        if not op.metrics:
+            raise BackendError("at least one metric is required")
         sub: dict[str, Any] = {}
         names = []
         for m in op.metrics:
@@ -330,19 +343,22 @@ class OpenSearchBackend:
         if sub:
             agg["aggs"] = sub
         query = {"bool": {"filter": [filter_dsl(op.filter)]}} if op.filter else {"match_all": {}}
-        resp = await self._call("search", index=coll.name,
-                                body={"size": 0, "query": query, "aggs": {"g": agg}})
-        hits = []
-        for bucket in resp["aggregations"]["g"]["buckets"]:
-            key = bucket["key"] if isinstance(bucket["key"], list) else [bucket["key"]]
-            data: dict[str, Any] = dict(zip(op.group_by, key))
-            for alias in names:
-                data[alias] = bucket["doc_count"] if alias == "count" else bucket[alias]["value"]
-            first = data[names[0]]
-            hits.append(Hit(doc_id=f"agg:{dumps({g: data[g] for g in op.group_by})}", source=self.name,
-                            content=[StructuredPart(data=data)],
-                            raw_score=float(first) if first is not None else None))
-        return hits
+        try:
+            resp = await self._call("search", index=coll.name,
+                                    body={"size": 0, "query": query, "aggs": {"g": agg}})
+            hits = []
+            for bucket in resp["aggregations"]["g"]["buckets"]:
+                key = bucket["key"] if isinstance(bucket["key"], list) else [bucket["key"]]
+                data: dict[str, Any] = dict(zip(op.group_by, key))
+                for alias in names:
+                    data[alias] = bucket["doc_count"] if alias == "count" else bucket[alias]["value"]
+                first = data[names[0]]
+                hits.append(Hit(doc_id=f"agg:{dumps({g: data[g] for g in op.group_by})}", source=self.name,
+                                content=[StructuredPart(data=data)],
+                                raw_score=float(first) if first is not None else None))
+            return hits
+        except (KeyError, IndexError, TypeError) as exc:
+            raise BackendError(f"unexpected OpenSearch response: {exc}") from exc
 
     async def _native(self, op: Native, indices: dict[str, CollectionInfo]) -> list[Hit]:
         if not self.native_query:
