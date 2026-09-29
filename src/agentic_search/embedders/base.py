@@ -85,14 +85,31 @@ class CachedEmbedder:
         if purpose != "query" or not all(isinstance(i, TextPart) for i in items):
             return await self.inner.embed(items, purpose)
         texts = [i.text for i in items]  # type: ignore[union-attr]
-        missing = list(dict.fromkeys(t for t in texts if t not in self._cache))
+
+        # Capture cache hits into local dict BEFORE await (safe under concurrent use)
+        found = {t: self._cache[t] for t in texts if t in self._cache}
+
+        # Compute missing texts
+        missing = [t for t in texts if t not in found]
+
+        # Fetch missing vectors from inner embedder
         if missing:
             vectors = await self.inner.embed([TextPart(text=t) for t in missing], "query")
-            self._cache.update(zip(missing, vectors))
-        out = []
+            if len(vectors) != len(missing):
+                raise ValueError(f"inner embedder returned {len(vectors)} vectors for {len(missing)} texts")
+            # Add fresh vectors to local dict
+            found.update(zip(missing, vectors))
+
+        # Build output from local dict
+        out = [found[t] for t in texts]
+
+        # Update shared cache and evict
         for t in texts:
-            self._cache.move_to_end(t)
-            out.append(self._cache[t])
+            if t in self._cache:
+                self._cache.move_to_end(t)
+            else:
+                self._cache[t] = found[t]
         while len(self._cache) > self.maxsize:
             self._cache.popitem(last=False)
+
         return out
