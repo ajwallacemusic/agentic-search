@@ -40,9 +40,9 @@ Or from YAML: `from agentic_search.config import load_harness`. The spec §7 sho
 
 | mode | what happens |
 |---|---|
-| `retrieval` | one planned pass, rank by fused backend scores (optionally judged) |
+| `retrieval` | one planned pass, rank by fused backend scores (judged if an analyzer is configured) |
 | `harness` | full loop; the judge's feedback steers the next turn's plan |
-| `model` | a trained search model (e.g. SID-1 via an OpenAI-compatible endpoint) runs its own tool loop; the harness enforces budgets and records the trace |
+| `model` | a trained search model (e.g. SID-1 via an OpenAI-compatible endpoint) runs its own tool loop; the harness enforces every budget (turns, tool calls, time, tokens, cost) and records the trace |
 
 ## Roles
 
@@ -50,8 +50,11 @@ Or from YAML: `from agentic_search.config import load_harness`. The spec §7 sho
 - **Analyzer decider**: judges relevance (`LLMJudge`, `CrossEncoderJudge`, TypeSafe System One in Plan 3).
 - **Controller decider**: continue/refine/broaden/stop (`LLMJudge`, or the built-in heuristic).
 - **Backends**: `FilesBackend` now. SQL, OpenSearch, graph and vector stores come in Plans 2–3.
-- **Hooks / SourcePolicy**: every model-bound payload passes through `Hooks.before_model_call`;
-  per-source `allowed_models` withholds raw content from other models.
+- **Hooks / SourcePolicy**: every model-bound payload passes through `Hooks.before_model_call`:
+  the planner view, judge requests (question + hits), the controller view, embedder queries, and in
+  model mode the delegate question/context and every tool output (a raising hook withholds that
+  output). Per-source `allowed_models` withholds raw content from other models; each model's
+  digest is rendered for that model.
 
 ## Evaluate
 
@@ -59,6 +62,9 @@ Or from YAML: `from agentic_search.config import load_harness`. The spec §7 sho
 uv run python scripts/eval_beir.py --modes bm25 --limit 50                      # offline baseline
 uv run python scripts/eval_beir.py --modes bm25,retrieval,harness --limit 50    # needs ANTHROPIC_API_KEY
 ```
+
+`retrieval` is an unjudged baseline unless `--rerank-retrieval` is passed. Model mode returns only
+the keys the model ranked, so its recall@100 is structurally lower than modes that return the pool.
 
 ## Develop
 
