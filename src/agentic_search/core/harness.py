@@ -86,7 +86,10 @@ class _DelegateRuntime:
         self.reported = self.reported.plus(usage)
 
     def budget_exhausted(self) -> bool:
-        return self.exhausted is not None or self.controller.budget_stop(self.state) is not None
+        reason = self.exhausted or self.controller.budget_stop(self.state)
+        if reason is not None and self.exhausted is None:
+            self.exhausted = reason
+        return reason is not None
 
     def unreported(self, total: ModelUsage) -> ModelUsage:
         """The part of a driver's final usage total not already reported mid-run."""

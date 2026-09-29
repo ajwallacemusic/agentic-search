@@ -199,6 +199,22 @@ async def test_model_mode_cost_budget_cuts_off_model_calls(docs_backend):
     assert res.stop_reason is StopReason.BUDGET_COST
 
 
+async def test_model_mode_records_budget_exhaustion_reason(docs_backend):
+    from agentic_search.models.driver import ToolCallingDriver
+    from agentic_search.models.llm import ChatResponse
+    from agentic_search.testing import FakeLLMClient
+
+    client = FakeLLMClient([
+        ChatResponse(tool_calls=[lex("headache", id="a")]),
+        ChatResponse(tool_calls=[call("finish", id="f", ranked_keys=["docs:d1"])]),
+    ])
+    res = await make(docs_backend, ToolCallingDriver(client)).search(
+        "q", mode="model", budget=Budget(max_tool_calls=1, max_turns=4))
+    assert len(client.requests) == 2  # one tool turn, then forced finish
+    assert client.requests[1]["tool_choice"] == "finish"
+    assert res.stop_reason is StopReason.BUDGET_TOOL_CALLS
+
+
 async def test_controller_digest_rendered_for_controller_model(docs_backend):
     driver = ScriptedDriver([[lex("headache")], [lex("castles")]])
     ctrl = ScriptedController([Action.CONTINUE, Action.STOP])
