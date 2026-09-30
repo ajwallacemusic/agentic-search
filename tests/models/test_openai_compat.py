@@ -66,3 +66,29 @@ async def test_missing_usage_and_content():
     fake.chat.completions.response.usage = None
     r = await OpenAICompatClient("m", client=fake).chat("s", [ChatMessage(role="user", content="q")])
     assert r.text == "" and r.tool_calls == [] and r.usage.input_tokens == 0
+
+
+class CountingAuth:
+    def __init__(self):
+        self.calls = 0
+
+    async def headers(self):
+        self.calls += 1
+        return {"Authorization": f"Bearer tok{self.calls}"}
+
+
+async def test_auth_headers_are_fetched_on_every_call():
+    fake = sdk()
+    auth = CountingAuth()
+    c = OpenAICompatClient("m", client=fake, auth=auth)
+    await c.chat("s", [ChatMessage(role="user", content="q")])
+    assert fake.chat.completions.kwargs["extra_headers"] == {"Authorization": "Bearer tok1"}
+    await c.chat("s", [ChatMessage(role="user", content="q")])
+    assert fake.chat.completions.kwargs["extra_headers"] == {"Authorization": "Bearer tok2"}
+
+
+async def test_no_auth_sends_no_extra_headers():
+    fake = sdk()
+    c = OpenAICompatClient("m", client=fake)
+    await c.chat("s", [ChatMessage(role="user", content="q")])
+    assert "extra_headers" not in fake.chat.completions.kwargs
