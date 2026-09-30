@@ -161,8 +161,10 @@ def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
             f"native SQL may use only the allowed tables and columns: {exc}") from exc
     # After a clean resolve, a column with no table is an alias reference. `qualify` leaves one
     # where it cannot tell alias from table column (HAVING) and where a bare table alias names
-    # the whole row (`SELECT v FROM t v`); both can read a hidden column. Only ORDER BY on a
-    # select alias, which `qualify` has already checked, may stay unqualified.
+    # the whole row (`SELECT v FROM t v`); both can read a hidden column. Only a select alias
+    # that is a whole ORDER BY term, which `qualify` has already checked, may stay unqualified.
+    # Postgres binds the alias only there: inside an expression such as `ssn || ''` the same
+    # name binds to the table column, which can be a hidden one.
     for whole_row in stmt.find_all(exp.TableColumn):
         raise NativeQueryRejected(
             f"native SQL may use only the allowed tables and columns: "
@@ -171,7 +173,9 @@ def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
         if column.table:
             continue
         order = column.find_ancestor(exp.Order)
-        if order is None or not isinstance(order.parent, exp.Query):
+        whole_term = (isinstance(column.parent, exp.Ordered) and order is not None
+                      and column.parent.parent is order)
+        if not whole_term or not isinstance(order.parent, exp.Query):
             raise NativeQueryRejected(
                 f"native SQL may use only the allowed tables and columns: "
                 f"{column.sql(dialect=dialect)} is not a qualified allowed column")

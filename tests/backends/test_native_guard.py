@@ -483,3 +483,28 @@ def test_postgres_mixed_case_schema_stays_exact():
         'SELECT docs.id AS id FROM "Clinic".docs AS docs LIMIT 10'
     with pytest.raises(NativeQueryRejected):
         guard_sql("SELECT id FROM clinic.docs", "postgres", 10, allow)
+
+
+PG_VISITS = SqlAllowList(tables={"visits": frozenset({"id", "dx"})}, db="public")
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT id, dx AS ssn FROM visits ORDER BY ssn || '' LIMIT 1",
+    "SELECT id, dx AS ssn FROM visits ORDER BY LENGTH(ssn)",
+    "SELECT id, dx AS ssn FROM visits WHERE id = '2' "
+    "ORDER BY 1 / (CASE WHEN ssn LIKE '1%' THEN 1 ELSE 0 END)",
+])
+def test_postgres_alias_inside_an_order_by_expression_is_refused(query):
+    # Postgres binds a select alias only when it is the whole sort term. Inside an expression the
+    # same name binds to the table column, which here is the hidden `ssn`.
+    with pytest.raises(NativeQueryRejected, match="allowed tables and columns"):
+        guard_sql(query, "postgres", 10, PG_VISITS)
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT id, dx AS ssn FROM visits ORDER BY ssn",
+    "SELECT id, dx AS ssn FROM visits ORDER BY ssn DESC",
+    "SELECT dx, COUNT(*) AS n FROM visits GROUP BY dx ORDER BY n DESC, dx",
+])
+def test_postgres_alias_as_a_whole_sort_term_is_accepted(query):
+    assert guard_sql(query, "postgres", 10, PG_VISITS).endswith("LIMIT 10")
