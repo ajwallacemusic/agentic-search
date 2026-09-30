@@ -55,5 +55,7 @@ npm run build                    # emits dist/
 ```
 
 `test/contract.test.ts` checks these types against the JSON Schema and golden SSE fixtures the
-Python service exports to the repo's `schema/` directory (`agentic-search export-schema`), so
-the two cannot drift apart silently.
+Python service exports to the repo's `schema/` directory (`agentic-search export-schema`): each
+event's and nested model's field set, which fields are nullable, the enumerations, and that every
+schema `$def` is covered, both at compile time and at run time. It does not check full value
+types (for example `string` vs `number`); the golden fixtures and e2e tests exercise those.

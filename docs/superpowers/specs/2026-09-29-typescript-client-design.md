@@ -17,8 +17,8 @@ with typed results and live, typed progress events.
 2. `stream()` is an async iterator of a discriminated `SearchEvent` union that mirrors schema v1.
 3. Leaving the loop, or aborting an `AbortSignal`, closes the connection, and the service then
    cancels the search.
-4. Drift between the TypeScript types and the Python models fails the test suite, both at compile
-   time and at run time.
+4. Drift between the TypeScript types and the Python models in field sets, nullability,
+   enumerations or `$def` coverage fails the test suite, both at compile time and at run time.
 5. An end-to-end test runs against the real Python service.
 
 ### Non-goals
@@ -125,8 +125,18 @@ the Python service (spec 2 §8).
   typed with an `Exactly<T, L>` helper. At compile time the list must name exactly the interface's
   keys; a missing or extra key is a type error. At run time the list must equal the schema's
   `properties` for that event type or model.
+- **Nullability, checked twice.** Per event type and per nested model there is a list of the
+  fields whose TS type admits `null`, typed with a `NullableKeys<T>` helper (keys `K` with
+  `null extends T[K]`). At compile time the list must be exactly that set. At run time it must
+  equal the schema properties that are nullable (an `anyOf` branch `{"type": "null"}`, or a
+  `type` list containing `"null"`).
 - **Enumerations.** `EVENT_TYPES` must equal the schema's discriminator mapping keys.
-  `StopReason`, `Phase` and `Mode` must match the schema enums.
+  `StopReason`, `Phase` (on both `PhaseStarted` and `PhaseFinished`), `Mode`, `Action` and
+  `ToolErrorKind` must match the schema enums.
+- **`$def` coverage.** Every schema `$def` is an event (a discriminator mapping target),
+  `StopReason`, or a nested model with a field list, so a new nested model cannot go unchecked.
+- **Not checked:** value types beyond nullability (e.g. `string` vs `number`, array item types);
+  the fixtures and the end-to-end tests exercise those.
 - **Fixtures.** Every frame has a known type, `event == data.type`, `id == data.seq`, and keys
   exactly equal to that event's field list. Each stream has exactly one terminal event, and it is
   the last. The lean result has no trace and no hit content. The `with_content` fixture has a

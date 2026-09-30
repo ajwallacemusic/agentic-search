@@ -1,8 +1,11 @@
 /**
  * The TypeScript types must match the Python event models. The schema and fixtures come from
- * `agentic-search export-schema` (committed under the repo's `schema/`). Field lists below are
- * checked two ways: at compile time they must name exactly the TS interface's keys, and at run
- * time they must equal the JSON Schema's properties. Together these catch drift on either side.
+ * `agentic-search export-schema` (committed under the repo's `schema/`). Field lists and nullable
+ * field lists below are checked two ways: at compile time they must name exactly the TS
+ * interface's keys (or exactly its keys that admit `null`), and at run time they must equal the
+ * JSON Schema's properties (or its properties with a `null` branch). Enumerations are compared
+ * with the schema's enums, and every `$def` must be covered by an event or model field list.
+ * Value types beyond nullability (e.g. `string` vs `number`) are not checked.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -45,6 +48,16 @@ function fields<T>() {
   return <const L extends readonly (keyof T)[]>(list: Exactly<T, L>) => list;
 }
 
+/** The keys of `T` whose type admits `null`. */
+type NullableKeys<T> = { [K in keyof T]-?: null extends T[K] ? K : never }[keyof T];
+
+/** Compile-time: `L` must list exactly the keys of `T` whose type admits `null`. */
+function nullable<T>() {
+  return <const L extends readonly NullableKeys<T>[]>(
+    list: Exclude<NullableKeys<T>, L[number]> extends never ? L : never,
+  ) => list;
+}
+
 /** Compile-time: `L` must list every member of union `T` and nothing else. */
 function allOf<T extends string>() {
   return <const L extends readonly T[]>(list: Exclude<T, L[number]> extends never ? L : never) => list;
@@ -70,7 +83,7 @@ const EVENT_FIELDS = {
   search_failed: fields<EventOf<"search_failed">>()(["type", "schema_version", "search_id", "seq", "turn", "at_ms", "error_type", "message"]),
 } satisfies Record<SearchEvent["type"], readonly string[]>;
 
-const MODEL_FIELDS: Record<string, readonly string[]> = {
+const MODEL_FIELDS = {
   Budget: fields<Budget>()(["max_turns", "max_tool_calls", "max_tokens", "max_cost_usd", "max_seconds"]),
   Usage: fields<Usage>()(["input_tokens", "output_tokens", "cost_usd", "tool_calls", "turns"]),
   PhaseSummary: fields<PhaseSummary>()(["n_calls", "n_hits", "n_new", "n_errors", "n_judged", "n_relevant", "action", "confidence", "n_ranked", "note", "error"]),
@@ -86,10 +99,49 @@ const MODEL_FIELDS: Record<string, readonly string[]> = {
   SearchResult: fields<SearchResult>()(["question", "hits", "stop_reason", "usage", "mode", "trace"]),
   Trace: fields<Trace>()(["events"]),
   TraceEvent: fields<TraceEvent>()(["type", "turn", "at_ms", "duration_ms", "data"]),
-};
+} satisfies Record<string, readonly string[]>;
+
+const EVENT_NULLABLE = {
+  search_started: nullable<EventOf<"search_started">>()([]),
+  phase_started: nullable<EventOf<"phase_started">>()([]),
+  phase_finished: nullable<EventOf<"phase_finished">>()([]),
+  tool_call_started: nullable<EventOf<"tool_call_started">>()(["source"]),
+  tool_call_finished: nullable<EventOf<"tool_call_finished">>()(["error"]),
+  results_updated: nullable<EventOf<"results_updated">>()([]),
+  usage_updated: nullable<EventOf<"usage_updated">>()([]),
+  search_finished: nullable<EventOf<"search_finished">>()([]),
+  search_failed: nullable<EventOf<"search_failed">>()([]),
+} satisfies Record<SearchEvent["type"], readonly string[]>;
+
+const MODEL_NULLABLE = {
+  Budget: nullable<Budget>()(["max_tokens", "max_cost_usd", "max_seconds"]),
+  Usage: nullable<Usage>()([]),
+  PhaseSummary: nullable<PhaseSummary>()(["n_calls", "n_hits", "n_new", "n_errors", "n_judged", "n_relevant", "action", "confidence", "n_ranked", "note", "error"]),
+  ToolErrorInfo: nullable<ToolErrorInfo>()(["source"]),
+  HitSummary: nullable<HitSummary>()(["title", "p_relevant", "content"]),
+  Query: nullable<Query>()([]),
+  TextPart: nullable<TextPart>()([]),
+  ImagePart: nullable<ImagePart>()(["uri", "data"]),
+  StructuredPart: nullable<StructuredPart>()([]),
+  OpRef: nullable<OpRef>()([]),
+  Hit: nullable<Hit>()(["raw_score"]),
+  RankedHit: nullable<RankedHit>()(["p_relevant", "rationale"]),
+  SearchResult: nullable<SearchResult>()([]),
+  Trace: nullable<Trace>()([]),
+  TraceEvent: nullable<TraceEvent>()(["duration_ms"]),
+} satisfies Record<keyof typeof MODEL_FIELDS, readonly string[]>;
 
 const sorted = (xs: Iterable<string>) => [...xs].sort();
-const defOf = (ref: string) => schema.$defs[ref.replace("#/$defs/", "")];
+const defName = (ref: string) => ref.replace("#/$defs/", "");
+const defOf = (ref: string) => schema.$defs[defName(ref)];
+
+/** A schema property admits null iff it has a `{"type": "null"}` branch or a type list with "null". */
+function isNullable(prop: { type?: unknown; anyOf?: { type?: unknown }[] }): boolean {
+  if (Array.isArray(prop.type) && prop.type.includes("null")) return true;
+  return (prop.anyOf ?? []).some((branch) => branch.type === "null");
+}
+const nullableProps = (def: { properties: Record<string, never> }) =>
+  sorted(Object.keys(def.properties).filter((k) => isNullable(def.properties[k]!)));
 
 describe("contract with the Python models (schema v1)", () => {
   it("knows exactly the schema's event types", () => {
@@ -104,15 +156,39 @@ describe("contract with the Python models (schema v1)", () => {
   });
 
   it("declares each nested model's fields exactly as the schema does", () => {
-    for (const [name, tsFields] of Object.entries(MODEL_FIELDS)) {
+    for (const [name, tsFields] of Object.entries<readonly string[]>(MODEL_FIELDS)) {
       expect(schema.$defs[name], name).toBeDefined();
       expect(sorted(tsFields), name).toEqual(sorted(Object.keys(schema.$defs[name].properties)));
+    }
+  });
+
+  it("checks every $def: each is an event, StopReason, or a nested model with a field list", () => {
+    const covered = new Set<string>([
+      ...Object.values<string>(schema.discriminator.mapping).map(defName),
+      "StopReason",
+      ...Object.keys(MODEL_FIELDS),
+    ]);
+    const unchecked = Object.keys(schema.$defs).filter((name) => !covered.has(name));
+    expect(unchecked).toEqual([]);
+  });
+
+  it("declares each event's nullable fields exactly as the schema does", () => {
+    for (const [type, ref] of Object.entries<string>(schema.discriminator.mapping)) {
+      const tsNullable = EVENT_NULLABLE[type as SearchEvent["type"]];
+      expect(sorted(tsNullable), type).toEqual(nullableProps(defOf(ref)));
+    }
+  });
+
+  it("declares each nested model's nullable fields exactly as the schema does", () => {
+    for (const [name, tsNullable] of Object.entries<readonly string[]>(MODEL_NULLABLE)) {
+      expect(sorted(tsNullable), name).toEqual(nullableProps(schema.$defs[name]));
     }
   });
 
   it("matches the schema's enumerations", () => {
     expect(sorted(STOP_REASONS)).toEqual(sorted(schema.$defs.StopReason.enum));
     expect(sorted(PHASES)).toEqual(sorted(schema.$defs.PhaseStarted.properties.phase.enum));
+    expect(sorted(PHASES)).toEqual(sorted(schema.$defs.PhaseFinished.properties.phase.enum));
     expect(sorted(MODES)).toEqual(sorted(schema.$defs.SearchStarted.properties.mode.enum));
     // Action is nullable in PhaseSummary, so find the enum inside the anyOf branch
     const actionEnumDef = schema.$defs.PhaseSummary.properties.action.anyOf.find((d: Record<string, unknown>) => d.enum);
