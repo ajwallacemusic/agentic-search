@@ -42,6 +42,21 @@ NATIVE["neo4j"] = ("MATCH (n:docs) WHERE n.type = 'history' RETURN n.id AS id",
 NATIVE_DIALECT = {"postgres": "sql", "mysql": "sql", "opensearch": "opensearch_dsl", "neo4j": "cypher"}
 
 
+C = Capability
+_CORE = {C.FILTER, C.FETCH}
+_SEARCH = {C.LEXICAL, C.VECTOR, C.HYBRID}
+# What each backend is designed to offer against the contract seed; a capability silently
+# disappearing (e.g. an index no longer discovered) fails test_discover instead of skipping tests.
+EXPECTED: dict[str, set[Capability]] = {
+    "files": _CORE | _SEARCH | {C.REGEX, C.AGGREGATE},
+    "postgres": _CORE | _SEARCH | {C.REGEX, C.AGGREGATE, C.NATIVE},
+    "mysql": _CORE | {C.LEXICAL, C.REGEX, C.AGGREGATE, C.NATIVE},
+    "opensearch": _CORE | _SEARCH | {C.REGEX, C.AGGREGATE, C.NATIVE},
+    "neo4j": _CORE | _SEARCH | {C.REGEX, C.AGGREGATE, C.TRAVERSE, C.NATIVE},
+    "milvus": _CORE | _SEARCH,
+}
+
+
 async def make_backend(kind: str) -> Backend:
     if kind == "files":
         return FilesBackend.from_documents("files", corpus.documents(), embedder=corpus.EMBEDDER,
@@ -103,7 +118,7 @@ async def test_discover(backend):
     coll = m.resolve_collection("docs")
     assert coll is not None and coll.count in (None, 5)
     assert {"type", "year"} <= {f.name for f in coll.fields}
-    assert {Capability.FILTER, Capability.FETCH} <= m.capabilities
+    assert EXPECTED[backend.kind] <= m.capabilities, EXPECTED[backend.kind] - m.capabilities
     if Capability.VECTOR in m.capabilities:
         emb = coll.field("embedding")
         assert emb.embedder_id == "hash64" and emb.vector_dim == 64
