@@ -86,3 +86,7 @@ the named plan ships the feature that exposes them.
 - `parseSse` strips a leading BOM although `TextDecoder("utf-8")` already does by default; the strip is redundant.
 - `parseSse` re-scans and re-slices the buffer per line, so a very long line arriving in many chunks is parsed in quadratic time.
 - `test/e2e.test.ts` listens for the child's `error` event only inside `waitFor`; after startup no listener remains, so a later child `error` (for example from killing it) would surface as an unhandled error. Add a permanent listener.
+- TS client: `NullableKeys` counts `unknown`/`any` fields as nullable while pydantic `Any` fields have no null branch — adding such a field fails the contract test confusingly (fails loudly, not silently).
+- TS client: `ClientOptions.fetch` doc mentions "older runtimes", but the client now also needs a global `Headers`; document or accept a `Headers` polyfill.
+- TS client: very long JSON `detail` strings / 422 arrays go into `AgenticSearchError.message` untruncated.
+- TS client e2e checks only top-level keys of `ProfileInfo.limits`/`budget`.
