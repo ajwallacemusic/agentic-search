@@ -54,6 +54,14 @@ __all__ = ["Harness", "HarnessError", "HarnessSettings", "Mode", "RankedHit", "S
            "SearchStream"]
 
 
+class _TaskDone:
+    """Sentinel object to detect when the search task finishes without emitting a terminal event."""
+    pass
+
+
+_TASK_DONE = _TaskDone()
+
+
 class HarnessError(Exception):
     """Harness-level failure: misconfiguration or no reachable backends."""
 
@@ -262,17 +270,29 @@ class Harness:
         queue: asyncio.Queue[SearchEvent] = asyncio.Queue()
         emitter = EventEmitter(uuid.uuid4().hex, queue.put_nowait)
         task = asyncio.create_task(self._run_search(opts, emitter, failure))
+        task.add_done_callback(lambda _t: queue.put_nowait(_TASK_DONE))
         try:
             while True:
                 event = await queue.get()
+                if isinstance(event, _TaskDone):
+                    # Task finished without emitting a terminal event; re-raise any exception
+                    if task.cancelled():
+                        raise asyncio.CancelledError()
+                    exc = task.exception()
+                    if exc is not None:
+                        raise exc
+                    break
                 yield event
                 if isinstance(event, TERMINAL_EVENTS):
                     break
         finally:
             if not task.done():
                 task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            try:
                 await task
+            except asyncio.CancelledError:
+                if asyncio.current_task().cancelling():
+                    raise
 
     async def _run_search(self, opts: _Options, emitter: EventEmitter,
                           failure: list[BaseException]) -> None:

@@ -290,3 +290,83 @@ async def test_search_matches_stream_result(docs_backend):
     assert streamed.keys() == direct.keys()
     assert [h.score for h in streamed.hits] == [h.score for h in direct.hits]
     assert streamed.stop_reason is direct.stop_reason
+
+
+async def test_cancelled_error_from_driver_plan_search_propagates(docs_backend):
+    """Test that CancelledError raised inside plan() is not swallowed by search()."""
+    class CancellingDriver(ScriptedDriver):
+        async def plan(self, view, tools):
+            raise asyncio.CancelledError("plan cancelled")
+
+    h = make(docs_backend, CancellingDriver())
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(h.search("q"), 5)
+
+
+async def test_cancelled_error_from_driver_plan_stream_propagates(docs_backend):
+    """Test that CancelledError raised inside plan() is not swallowed by stream()."""
+    class CancellingDriver(ScriptedDriver):
+        async def plan(self, view, tools):
+            raise asyncio.CancelledError("plan cancelled")
+
+    h = make(docs_backend, CancellingDriver())
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(collect(h.stream("q")), 5)
+
+
+async def test_custom_base_exception_from_driver_search_propagates(docs_backend):
+    """Test that custom BaseException subclass is not swallowed by search()."""
+    class Fatal(BaseException):
+        pass
+
+    class FatalDriver(ScriptedDriver):
+        async def plan(self, view, tools):
+            raise Fatal("custom fatal error")
+
+    h = make(docs_backend, FatalDriver())
+    with pytest.raises(Fatal):
+        await asyncio.wait_for(h.search("q"), 5)
+
+
+async def test_custom_base_exception_from_driver_stream_propagates(docs_backend):
+    """Test that custom BaseException subclass is not swallowed by stream()."""
+    class Fatal(BaseException):
+        pass
+
+    class FatalDriver(ScriptedDriver):
+        async def plan(self, view, tools):
+            raise Fatal("custom fatal error")
+
+    h = make(docs_backend, FatalDriver())
+    with pytest.raises(Fatal):
+        await asyncio.wait_for(collect(h.stream("q")), 5)
+
+
+async def test_consumer_timeout_not_swallowed_by_stream_cleanup(docs_backend):
+    """Test that consumer's timeout is not swallowed by stream cleanup."""
+    cleanup_started = asyncio.Event()
+
+    async def shielded_cleanup(op):
+        cleanup_started.set()
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            # Backend does shielded cleanup before re-raising
+            await asyncio.shield(asyncio.sleep(0.3))
+            raise
+        return []
+
+    docs_backend.execute = shielded_cleanup
+    h = make(docs_backend, ScriptedDriver([[lex("headache")]]),
+             settings=HarnessSettings(call_timeout=600))
+
+    async def consume_with_timeout():
+        async with asyncio.timeout(0.1):
+            async with h.stream("q") as s:
+                async for ev in s:
+                    if isinstance(ev, ToolCallStarted):
+                        await cleanup_started.wait()
+                        await asyncio.sleep(10)
+
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(consume_with_timeout(), 5)
