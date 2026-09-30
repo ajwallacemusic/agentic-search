@@ -51,3 +51,9 @@ the named plan ships the feature that exposes them.
 - Neo4j regex wrapper can be escaped by unbalanced parentheses (semantics only; the pattern is a `$param`).
 - Milvus `_samples` reads only a 1000-row slice (`SAMPLE_SCAN_MAX`) for distinct sample values.
 - `OpenAICompatClient`/`AnthropicClient` expose no `close()`, so `Harness.close` cannot release their SDK clients.
+- `AzureIdentity.close` closes a caller-supplied credential and never resets it, so an Azure-auth embedder shared by two harnesses breaks after the first closes.
+- `TypeSafeDecider.judge` drops usage accumulated from earlier batches when it re-raises a later failure.
+- `Harness.close` discards close exceptions (`return_exceptions=True`) without logging them.
+- Milvus caches a positive load state forever; a collection released later gives a server error instead of "not loaded".
+- The Cypher guard and wrapper rely on `CALL { WITH x … }`, which Neo4j flags as deprecated in favour of `CALL (x) { … }`; revisit when it is removed.
+- Native Cypher rejects any backslash-u sequence (Neo4j decodes them before tokenising); queries needing non-ASCII literals must use literal characters or parameters.
