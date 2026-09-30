@@ -64,3 +64,6 @@ the named plan ships the feature that exposes them.
 - SSE payload size of `SearchFinished` (full trace plus content): the service layer should offer a lean projection.
 - Snapshot ranking and the turn summary each sort the pool; share one sort.
 - `NullEmitter` still constructs event objects before discarding them.
+- Stream tests' phase pairing check compares ordered `(phase, turn)` lists but not start-before-finish ordering, and would reject nested phases if any are added.
+- The `SearchStarted.mode` drift test compares against a hard-coded set rather than `harness._MODES`.
+- The delegate trace entry records the post-run turn while `phase_finished(delegate)` uses the start turn.
