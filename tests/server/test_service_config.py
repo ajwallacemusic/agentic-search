@@ -6,7 +6,7 @@ from agentic_search.config import ConfigError
 from agentic_search.core.secrets import scrub
 from agentic_search.core.types import Budget
 from agentic_search.server import AuthConfig, ProfileLimits, check_profiles, load_service
-from agentic_search.server.models import BudgetOverride, resolve_budget
+from agentic_search.server.models import BudgetOverride, budget_ceilings, resolve_budget
 
 PROFILE = """
     backends: [{name: notes, type: files, root: docs, glob: "*.txt"}]
@@ -64,6 +64,20 @@ def test_resolve_budget():
                          {"max_turns": 3, "max_cost_usd": 0.5})
     assert (got.max_turns, got.max_tool_calls, got.max_cost_usd) == (3, 5, 0.5)
     assert resolve_budget(base, None, {}) == base
+
+
+def test_budget_ceilings_default_to_the_profile_budget():
+    base = Budget(max_turns=4, max_tool_calls=32, max_tokens=None, max_cost_usd=None,
+                  max_seconds=60.0)
+    assert budget_ceilings(base, {}) == {"max_turns": 4, "max_tool_calls": 32, "max_seconds": 60.0}
+    assert budget_ceilings(base, {"max_turns": 10, "max_cost_usd": 0.5}) == {
+        "max_turns": 10, "max_tool_calls": 32, "max_seconds": 60.0, "max_cost_usd": 0.5}
+    lowered = resolve_budget(base, BudgetOverride(max_turns=2, max_tokens=500),
+                             budget_ceilings(base, {}))
+    raised = resolve_budget(base, BudgetOverride(max_turns=99, max_seconds=600),
+                            budget_ceilings(base, {}))
+    assert (lowered.max_turns, lowered.max_tokens) == (2, 500)  # lowering is free
+    assert (raised.max_turns, raised.max_seconds) == (4, 60.0)  # raising needs max_budget
 
 
 class TestAuthConfig:

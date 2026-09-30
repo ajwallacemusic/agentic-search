@@ -96,15 +96,32 @@ async def test_profiles_and_health(app_factory, docs_backend):
     assert search.status_code == 503 and health["status"] == "degraded"
 
 
-async def test_budget_is_clamped_by_profile_limits(app_factory):
-    turns = [[lex("headache")], [lex("fever")], [lex("pain")]]
+def _three_turn_app(app_factory, **kw):
     from agentic_search.models.base import Action
     from agentic_search.testing import ScriptedController
 
-    app = app_factory(turns=turns, limits=ProfileLimits(max_budget={"max_turns": 1}),
-                      controller=ScriptedController([Action.CONTINUE, Action.CONTINUE]))
+    turns = [[lex("headache")], [lex("fever")], [lex("pain")]]
+    return app_factory(turns=turns, controller=ScriptedController([Action.CONTINUE] * 2), **kw)
+
+
+async def test_budget_is_clamped_by_profile_limits(app_factory):
+    """An explicit max_budget ceiling caps requests, and may sit above the profile's budget."""
+    from agentic_search.core.types import Budget
+
+    app = _three_turn_app(app_factory, budget=Budget(max_turns=1),
+                          limits=ProfileLimits(max_budget={"max_turns": 2}))
     async with client(app) as c:
         r = await c.post("/v1/search", json={"question": "q", "budget": {"max_turns": 9}})
+    assert r.json()["usage"]["turns"] == 2 and r.json()["stop_reason"] == "budget_turns"
+
+
+async def test_budget_ceiling_defaults_to_profile_budget(app_factory):
+    """Without max_budget, a request cannot raise a field above the profile's own budget."""
+    from agentic_search.core.types import Budget
+
+    app = _three_turn_app(app_factory, budget=Budget(max_turns=1))
+    async with client(app) as c:
+        r = await c.post("/v1/search", json={"question": "q", "budget": {"max_turns": 99}})
     assert r.json()["usage"]["turns"] == 1 and r.json()["stop_reason"] == "budget_turns"
 
 

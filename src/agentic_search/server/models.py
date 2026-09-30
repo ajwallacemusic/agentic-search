@@ -91,10 +91,19 @@ def build_query(req: SearchRequest, *, max_images: int, max_image_bytes: int) ->
     return Query(content=parts)
 
 
+def budget_ceilings(base: Budget, max_budget: dict[str, float | int]) -> dict[str, float | int]:
+    """Per-field ceilings for request budgets: the profile's `max_budget` where it sets a field,
+    otherwise the profile budget's own (non-None) value. Requests may lower any field freely;
+    raising one above the profile's budget needs an explicit `max_budget`."""
+    ceilings = {k: v for k, v in base.model_dump().items() if v is not None}
+    ceilings.update(max_budget)
+    return ceilings
+
+
 def resolve_budget(base: Budget, override: BudgetOverride | None,
                    ceilings: dict[str, float | int]) -> Budget:
-    """The profile's budget, updated with the request's fields, then capped by the profile's
-    ceilings. An unlimited (None) field under a ceiling becomes the ceiling."""
+    """The profile's budget, updated with the request's fields, then capped by `ceilings` (see
+    `budget_ceilings`). An unlimited (None) field under a ceiling becomes the ceiling."""
     fields = base.model_dump()
     if override is not None:
         fields.update(override.model_dump(exclude_none=True))

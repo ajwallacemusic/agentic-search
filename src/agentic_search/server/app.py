@@ -23,6 +23,7 @@ from agentic_search.server.models import (
     RequestError,
     SearchRequest,
     StreamRequest,
+    budget_ceilings,
     build_query,
     lean_result,
     render_event,
@@ -160,7 +161,8 @@ def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) ->
             raise HTTPException(400, str(exc)) from exc
         return {"sources": req.sources, "top_k": req.top_k, "mode": req.mode,
                 "budget": resolve_budget(profile.harness.budget, req.budget,
-                                         profile.limits.max_budget),
+                                         budget_ceilings(profile.harness.budget,
+                                                         profile.limits.max_budget)),
                 "question": query}
 
     @app.get("/healthz")

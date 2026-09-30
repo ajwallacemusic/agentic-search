@@ -115,7 +115,9 @@ budget?, include_content?, include_trace?}`, plus `snapshot_k?` for the stream. 
   comment is sent after `keepalive_s` (default 15 s) of silence.
 - The final `search_finished` carries a lean result: no trace unless `include_trace`, no hit
   content unless `include_content` (and the profile allows it).
-- A request's budget is capped by the profile's `limits.max_budget`.
+- A request may lower any budget field. Each field is capped by the profile's
+  `limits.max_budget` if set there, otherwise by the profile's own budget: to let clients raise
+  a field, set `max_budget` for it explicitly.
 - Closing the connection cancels the search, including in-flight backend and model calls.
 - `401` bad key, `404` unknown profile, `422` invalid body, `429` too many concurrent searches,
   `503` profile unavailable. Failures during a streamed search arrive as a `search_failed` event.

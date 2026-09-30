@@ -64,7 +64,8 @@ class ServiceConfig(BaseModel):
 
 
 class ProfileLimits(BaseModel):
-    """`max_budget`: per-field ceilings on the budget a request may ask for (unset = no ceiling)."""
+    """`max_budget`: per-field ceilings on the budget a request may ask for. A field it does not
+    set is capped at the profile harness budget's own value (if that is not None)."""
 
     model_config = ConfigDict(extra="forbid")
 

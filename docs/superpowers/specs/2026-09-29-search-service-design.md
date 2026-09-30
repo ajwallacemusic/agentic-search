@@ -83,7 +83,8 @@ profiles:
   creation. An empty or unset variable is a `ConfigError`. Every key is registered for scrubbing.
 - Unknown keys in `service:`, `auth:` and `limits:` are errors (`extra="forbid"`).
 - `limits.max_budget` maps `Budget` field names to positive ceilings. Unknown field names, or
-  ceilings that are not a valid `Budget` value, are errors. `allow_include_content` defaults to
+  ceilings that are not a valid `Budget` value, are errors. A field it leaves out is capped at
+  the profile harness budget's own value when that is not `None` (§5.1). `allow_include_content` defaults to
   true.
 - `load_service` builds every profile's harness with `build_harness(cfg, base_dir=<yaml dir>)`.
   It does not set them up. Errors are raised as `ConfigError`.
@@ -139,8 +140,14 @@ for `/v1/*`:
     `400`.
   - A `uri` field is rejected by validation with `422`. The service never reads a
     client-supplied path or URI.
-- **Budget:** the profile harness's budget, updated with the request's fields, then capped by
-  `max_budget`. An unlimited (`None`) field under a ceiling becomes the ceiling.
+- **Budget:** the profile harness's budget, updated with the request's fields, then capped per
+  field. An unlimited (`None`) field under a ceiling becomes the ceiling.
+  - **Ceilings default to the profile's own budget** (final-review ruling,
+    `models.budget_ceilings`): a field's ceiling is `max_budget[field]` if set, else the profile
+    budget's value for it if not `None`, else none. Clients can lower any field freely; raising
+    one above the profile's budget requires the operator to set `max_budget` for it explicitly.
+    For example, `{"budget": {"max_turns": 99}}` on a profile with default limits runs at most
+    the profile's `max_turns`.
 - **Content:** `include_content` on a profile with `allow_include_content: false` returns `400`.
 
 ### 5.2 Readiness and errors
@@ -249,7 +256,7 @@ free port:
 - `/v1/profiles` contents; an unavailable profile gives `503`, and health reports `degraded`.
   Failed setup is not re-run within `setup_retry_s` (and is with `setup_retry_s: 0`); the
   lifespan logs setup and close failures, scrubbed.
-- Budget clamping end to end.
+- Budget clamping end to end, including the default ceiling of the profile's own budget.
 - Images: decoded inline, invalid base64 `400`, `uri` `422`, too many `400`.
 - `HarnessError` gives `400`, and capacity gives `429` for both routes.
 - Stream framing: ids equal `seq`, event equals `type`, the lean finish, `snapshot_k`, and
