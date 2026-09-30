@@ -65,6 +65,41 @@ class SqlAllowList:
         return schema
 
 
+def _check_columns_by_scope(stmt: Any, dialect: str, allow: SqlAllowList) -> None:
+    """Check every qualified column again, without trusting `qualify`: its qualifier must name a
+    source in scope, and that source must hold the column. A source is an allowed table with
+    the column in its allowed set, or a derived table or CTE that outputs it."""
+    from sqlglot import exp
+    from sqlglot.optimizer.scope import Scope, traverse_scope
+
+    def refuse(column: Any) -> NativeQueryRejected:
+        return NativeQueryRejected(
+            "native SQL may use only the allowed tables and columns: "
+            f"{column.sql(dialect=dialect)} does not name an allowed column")
+
+    seen: set[int] = set()
+    for scope in traverse_scope(stmt):
+        for column in scope.columns:
+            if not column.table:
+                continue
+            seen.add(id(column))
+            # A correlated reference names a source of an enclosing scope.
+            source, outer = None, scope
+            while source is None and outer is not None:
+                source, outer = outer.sources.get(column.table), outer.parent
+            if isinstance(source, Scope):
+                if column.name not in source.expression.named_selects:
+                    raise refuse(column)
+            elif isinstance(source, exp.Table):
+                if column.name not in allow.tables.get(source.name, frozenset()):
+                    raise refuse(column)
+            else:
+                raise refuse(column)
+    for column in stmt.find_all(exp.Column):
+        if column.table and id(column) not in seen:
+            raise refuse(column)
+
+
 def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
     """Resolve every column against the allowed columns and return the resolved query.
 
@@ -96,8 +131,17 @@ def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
             raise NativeQueryRejected(
                 f"native SQL may use only the allowed tables and columns: "
                 f"{column.sql(dialect=dialect)} is not a qualified allowed column")
+    # LATERAL lets a column bind to the lateral's own alias, which `qualify` does not flag, and
+    # that alias can be the name of a real table. The scope pass below cannot vouch for it.
+    for lateral in stmt.find_all(exp.Lateral):
+        raise NativeQueryRejected(f"{lateral.sql(dialect=dialect)[:40]}... is not allowed in native SQL")
+    _check_columns_by_scope(stmt, dialect, allow)
     ctes = {cte.alias_or_name for cte in stmt.find_all(exp.CTE)}
     for table in stmt.find_all(exp.Table):
+        # Time travel reads a table as it was, including rows deleted since.
+        if table.args.get("version") is not None or table.args.get("when") is not None:
+            raise NativeQueryRejected(
+                f"table {table.name} read at a past point in time is not allowed in native SQL")
         if table.name in ctes and not table.db:
             continue
         # A query naming no column, such as COUNT(*), resolves against any table; check each one.
@@ -105,8 +149,13 @@ def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
                 or (table.catalog or None) != allow.catalog):
             raise NativeQueryRejected(f"table {table.sql(dialect=dialect)} is not allowed in native SQL")
     for func in stmt.find_all(exp.Func):
-        if isinstance(func, exp.Connector):  # AND, OR and XOR are operators, not functions
+        # AND, OR, XOR and EXISTS are operators that sqlglot models as functions.
+        if isinstance(func, (exp.Connector, exp.Exists)):
             continue
+        if isinstance(func.parent, exp.Dot):
+            raise NativeQueryRejected(
+                f"a qualified function call, {func.parent.sql(dialect=dialect)[:40]}, "
+                "is not allowed in native SQL")
         name = (func.name if isinstance(func, exp.Anonymous) else func.sql_name()).upper()
         if name not in allow.functions:
             raise NativeQueryRejected(f"function {name} is not allowed in native SQL")

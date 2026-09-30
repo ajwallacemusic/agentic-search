@@ -363,3 +363,47 @@ def test_allow_list_accepts_boolean_operators_and_having_on_an_alias():
     out = guard_sql("SELECT dx, COUNT(*) AS n FROM visits WHERE dx = 'a' AND id = '1' OR note IS NULL "
                     "GROUP BY dx HAVING n > 1 ORDER BY n DESC", "bigquery", 10, BQ)
     assert "HAVING COUNT(*) > 1" in out and out.endswith("ORDER BY n DESC LIMIT 10")
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT a.title, docs.secret FROM docs a LEFT JOIN LATERAL "
+    "(SELECT secret FROM docs WHERE docs.id = a.id) docs ON TRUE",
+    "SELECT a.title FROM docs a, LATERAL (SELECT secret FROM docs) docs",
+    "SELECT a.title FROM docs a CROSS JOIN LATERAL (SELECT secret FROM docs) docs",
+    "SELECT a.title FROM docs a JOIN LATERAL (SELECT secret FROM docs) docs ON TRUE",
+    "SELECT title FROM docs WHERE EXISTS (SELECT 1 FROM (SELECT id FROM docs) docs WHERE docs.secret = 1)",
+    "SELECT title FROM docs WHERE EXISTS (SELECT 1 FROM docs d2 WHERE d2.id = docs.secret)",
+])
+def test_allow_list_rejects_lateral_and_hidden_columns_behind_a_shadowed_alias(query):
+    with pytest.raises(NativeQueryRejected):
+        guard_sql(query, "postgres", 10, PG)
+
+
+@pytest.mark.parametrize("query,allow,dialect", [
+    ("SELECT otherds.LOWER(dx) FROM visits", BQ, "bigquery"),
+    ("SELECT `other-proj`.ds.COUNT(dx) FROM visits", BQ, "bigquery"),
+    ("SELECT evil.lower(title) FROM docs", PG, "postgres"),
+])
+def test_allow_list_rejects_a_qualified_function_call(query, allow, dialect):
+    with pytest.raises(NativeQueryRejected, match="qualified function call"):
+        guard_sql(query, dialect, 10, allow)
+
+
+@pytest.mark.parametrize("query,allow,dialect", [
+    ("SELECT dx FROM visits v WHERE EXISTS (SELECT 1 FROM visits v2 WHERE v2.id = v.id)", BQ, "bigquery"),
+    ("SELECT title FROM docs WHERE NOT EXISTS (SELECT 1 FROM docs d2 WHERE d2.id = docs.id)", PG, "postgres"),
+    ("SELECT title FROM docs WHERE id IN (SELECT x.id FROM docs x WHERE x.id = docs.id)", PG, "postgres"),
+    ("SELECT d.title FROM (SELECT title, id FROM docs) d JOIN docs e ON d.id = e.id", PG, "postgres"),
+    ("SELECT * FROM docs a JOIN docs b ON a.id = b.id", PG, "postgres"),
+])
+def test_allow_list_accepts_exists_correlated_and_derived_queries(query, allow, dialect):
+    assert guard_sql(query, dialect, 10, allow).endswith("LIMIT 10")
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT dx FROM visits FOR SYSTEM_TIME AS OF '2026-01-01'",
+    "SELECT dx FROM visits FOR SYSTEM_TIME AS OF TIMESTAMP '2026-01-01'",
+])
+def test_allow_list_rejects_time_travel(query):
+    with pytest.raises(NativeQueryRejected, match="past point in time"):
+        guard_sql(query, "bigquery", 10, BQ)
