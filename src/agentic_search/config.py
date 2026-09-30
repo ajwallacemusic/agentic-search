@@ -155,6 +155,61 @@ def _openai_compat(cfg: dict[str, Any], ctx: BuildContext) -> Any:
                               max_tokens_param=cfg.get("max_tokens_param", "max_tokens"))
 
 
+def _neo4j(cfg: dict[str, Any], ctx: BuildContext) -> Any:
+    from agentic_search.backends.neo4j import Neo4jBackend
+    return Neo4jBackend(cfg["name"], cfg["uri"], **_backend_kwargs(
+        cfg, ctx, ("user", "password", "database", "labels", "id_property", "embedders", "native_query",
+                   "description", "max_rows", "sample_values", "connect_timeout_s")))
+
+
+def _milvus(cfg: dict[str, Any], ctx: BuildContext) -> Any:
+    from agentic_search.backends.milvus import MilvusBackend
+    return MilvusBackend(cfg["name"], cfg["uri"], **_backend_kwargs(
+        cfg, ctx, ("token", "db_name", "collections", "embedders", "description", "max_rows",
+                   "sample_values", "connect_timeout_s")))
+
+
+_HTTP_EMBEDDER_KEYS = ("id", "batch_size", "concurrency", "timeout_s", "max_retries")
+
+
+def _http_kwargs(cfg: dict[str, Any], extra: tuple[str, ...] = ()) -> dict[str, Any]:
+    from agentic_search.embedders.auth import build_auth
+    kwargs = {k: cfg[k] for k in _HTTP_EMBEDDER_KEYS + extra if k in cfg}
+    if "auth" in cfg:
+        kwargs["auth"] = build_auth(cfg["auth"])
+    return kwargs
+
+
+def _openai_embedder(cfg: dict[str, Any], ctx: BuildContext) -> Any:
+    from agentic_search.embedders.openai_compat import OpenAICompatEmbedder
+    return OpenAICompatEmbedder(cfg["model"], int(cfg["dim"]), **_http_kwargs(
+        cfg, ("base_url", "api_key", "dimensions", "query_prefix", "document_prefix")))
+
+
+def _tei(cfg: dict[str, Any], ctx: BuildContext) -> Any:
+    from agentic_search.embedders.tei import TEIEmbedder
+    return TEIEmbedder(cfg["url"], int(cfg["dim"]), **_http_kwargs(
+        cfg, ("query_prefix", "document_prefix", "normalize")))
+
+
+def _vertex(cfg: dict[str, Any], ctx: BuildContext) -> Any:
+    from agentic_search.embedders.vertex import VertexEmbedder
+    return VertexEmbedder(cfg["model"], int(cfg["dim"]), project=cfg["project"],
+                          **_http_kwargs(cfg, ("location", "endpoint")))
+
+
+def _http_embedder(cfg: dict[str, Any], ctx: BuildContext) -> Any:
+    from agentic_search.embedders.http_generic import GenericHttpEmbedder
+    return GenericHttpEmbedder(cfg["url"], int(cfg["dim"]), request=cfg["request"],
+                               response_path=cfg["response_path"], **_http_kwargs(cfg, ("headers",)))
+
+
+def _typesafe(cfg: dict[str, Any], ctx: BuildContext) -> Any:
+    from agentic_search.models.typesafe import TypeSafeDecider
+    return TypeSafeDecider(cfg.get("model", "jev-latest"), api_key=cfg.get("api_key"), id=cfg.get("id"),
+                           batch_size=int(cfg.get("batch_size", 16)), price_per_mtok=_price(cfg))
+
+
 def _cross_encoder(cfg: dict[str, Any], ctx: BuildContext) -> Any:
     from agentic_search.models.cross_encoder import CrossEncoderJudge
     return CrossEncoderJudge(cfg.get("model", "BAAI/bge-reranker-v2-m3"),
@@ -175,12 +230,19 @@ for _kind, _type, _factory in [
     ("backend", "mysql", _mysql),
     ("backend", "bigquery", _bigquery),
     ("backend", "opensearch", _opensearch),
+    ("backend", "neo4j", _neo4j),
+    ("backend", "milvus", _milvus),
     ("embedder", "hash", _hash),
     ("embedder", "sentence_transformers", _sentence_transformers),
+    ("embedder", "openai_compat", _openai_embedder),
+    ("embedder", "tei", _tei),
+    ("embedder", "vertex", _vertex),
+    ("embedder", "http", _http_embedder),
     ("client", "anthropic", _anthropic),
     ("client", "openai_compat", _openai_compat),
     ("decider", "cross_encoder", _cross_encoder),
     ("decider", "llm_judge", _llm_judge),
+    ("decider", "typesafe", _typesafe),
 ]:
     register(_kind, _type, _factory)
 

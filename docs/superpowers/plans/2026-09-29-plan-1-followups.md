@@ -37,3 +37,7 @@ the named plan ships the feature that exposes them.
 - `ValueError` from backend constructor validation (BigQuery project/dataset, Postgres text_search_config) is not converted to `ConfigError`.
 - `strip_collection` cannot distinguish a raw pk that itself starts with "<collection>/" (namespaced form works).
 - Minor: remaining deferred items are listed in the Plan 2 ledger summary (final message of the run).
+
+## Status after Plan 3
+- Done: hooked backend embeddings (Task 2); Postgres stored tsvector and ConfigError for invalid values (Task 8).
+- Open: live runs of BigQuery, Vertex, OpenAI/TEI embeddings, TypeSafe and Azure/GCP auth with real credentials; Neo4j Enterprise/Aura/TLS; auth-enabled Milvus.

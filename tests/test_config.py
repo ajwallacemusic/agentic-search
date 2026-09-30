@@ -136,3 +136,61 @@ def test_constructor_value_errors_become_config_errors(tmp_path):
         build_harness({"backends": [{"name": "bq", "type": "bigquery", "project": "bad project!", "dataset": "d"}],
                        "driver": {"type": "openai_compat", "model": "m", "base_url": "http://x/v1"}},
                       base_dir=tmp_path)
+
+
+async def test_build_remote_embedders_and_typesafe(tmp_path, monkeypatch):
+    from agentic_search.embedders.auth import AzureIdentity, Bearer, GcpAdc
+    from agentic_search.embedders.http_generic import GenericHttpEmbedder
+    from agentic_search.embedders.openai_compat import OpenAICompatEmbedder
+    from agentic_search.embedders.tei import TEIEmbedder
+    from agentic_search.embedders.vertex import VertexEmbedder
+    from agentic_search.models.typesafe import TypeSafeDecider
+
+    monkeypatch.setenv("TS_KEY", "ts-cfg-key-555")
+    monkeypatch.setenv("MEDSIGLIP_URL", "https://medsiglip.example/score")
+    h = build_harness({
+        "embedders": [
+            {"type": "openai_compat", "model": "text-embedding-3-small", "dim": 1536,
+             "auth": {"type": "bearer", "token": "sk-cfg-1234"}},
+            {"type": "tei", "url": "http://tei:8080", "dim": 384, "id": "tei:bge-small"},
+            {"type": "vertex", "model": "gemini-embedding-001", "dim": 768, "project": "proj-1"},
+            {"type": "http", "id": "azure:medsiglip-448", "url_env": "MEDSIGLIP_URL", "dim": 1152,
+             "auth": {"type": "azure_identity", "scope": "api://medsiglip/.default"},
+             "request": {"image": {"instances": [{"image_b64": "{{b64}}"}]}},
+             "response_path": "$.predictions[*].embedding"},
+        ],
+        "backends": [{"name": "notes", "type": "files", "root": ".", "glob": "none/*"}],
+        "driver": {"type": "openai_compat", "model": "local", "base_url": "http://localhost:8000/v1"},
+        "controller": {"type": "typesafe", "api_key_env": "TS_KEY"},
+    }, base_dir=tmp_path)
+    emb = {e.id: e for e in h.embedders._by_id.values()}
+    assert isinstance(emb["openai:text-embedding-3-small"], OpenAICompatEmbedder)
+    assert isinstance(emb["openai:text-embedding-3-small"].auth, Bearer)
+    assert isinstance(emb["tei:bge-small"], TEIEmbedder)
+    assert isinstance(emb["vertex:gemini-embedding-001"].auth, GcpAdc)
+    assert isinstance(emb["vertex:gemini-embedding-001"], VertexEmbedder)
+    med = emb["azure:medsiglip-448"]
+    assert isinstance(med, GenericHttpEmbedder) and isinstance(med.auth, AzureIdentity)
+    assert med.url == "https://medsiglip.example/score"
+    assert isinstance(h.controller_decider, TypeSafeDecider) and h.controller_decider.id == "typesafe:jev-latest"
+
+
+def test_build_graph_and_vector_backends(tmp_path, monkeypatch):
+    from agentic_search.backends.milvus import MilvusBackend
+    from agentic_search.backends.neo4j import Neo4jBackend
+    from agentic_search.core.secrets import scrub
+
+    monkeypatch.setenv("NEO4J_PASSWORD", "neo-pass-2468")
+    h = build_harness({
+        "embedders": [{"type": "hash", "id": "hash64", "dim": 64}],
+        "backends": [
+            {"name": "kg", "type": "neo4j", "uri": "bolt://graph:7687", "user": "neo4j",
+             "password_env": "NEO4J_PASSWORD", "labels": ["Drug", "Condition"],
+             "embedders": {"Drug.embedding": "hash64"}, "native_query": True},
+            {"name": "vec", "type": "milvus", "uri": "http://milvus:19530", "collections": ["docs"],
+             "embedders": {"docs.embedding": "hash64"}},
+        ],
+        "driver": {"type": "openai_compat", "model": "local", "base_url": "http://localhost:8000/v1"},
+    }, base_dir=tmp_path)
+    assert isinstance(h.backends["kg"], Neo4jBackend) and isinstance(h.backends["vec"], MilvusBackend)
+    assert scrub("neo-pass-2468") == "***"

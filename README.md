@@ -47,10 +47,9 @@ Or from YAML: `from agentic_search.config import load_harness`. The spec §7 sho
 ## Roles
 
 - **Driver**: plans and calls tools (`ToolCallingDriver` over `AnthropicClient` or `OpenAICompatClient`).
-- **Analyzer decider**: judges relevance (`LLMJudge`, `CrossEncoderJudge`, TypeSafe System One in Plan 3).
-- **Controller decider**: continue/refine/broaden/stop (`LLMJudge`, or the built-in heuristic).
-- **Backends**: files, Postgres + pgvector, MySQL, BigQuery and OpenSearch (see below). Graph and
-  vector stores (Neo4j, Milvus) come in Plan 3.
+- **Analyzer decider**: judges relevance (`LLMJudge`, `CrossEncoderJudge`, `TypeSafeDecider`).
+- **Controller decider**: continue/refine/broaden/stop (`LLMJudge`, `TypeSafeDecider`, or the built-in heuristic).
+- **Backends**: files, Postgres + pgvector, MySQL, BigQuery, OpenSearch, Neo4j and Milvus (see below).
 - **Hooks / SourcePolicy**: every model-bound payload passes through `Hooks.before_model_call`:
   the planner view, judge requests (question + hits), the controller view, embedder queries, and in
   model mode the delegate question/context and every tool output (a raising hook withholds that
@@ -66,6 +65,8 @@ Or from YAML: `from agentic_search.config import load_harness`. The spec §7 sho
 | `mysql` | `mysql` | FULLTEXT (natural language) | – | lexical needs a FULLTEXT index; READ ONLY sessions, `max_execution_time` |
 | `bigquery` | `bigquery` | term match (`CONTAINS_SUBSTR`) | `VECTOR_SEARCH` | every query dry-run; refused above `max_bytes_billed` |
 | `opensearch` | `opensearch` | `multi_match` | k-NN (`knn_vector`) | search APIs only |
+| `neo4j` | `neo4j` | FULLTEXT index | VECTOR index | collections are labels; `traverse`; READ sessions; native Cypher |
+| `milvus` | `milvus` | BM25 function (sparse) | ANN | collections map 1:1; no regex/aggregate |
 
 All backends support filters, regex, aggregates (`count`, `sum|avg|min|max:<column>`) and fetch.
 Set `native_query: true` on a backend to let the planner run read-only native SQL / search bodies;
@@ -89,6 +90,36 @@ backends:
   - {name: search, type: opensearch, url_env: SEARCH_URL, indices: [articles]}
 ```
 
+## Embedders
+
+| type | modalities | notes |
+|---|---|---|
+| `hash`, `sentence_transformers` | text (+ image for CLIP) | in-process (`local`) |
+| `openai_compat` | text | OpenAI, Azure OpenAI, vLLM, Ollama, Together |
+| `tei` | text | Hugging Face Text Embeddings Inference |
+| `vertex` | text; image with `multimodalembedding@001` | Google Application Default Credentials by default |
+| `http` | per request template | custom containers, e.g. MedSigLIP on Azure ML |
+
+Remote embedders take `auth: {type: api_key|bearer|gcp_adc|azure_identity, ...}` (install the `gcp` or
+`azure` extra for the cloud credentials). Backends that embed their own documents send them to
+non-local embedders only through `Hooks.before_model_call`, and `allowed_models` source policy applies to
+embedders too.
+
+```yaml
+embedders:
+  - {type: vertex, model: gemini-embedding-001, dim: 768, project: my-proj}
+  - id: "azure:medsiglip-448"
+    type: http
+    url_env: MEDSIGLIP_URL
+    dim: 1152
+    auth: {type: azure_identity, scope: "api://medsiglip/.default"}
+    request:
+      image: {instances: [{image_b64: "{{b64}}"}]}
+      text: {instances: [{text: "{{text}}"}]}
+    response_path: "$.predictions[*].embedding"
+controller: {type: typesafe, api_key_env: TYPESAFE_API_KEY}   # Jev judges/decides
+```
+
 ## Evaluate
 
 ```bash
@@ -103,6 +134,6 @@ the keys the model ranked, so its recall@100 is structurally lower than modes th
 
 ```bash
 uv sync && uv run pytest                      # unit tests, no services
-docker compose up -d --wait                   # Postgres+pgvector, MySQL, OpenSearch
+docker compose up -d --wait                   # Postgres+pgvector, MySQL, OpenSearch, Neo4j, Milvus
 AGENTIC_SEARCH_INTEGRATION=1 uv run pytest -m integration   # backend contract suite
 ```
