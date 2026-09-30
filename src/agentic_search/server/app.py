@@ -7,6 +7,7 @@ import hmac
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable
 
+import anyio
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import StreamingResponse
@@ -54,7 +55,11 @@ class _GatedStreamingResponse(StreamingResponse):
         try:
             await super().__call__(scope, receive, send)
         finally:
-            self._release()
+            try:
+                with anyio.CancelScope(shield=True):
+                    await self.body_iterator.aclose()
+            finally:
+                self._release()
 
 
 def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) -> FastAPI:
@@ -62,7 +67,7 @@ def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) ->
     also works without lifespan events) and closed at shutdown."""
     check_profiles(config, profiles)
     profs = {n: p if isinstance(p, Profile) else Profile(harness=p) for n, p in profiles.items()}
-    keys = config.auth.keys()
+    keys = [k.encode() for k in config.auth.keys()]
     gate = _Gate(config.max_concurrent_searches)
 
     @asynccontextmanager
@@ -75,7 +80,8 @@ def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) ->
     if config.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=config.cors_origins,
                            allow_methods=["GET", "POST"],
-                           allow_headers=["Authorization", "Content-Type", "X-API-Key"])
+                           allow_headers=["Authorization", "Content-Type", "X-API-Key"],
+                           expose_headers=["X-Search-Profile"])
 
     async def require_key(authorization: str | None = Header(default=None),
                           x_api_key: str | None = Header(default=None)) -> None:
@@ -84,7 +90,8 @@ def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) ->
         token = x_api_key
         if authorization and authorization.lower().startswith("bearer "):
             token = authorization[7:].strip()
-        if not token or not any(hmac.compare_digest(token, k) for k in keys):
+        candidate = (token or "").encode("utf-8", "surrogateescape")
+        if not token or not any(hmac.compare_digest(candidate, k) for k in keys):
             raise HTTPException(401, "missing or invalid API key",
                                 headers={"WWW-Authenticate": "Bearer"})
 
@@ -180,17 +187,18 @@ def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) ->
                                             include_content=req.include_content, **opts)
         except HarnessError as exc:
             raise HTTPException(400, scrub(str(exc))) from exc
-        if not gate.try_acquire():
-            raise HTTPException(429, "too many concurrent searches")
 
         def render(event: Any) -> str:
             return render_event(event, include_content=req.include_content,
                                 include_trace=req.include_trace)
 
         body = sse_body(stream, render, keepalive_s=config.keepalive_s, receive=request.receive)
-        return _GatedStreamingResponse(body, release=gate.release, media_type="text/event-stream",
-                                       headers={"Cache-Control": "no-cache",
-                                                "X-Accel-Buffering": "no",
-                                                "X-Search-Profile": name})
+        response = _GatedStreamingResponse(
+            body, release=gate.release, media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                     "X-Search-Profile": name})
+        if not gate.try_acquire():
+            raise HTTPException(429, "too many concurrent searches")
+        return response
 
     return app

@@ -187,3 +187,94 @@ async def test_stream_releases_slot(docs_backend):
     async with client(app) as c:
         for _ in range(3):
             assert (await c.post("/v1/search/stream", json={"question": "q"})).status_code == 200
+
+
+async def test_non_ascii_api_key_is_401_not_500(app_factory, monkeypatch):
+    monkeypatch.setenv("SEARCH_KEYS", "k-one")
+    app = app_factory(config=service(auth=AuthConfig(type="api_key", keys_env="SEARCH_KEYS")))
+    async with client(app) as c:
+        x = await c.post("/v1/search", json={"question": "q"},
+                         headers={"X-API-Key": "k\xe9y".encode("latin-1")})
+        bearer = await c.post("/v1/search", json={"question": "q"},
+                              headers={"Authorization": "Bearer k\xe9y".encode("latin-1")})
+    assert x.status_code == 401 and bearer.status_code == 401
+
+
+async def test_auth_header_precedence(app_factory, monkeypatch):
+    monkeypatch.setenv("SEARCH_KEYS", "k-one")
+    app = app_factory(config=service(auth=AuthConfig(type="api_key", keys_env="SEARCH_KEYS")))
+    async with client(app) as c:
+        bad_bearer = await c.get("/v1/profiles", headers={
+            "Authorization": "Bearer nope", "X-API-Key": "k-one"})
+        basic = await c.get("/v1/profiles", headers={
+            "Authorization": "Basic abc", "X-API-Key": "k-one"})
+    assert bad_bearer.status_code == 401 and basic.status_code == 200
+
+
+async def test_stream_disconnect_with_blocked_send_cancels_search_and_frees_slot(
+        docs_backend, monkeypatch):
+    from agentic_search.core.harness import HarnessSettings
+
+    entered, cancelled = asyncio.Event(), asyncio.Event()
+    mode = {"slow": True}
+
+    async def execute(op):
+        if not mode["slow"]:
+            return []
+        entered.set()
+        try:
+            await asyncio.sleep(600)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return []
+
+    docs_backend.execute = execute
+    import agentic_search.server.app as app_module
+
+    real_sse_body, bodies = app_module.sse_body, []  # strong refs: GC must not rescue the test
+
+    def keep(*args, **kwargs):
+        bodies.append(real_sse_body(*args, **kwargs))
+        return bodies[-1]
+
+    monkeypatch.setattr(app_module, "sse_body", keep)
+    h = make_harness(docs_backend, settings=HarnessSettings(call_timeout=600))
+    app = create_app(service(max_concurrent_searches=1, keepalive_s=30), {"demo": h})
+    scope = {"type": "http", "method": "POST", "path": "/v1/search/stream",
+             "headers": [(b"content-type", b"application/json")], "query_string": b"",
+             "http_version": "1.1", "scheme": "http", "server": ("test", 80),
+             "client": ("t", 1), "root_path": "",
+             "asgi": {"version": "3.0", "spec_version": "2.4"}}
+    disconnect, blocked, sent_body, requested = asyncio.Event(), asyncio.Event(), [], []
+
+    async def receive():
+        if not requested:
+            requested.append(1)
+            return {"type": "http.request", "body": b'{"question": "q"}', "more_body": False}
+        await disconnect.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if message["type"] == "http.response.body":
+            if sent_body:
+                blocked.set()
+                await disconnect.wait()  # write-paused transport, then the peer is gone
+                raise OSError("client disconnected")
+            sent_body.append(message)
+
+    task = asyncio.create_task(app(scope, receive, send))
+    await asyncio.wait_for(entered.wait(), 5)
+    await asyncio.wait_for(blocked.wait(), 5)
+    assert not cancelled.is_set()
+    disconnect.set()
+    await asyncio.wait_for(cancelled.wait(), 5)
+    mode["slow"] = False
+    async with client(app) as c:
+        for _ in range(100):  # the slot comes back once the response has wound down
+            again = await c.post("/v1/search", json={"question": "q"})
+            if again.status_code != 429:
+                break
+            await asyncio.sleep(0.05)
+    assert again.status_code == 200
+    task.cancel()
