@@ -81,3 +81,17 @@ async def test_pool_open_cancelled_closes_pool(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await backend._get_pool()
     assert closed == [True] and backend._pool is None
+
+
+def test_lexical_uses_stored_tsvector_column():
+    from agentic_search.backends.sql_backend import TableInfo
+    from agentic_search.core.types import FieldSpec, FieldType, Lexical
+
+    b = PostgresBackend("pg", "postgresql://u:p@h/db")
+    table = TableInfo(name="docs", id_column="id", fields=[
+        FieldSpec(name="id", type=FieldType.KEYWORD), FieldSpec(name="body", type=FieldType.TEXT, searchable=True)])
+    b._tsv = {"docs": "search"}
+    sql, _ = b._lexical_sql(Lexical(source="pg", text="headache"), table, 5)
+    assert '"search" @@ websearch_to_tsquery' in sql and "to_tsvector" not in sql
+    sql2, _ = b._lexical_sql(Lexical(source="pg", text="headache", fields=["body"]), table, 5)
+    assert "to_tsvector('english', concat_ws(' ', \"body\"))" in sql2

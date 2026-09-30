@@ -129,3 +129,10 @@ def test_backend_embedder_reference_must_exist(tmp_path):
                                      "embedders": {"docs.embedding": "nope"}}],
                        "driver": {"type": "openai_compat", "model": "m", "base_url": "http://x/v1"}},
                       base_dir=tmp_path)
+
+
+def test_constructor_value_errors_become_config_errors(tmp_path):
+    with pytest.raises(ConfigError, match="invalid"):
+        build_harness({"backends": [{"name": "bq", "type": "bigquery", "project": "bad project!", "dataset": "d"}],
+                       "driver": {"type": "openai_compat", "model": "m", "base_url": "http://x/v1"}},
+                      base_dir=tmp_path)

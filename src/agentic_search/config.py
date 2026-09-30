@@ -62,6 +62,10 @@ def build(kind: str, cfg: dict[str, Any], ctx: BuildContext) -> Any:
         return factory(cfg, ctx)
     except KeyError as exc:
         raise ConfigError(f"{kind} {type_!r} config is missing required key {exc}") from exc
+    except ValueError as exc:
+        if isinstance(exc, ConfigError):
+            raise
+        raise ConfigError(f"{kind} {type_!r} config is invalid: {exc}") from exc
 
 
 def _price(cfg: dict[str, Any]) -> tuple[float, float] | None:
@@ -101,7 +105,8 @@ def _postgres(cfg: dict[str, Any], ctx: BuildContext) -> Any:
     from agentic_search.backends.postgres import PostgresBackend
     return PostgresBackend(cfg["name"], cfg["dsn"],
                            **_backend_kwargs(cfg, ctx, _SQL_KEYS + ("schema", "text_search_config",
-                                                                    "pool_size", "statement_timeout_ms")))
+                                                                    "pool_size", "statement_timeout_ms",
+                                                                    "tsvector_columns")))
 
 
 def _mysql(cfg: dict[str, Any], ctx: BuildContext) -> Any:

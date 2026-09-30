@@ -50,8 +50,11 @@ class PostgresBackend(SqlBackend):
 
     def __init__(self, name: str, dsn: str, *, schema: str = "public",
                  text_search_config: str = "english", pool_size: int = 4,
-                 statement_timeout_ms: int = 30_000, connect_timeout_s: float = 15, **kwargs: Any):
+                 statement_timeout_ms: int = 30_000, connect_timeout_s: float = 15,
+                 tsvector_columns: dict[str, str] | None = None, **kwargs: Any):
         super().__init__(name, **kwargs)
+        self.tsvector_columns = dict(tsvector_columns or {})
+        self._tsv: dict[str, str] = {}
         if not _CONFIG.match(text_search_config):
             raise ValueError(f"invalid text_search_config {text_search_config!r}")
         register_secret(dsn)
@@ -150,13 +153,18 @@ class PostgresBackend(SqlBackend):
                 by_table.setdefault(r["table_name"], []).append(r)
         tables: dict[str, TableInfo] = {}
         skipped: list[str] = []
+        tsv_of: dict[str, str] = {}
         for tname, rows in by_table.items():
             id_col = self.id_columns.get(tname) or self._single_pk(tname, pk_of.get(tname), skipped)
             if id_col is None:
                 continue
             fields = []
+            tsv_cols: list[str] = []
             for r in rows:
                 name, udt = r["column_name"], r["udt_name"]
+                if udt == "tsvector":
+                    tsv_cols.append(name)
+                    continue
                 if udt in _SKIP_UDTS:
                     continue
                 if udt == "vector":
@@ -167,10 +175,16 @@ class PostgresBackend(SqlBackend):
                 if r["data_type"] in _TYPES and ftype in (FieldType.KEYWORD, FieldType.BOOL) and name != id_col:
                     samples = await self._samples(tname, name)
                 fields.append(FieldSpec(name=name, type=ftype, sample_values=samples, **field_flags(ftype)))
+            configured = self.tsvector_columns.get(tname)
+            if configured in tsv_cols:
+                tsv_of[tname] = configured
+            elif configured is None and len(tsv_cols) == 1:
+                tsv_of[tname] = tsv_cols[0]
             est = est_of.get(tname)
             tables[tname] = TableInfo(name=tname, id_column=id_col, fields=fields,
                                       count=await self._count(tname, est if est and est > 0 else None))
         self.skipped = skipped
+        self._tsv = tsv_of
         return tables
 
     # ---- lexical / vector ------------------------------------------------------
@@ -183,8 +197,12 @@ class PostgresBackend(SqlBackend):
         if not terms:
             raise BackendError("lexical query has no searchable terms")
         query_text = op.text if '"' in op.text else " or ".join(terms)
-        doc = (f"to_tsvector('{self.ts_config}', concat_ws(' ', "
-               f"{', '.join(quote_ident(c, 'postgres') for c in fields)}))")
+        stored = None if op.fields else self._tsv.get(table.name)
+        if stored is not None:  # a stored tsvector column can use its GIN index
+            doc = quote_ident(stored, "postgres")
+        else:
+            doc = (f"to_tsvector('{self.ts_config}', concat_ws(' ', "
+                   f"{', '.join(quote_ident(c, 'postgres') for c in fields)}))")
         p = Params("postgres")
         score = f"ts_rank({doc}, websearch_to_tsquery('{self.ts_config}', {p.add(query_text)}))"
         match = f"{doc} @@ websearch_to_tsquery('{self.ts_config}', {p.add(query_text)})"

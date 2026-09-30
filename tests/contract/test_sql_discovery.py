@@ -117,3 +117,25 @@ async def test_opensearch_multi_index_ids_are_namespaced():
         await b.close()
         await admin.indices.delete(index="authors", ignore_unavailable=True)
         await admin.close()
+
+
+async def test_postgres_uses_stored_tsvector_column():
+    from agentic_search.backends.postgres import PostgresBackend
+    from agentic_search.core.types import Lexical
+
+    await _pg_exec(
+        "DROP TABLE IF EXISTS tsv_docs",
+        "CREATE TABLE tsv_docs (id TEXT PRIMARY KEY, title TEXT, body TEXT, search tsvector "
+        "GENERATED ALWAYS AS (to_tsvector('english', coalesce(title, '') || ' ' || coalesce(body, ''))) STORED)",
+        "CREATE INDEX tsv_docs_search ON tsv_docs USING GIN (search)",
+        *[f"INSERT INTO tsv_docs (id, title, body) VALUES ('{i}', '{t}', '{b}')" for i, t, b, _, _ in corpus.ROWS])
+    b = PostgresBackend("pg", corpus.PG_DSN, tables=["tsv_docs"])
+    try:
+        m = await b.discover()
+        assert b._tsv == {"tsv_docs": "search"}
+        assert m.resolve_collection("tsv_docs").field("search") is None  # not exposed as a field
+        hits = await b.execute(Lexical(source="pg", collection="tsv_docs", text="headache"))
+        assert {h.doc_id for h in hits} == {"d1", "d4"} and all(h.raw_score for h in hits)
+    finally:
+        await b.close()
+        await _pg_exec("DROP TABLE IF EXISTS tsv_docs")
