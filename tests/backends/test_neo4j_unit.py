@@ -52,23 +52,41 @@ def test_lucene_query_is_or_of_lowercase_terms():
         lucene_query("!!!")
 
 
-async def test_traverse_validates_identifiers(monkeypatch):
+def _traverse_backend(monkeypatch):
     from agentic_search.backends import neo4j as mod
 
     b = mod.Neo4jBackend("neo", "bolt://localhost:1")
-    schema = mod._Schema(labels={"docs": mod._Label(name="docs", properties={"id": None}),
+    schema = mod._Schema(labels={"docs": mod._Label(name="docs", properties={"id": None, "type": None}),
                                  "conditions": mod._Label(name="conditions", properties={"id": None})},
                          relationship_types=["TREATS"])
 
     async def fake_schema():
         return schema
 
+    async def no_query(*args, **kwargs):
+        raise AssertionError("query issued")
+
     monkeypatch.setattr(b, "_ensure_schema", fake_schema)
-    for bad in (dict(rel_types=["TREATS`]->(x) DELETE x //"]), dict(target_label="nope"),
-                dict(collection="nope")):
+    monkeypatch.setattr(b, "_read", no_query)
+    return b
+
+
+async def test_traverse_validates_identifiers(monkeypatch):
+    b = _traverse_backend(monkeypatch)
+    cases = [(dict(rel_types=["TREATS`]->(x) DELETE x //"]), "unknown relationship types"),
+             (dict(target_label="nope"), "unknown target label"),
+             (dict(collection="nope"), "unknown collection")]
+    for bad, message in cases:
         kwargs = {"rel_types": ["TREATS"], **bad}
-        with pytest.raises(BackendError):
+        with pytest.raises(BackendError, match=message):
             await b.execute(Traverse(source="neo", start=Eq(field="id", value="h"), **kwargs))
+
+
+async def test_traverse_filter_requires_target_label(monkeypatch):
+    b = _traverse_backend(monkeypatch)
+    with pytest.raises(BackendError, match="traverse filter requires target_label"):
+        await b.execute(Traverse(source="neo", collection="conditions", start=Eq(field="id", value="h"),
+                                 rel_types=["TREATS"], filter=Eq(field="type", value="zzz")))
 
 
 async def test_missing_extra_is_backend_error(monkeypatch):

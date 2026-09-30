@@ -528,7 +528,10 @@ class Neo4jBackend:
         params: dict[str, Any] = {"lim": min(op.limit, self.max_rows)}
         start_cond = filter_cypher(op.start, params, start_props, "s")
         filters = [start_cond]
-        if op.filter is not None and op.target_label is not None:
+        if op.filter is not None:
+            if op.target_label is None:
+                raise BackendError("traverse filter requires target_label "
+                                   "(end-node properties are only known per label)")
             filters.append(filter_cypher(op.filter, params, set(schema.labels[op.target_label].properties), "n"))
         rels = "|".join(quote_name(t) for t in op.rel_types)
         rel = f"[{':' + rels if rels else ''}*1..{int(op.depth)}]"
