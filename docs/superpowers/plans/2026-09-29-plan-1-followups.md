@@ -41,3 +41,13 @@ the named plan ships the feature that exposes them.
 ## Status after Plan 3
 - Done: hooked backend embeddings (Task 2); Postgres stored tsvector and ConfigError for invalid values (Task 8).
 - Open: live runs of BigQuery, Vertex, OpenAI/TEI embeddings, TypeSafe and Azure/GCP auth with real credentials; Neo4j Enterprise/Aura/TLS; auth-enabled Milvus.
+
+## Plan 3 final review — deferred
+- Hook payload shape for backend document embeddings (`HookedEmbedder` → `before_model_call`).
+- Default embedder ids.
+- Postgres tsvector logging.
+- `CachedEmbedder`-over-`HookedEmbedder` rebinding.
+- httpx `AsyncClient` event-loop binding (embedders, TypeSafe).
+- Neo4j regex wrapper can be escaped by unbalanced parentheses (semantics only; the pattern is a `$param`).
+- Milvus `_samples` reads only a 1000-row slice (`SAMPLE_SCAN_MAX`) for distinct sample values.
+- `OpenAICompatClient`/`AnthropicClient` expose no `close()`, so `Harness.close` cannot release their SDK clients.

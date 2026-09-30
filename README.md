@@ -68,7 +68,8 @@ Or from YAML: `from agentic_search.config import load_harness`. The spec §7 sho
 | `neo4j` | `neo4j` | FULLTEXT index | VECTOR index | collections are labels; `traverse`; READ sessions; native Cypher |
 | `milvus` | `milvus` | BM25 function (sparse) | ANN | collections map 1:1; no regex/aggregate |
 
-All backends support filters, regex, aggregates (`count`, `sum|avg|min|max:<column>`) and fetch.
+Every backend supports filters and fetch. All except Milvus also support regex and aggregates
+(`count`, `sum|avg|min|max:<column>`); `traverse` is Neo4j-only.
 Set `native_query: true` on a backend to let the planner run read-only native SQL / search bodies;
 they pass `backends/native_guard.py` (single SELECT, no DML/DDL/locks/scripts, row cap) first.
 Vector columns need `embedders: {<table>.<column>: <embedder id>}` so queries are embedded with the
