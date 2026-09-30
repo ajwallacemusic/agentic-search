@@ -36,7 +36,8 @@ class SearchRequest(BaseModel):
 
     profile: str | None = None
     question: str = Field(min_length=1, max_length=10_000)
-    images: list[ImageInput] = Field(default_factory=list)
+    # A hard bound independent of config; `ServiceConfig.max_images` is the effective limit.
+    images: list[ImageInput] = Field(default_factory=list, max_length=32)
     sources: list[str] | None = None
     mode: Literal["retrieval", "harness", "model"] | None = None
     top_k: int = Field(default=20, ge=1, le=1000)

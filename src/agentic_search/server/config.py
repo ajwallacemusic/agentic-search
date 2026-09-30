@@ -53,6 +53,13 @@ class ServiceConfig(BaseModel):
     keepalive_s: float = Field(default=15.0, gt=0)
     max_image_bytes: int = Field(default=10_000_000, ge=1)
     max_images: int = Field(default=4, ge=0)
+    max_body_bytes: int | None = Field(default=None, ge=1)
+
+    def body_limit(self) -> int:
+        """`max_body_bytes`, or by default room for `max_images` base64 images plus 64 KiB."""
+        if self.max_body_bytes is not None:
+            return self.max_body_bytes
+        return self.max_images * self.max_image_bytes * 4 // 3 + 65_536
 
 
 class ProfileLimits(BaseModel):

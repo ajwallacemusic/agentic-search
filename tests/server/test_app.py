@@ -297,3 +297,70 @@ async def test_stream_disconnect_with_blocked_send_cancels_search_and_frees_slot
             await asyncio.sleep(0.05)
     assert again.status_code == 200
     task.cancel()
+
+
+def _keyed(monkeypatch, **kw):
+    monkeypatch.setenv("SEARCH_KEYS", "k-one")
+    return service(auth=AuthConfig(type="api_key", keys_env="SEARCH_KEYS"), **kw)
+
+
+async def test_auth_is_checked_before_the_body_is_read(app_factory, monkeypatch):
+    app = app_factory(config=_keyed(monkeypatch))
+    async with client(app) as c:
+        malformed = await c.post("/v1/search", content=b"{not json" * 1000,
+                                 headers={"content-type": "application/json"})
+        huge = await c.post("/v1/search/stream", content=b"x" * 5_000_000)
+    for r in (malformed, huge):
+        assert r.status_code == 401, r.text
+        assert r.json() == {"detail": "missing or invalid API key"}
+        assert r.headers["www-authenticate"] == "Bearer"
+    # ASGI-direct: a request without a key is refused without ever calling receive().
+    calls, sent = [], []
+
+    async def receive():
+        calls.append(1)
+        return {"type": "http.request", "body": b"{}", "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "method": "POST", "path": "/v1/search", "raw_path": b"/v1/search",
+             "headers": [(b"content-type", b"application/json")], "query_string": b"",
+             "http_version": "1.1", "scheme": "http", "server": ("test", 80),
+             "client": ("t", 1), "root_path": "", "asgi": {"version": "3.0"}}
+    await asyncio.wait_for(app(scope, receive, send), 5)
+    assert calls == [] and sent[0]["status"] == 401
+
+
+async def test_body_size_cap(app_factory, monkeypatch):
+    app = app_factory(config=_keyed(monkeypatch, max_body_bytes=1000))
+    key = {"X-API-Key": "k-one"}
+
+    async def chunks():
+        for _ in range(10):
+            yield b" " * 200
+
+    async with client(app) as c:
+        declared = await c.post("/v1/search", content=b" " * 2000,
+                                headers={**key, "content-type": "application/json"})
+        chunked = await c.post("/v1/search/stream", content=chunks(),
+                               headers={**key, "content-type": "application/json"})
+        ok = await c.post("/v1/search", json={"question": "q"}, headers=key)
+        profiles = await c.get("/v1/profiles", headers=key)
+    assert "content-length" not in chunked.request.headers
+    for r in (declared, chunked):
+        assert r.status_code == 413, r.text
+        assert r.json() == {"detail": "request body too large"}
+    assert ok.status_code == 200 and profiles.status_code == 200
+
+
+def test_body_cap_default_and_image_count_bound():
+    from pydantic import ValidationError
+
+    from agentic_search.server.models import SearchRequest
+
+    assert service().body_limit() == 4 * 10_000_000 * 4 // 3 + 65_536
+    assert service(max_images=1, max_image_bytes=300).body_limit() == 400 + 65_536
+    assert service(max_body_bytes=77).body_limit() == 77
+    with pytest.raises(ValidationError):
+        SearchRequest(question="q", images=[{"data": "AA=="}] * 33)

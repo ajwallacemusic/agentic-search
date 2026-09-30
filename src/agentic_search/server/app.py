@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable
 
@@ -16,6 +15,7 @@ from agentic_search import __version__
 from agentic_search.core.harness import Harness, HarnessError
 from agentic_search.core.secrets import scrub
 from agentic_search.server.config import Profile, ServiceConfig, check_profiles
+from agentic_search.server.guard import UNAUTHORIZED, RequestGuard, key_matches
 from agentic_search.server.models import (
     RequestError,
     SearchRequest,
@@ -77,6 +77,9 @@ def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) ->
         await asyncio.gather(*(p.harness.close() for p in profs.values()), return_exceptions=True)
 
     app = FastAPI(title="agentic-search", version=__version__, lifespan=lifespan)
+    # Added before CORS, so CORS is the outer layer and its headers reach 401/413 answers too.
+    app.add_middleware(RequestGuard, keys=None if config.auth.type == "none" else keys,
+                       max_body_bytes=config.body_limit())
     if config.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=config.cors_origins,
                            allow_methods=["GET", "POST"],
@@ -85,15 +88,12 @@ def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) ->
 
     async def require_key(authorization: str | None = Header(default=None),
                           x_api_key: str | None = Header(default=None)) -> None:
+        # RequestGuard already checked the key before the body was read; this stays as a
+        # second line of defence for the routes themselves.
         if config.auth.type == "none":
             return
-        token = x_api_key
-        if authorization and authorization.lower().startswith("bearer "):
-            token = authorization[7:].strip()
-        candidate = (token or "").encode("utf-8", "surrogateescape")
-        if not token or not any(hmac.compare_digest(candidate, k) for k in keys):
-            raise HTTPException(401, "missing or invalid API key",
-                                headers={"WWW-Authenticate": "Bearer"})
+        if not key_matches(keys, authorization, x_api_key):
+            raise HTTPException(401, UNAUTHORIZED, headers={"WWW-Authenticate": "Bearer"})
 
     def resolve(name: str | None) -> tuple[str, Profile]:
         if name is None:

@@ -54,6 +54,7 @@ standard and URL-safe alphabets (`val_json_bytes="base64"`). Python-mode dumps k
 | `models.py` | Request models (`SearchRequest`, `StreamRequest`, `ImageInput`, `BudgetOverride`), `build_query`, `resolve_budget`, `lean_result`, `render_event`, `RequestError` |
 | `sse.py` | `format_sse`, `KEEPALIVE`, `sse_body` (framing, keep-alives, disconnect → cancel) |
 | `app.py` | `create_app(config, profiles)`: routes, auth, capacity gate, lifespan |
+| `guard.py` | `RequestGuard` (API key before body, body size cap), `key_matches` |
 | `demo.py` | `demo_harness`, `demo_app`: an in-memory service needing no network or models, used for fixtures and client end-to-end tests |
 | `schema.py` | `event_schema`, `fixture_streams`, `render_files`, `export` |
 | `cli.py` | `serve` and `export-schema` subcommands |
@@ -69,6 +70,7 @@ service:
   keepalive_s: 15                                     # default 15, >0
   max_image_bytes: 10000000                           # default 10 MB per image
   max_images: 4                                       # default 4 per request
+  max_body_bytes: 53398869                            # default max_images*max_image_bytes*4//3 + 65536
 profiles:
   general: {<harness config as build_harness accepts>}
   strict:
@@ -91,7 +93,19 @@ profiles:
 
 All `/v1/*` routes require auth when `auth.type == api_key`. The key is sent as
 `Authorization: Bearer <key>` or `X-API-Key: <key>` and compared in constant time. A failure
-returns `401` with `WWW-Authenticate: Bearer`.
+returns `401` `{"detail": "missing or invalid API key"}` with `WWW-Authenticate: Bearer`.
+
+**Auth before body, and a body cap** (final-review ruling). A pure-ASGI middleware
+(`server/guard.py`, `RequestGuard`), installed by `create_app` inside the CORS middleware, runs
+for `/v1/*`:
+- It checks the key from the headers *before reading the body*, so an unauthenticated client
+  gets `401` (never `422`) and cannot make the service buffer or parse a large body.
+- It enforces `service.max_body_bytes` (default `max_images * max_image_bytes * 4 // 3 +
+  65_536`, room for the maximum number of base64 images plus 64 KiB): a `Content-Length` over
+  the cap, or a streamed (chunked) body that grows past it, gets `413`
+  `{"detail": "request body too large"}` and the body is not read further.
+- It then replays the body to the app; later `receive()` calls pass through, so disconnect
+  detection is unaffected. The route-level key check remains as a second line of defence.
 
 | Route | Response |
 |---|---|
@@ -105,7 +119,8 @@ returns `401` with `WWW-Authenticate: Bearer`.
 `SearchRequest` (extra fields forbidden):
 - `profile?`
 - `question` (1–10 000 characters)
-- `images?: [{data, mime}]`, where `mime` matches `^image/…`
+- `images?: [{data, mime}]`, where `mime` matches `^image/…`; at most 32 entries (a hard bound
+  checked by validation, `422`); `max_images` remains the effective, configurable limit (`400`)
 - `sources?`
 - `mode?: retrieval|harness|model`
 - `top_k` (1–1000, default 20)
@@ -217,7 +232,8 @@ free port:
 - Lean results and the `include_content`/`include_trace` flags; the profile content ban.
 - Profile resolution and the default-profile check.
 - API-key auth (bearer, `X-API-Key`, wrong, missing), an unauthenticated `healthz`, and a missing
-  keys variable.
+  keys variable. A request without a key gets `401` before `receive()` is ever called, even with a
+  malformed or huge body; `Content-Length` over the cap and a chunked body over the cap get `413`.
 - `/v1/profiles` contents; an unavailable profile gives `503`, and health reports `degraded`.
 - Budget clamping end to end.
 - Images: decoded inline, invalid base64 `400`, `uri` `422`, too many `400`.
