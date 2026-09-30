@@ -86,7 +86,8 @@ HTML §9.2.6:
 - `headers` are added to every request, merged case-insensitively through a `Headers` object; the
   client's own `Accept`, `Content-Type` (when there is a body) and `Authorization` (when `apiKey`
   is set) replace any user header of the same name.
-- `fetch` defaults to the global one, and a `TypeError` is thrown if none exists.
+- `fetch` defaults to the global one bound to `globalThis`, and a `TypeError` is thrown if none
+  exists. A user-supplied `fetch` is called as is (a plain call, not rebound).
 
 | Method | Request |
 |---|---|

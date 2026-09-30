@@ -107,11 +107,12 @@ export class AgenticSearchClient {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.apiKey = options.apiKey;
     this.headers = options.headers ?? {};
-    const f = options.fetch ?? globalThis.fetch;
-    if (typeof f !== "function") {
+    if (!options.fetch && typeof globalThis.fetch !== "function") {
       throw new TypeError("no fetch implementation available; pass `fetch` in the options");
     }
-    this.fetchImpl = f.bind(globalThis);
+    // Only the global fetch is bound (browsers require `this` to be the global object); a
+    // user-supplied fetch is used as is.
+    this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
   health(options: CallOptions = {}): Promise<Health> {
@@ -186,7 +187,8 @@ export class AgenticSearchClient {
     const init: RequestInit = { method, headers };
     if (body !== undefined) init.body = JSON.stringify(body);
     if (signal) init.signal = signal;
-    const response = await this.fetchImpl(`${this.baseUrl}${path}`, init);
+    const fetchImpl = this.fetchImpl; // called as a plain function, not as a method of this client
+    const response = await fetchImpl(`${this.baseUrl}${path}`, init);
     if (!response.ok) {
       const text = await response.text();
       const { summary, detail } = describeErrorBody(text, response);

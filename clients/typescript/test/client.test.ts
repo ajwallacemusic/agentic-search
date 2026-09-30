@@ -202,6 +202,25 @@ describe("AgenticSearchClient", () => {
     expect(err).toMatchObject({ name: "AbortError" });
   });
 
+  it("calls a user-supplied fetch as is, without binding it to globalThis", async () => {
+    const fetch = fakeFetch(() => Response.json({ status: "ok", version: "0.1.0" }));
+    const client = new AgenticSearchClient({ baseUrl: "http://svc", fetch });
+    await client.health();
+    expect(fetch.mock.contexts[0]).toBeUndefined();
+  });
+
+  it("binds the global fetch to globalThis when none is supplied", async () => {
+    const global = fakeFetch(() => Response.json({ status: "ok", version: "0.1.0" }));
+    vi.stubGlobal("fetch", global);
+    try {
+      const client = new AgenticSearchClient({ baseUrl: "http://svc" });
+      expect((await client.health()).status).toBe("ok");
+      expect(global.mock.contexts[0]).toBe(globalThis);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("gets profiles, health and one-shot search", async () => {
     const fetch = fakeFetch((url) => {
       if (url.endsWith("/v1/profiles")) return Response.json({ profiles: [{ name: "demo" }] });
