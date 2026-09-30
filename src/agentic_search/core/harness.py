@@ -12,9 +12,10 @@ from pydantic import BaseModel
 from agentic_search.backends.base import Backend
 from agentic_search.core.annotations import apply_annotations
 from agentic_search.core.hooks import Hooks, SourcePolicy
+from agentic_search.core.result import RankedHit, SearchResult
 from agentic_search.core.secrets import scrub
-from agentic_search.core.state import Candidate, SearchState, Trace, Usage
-from agentic_search.core.types import Budget, Hit, Manifest, ModelUsage, Query, StopReason
+from agentic_search.core.state import Candidate, SearchState
+from agentic_search.core.types import Budget, Manifest, ModelUsage, Query, StopReason
 from agentic_search.embedders.base import Embedder, EmbedderRegistry
 from agentic_search.models.base import (
     Action,
@@ -50,26 +51,6 @@ class HarnessSettings(BaseModel):
     decider_timeout: float = 60.0
     min_new_relevant: int = 1
     discover_timeout: float | None = 300.0
-
-
-class RankedHit(BaseModel):
-    hit: Hit
-    score: float
-    p_relevant: float | None = None
-    rationale: str | None = None
-    judged: bool = False
-
-
-class SearchResult(BaseModel):
-    question: Query
-    hits: list[RankedHit]
-    stop_reason: StopReason
-    usage: Usage
-    trace: Trace
-    mode: str
-
-    def keys(self) -> list[str]:
-        return [h.hit.key for h in self.hits]
 
 
 class _DelegateRuntime:

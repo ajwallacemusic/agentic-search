@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, Field, PrivateAttr
 
+from agentic_search.core.emitter import EventEmitter, NullEmitter
 from agentic_search.core.secrets import scrub_data
 from agentic_search.core.types import Budget, Hit, Manifest, ModelUsage, OpRef, Query, ToolError
 from agentic_search.models.base import Decision, TurnSummary
@@ -137,6 +138,7 @@ class SearchState:
     last_decision: Decision | None = None
     last_errors: list[ToolError] = field(default_factory=list)
     started: float = field(default_factory=time.monotonic)
+    emitter: EventEmitter = field(default_factory=NullEmitter)
 
     def elapsed(self) -> float:
         return time.monotonic() - self.started
