@@ -141,12 +141,18 @@ returns `401` with `WWW-Authenticate: Bearer`.
 
 ## 6. Lean result
 
-The JSON view of a `SearchResult` is `result.model_dump(mode="json")`, with two changes:
+The JSON view of a `SearchResult` is `result.model_dump(mode="json")`, with three changes:
 - `trace` is removed unless `include_trace`.
 - Each `hits[i].hit.content` key is removed unless `include_content`.
+- **Question images are not echoed** (final-review ruling): every image part of `question`
+  keeps `kind`, `uri` and `mime` but has `data: null`. The client already has its images, and
+  echoing them could return up to `max_images × max_image_bytes` (about 53 MB of base64 at the
+  defaults). Images inside hit content are unaffected and follow `include_content`.
 
 The `/v1/search` body is exactly this lean result. The streamed `search_finished` event carries
-it as `result`. Every other event is its spec-1 JSON unchanged. `HitSummary.content` in
+it as `result`. `search_started.question` gets the same image treatment. Every other event is
+its spec-1 JSON unchanged. A TypeScript client must therefore treat `ImagePart.data` as
+`string | null` and never expect its own question images back. `HitSummary.content` in
 snapshots is present only if the request set `include_content`, which is passed through to
 `Harness.stream`.
 
@@ -179,12 +185,13 @@ snapshots is present only if the request set `include_content`, which is passed 
   request sets include_content". A test validates every committed fixture frame's `data`
   against the committed schema (`jsonschema.Draft202012Validator`; `jsonschema` is a dev
   dependency).
-- `fixture_streams()`: runs `demo_app()` in-process with four stream requests and records each
+- `fixture_streams()`: runs `demo_app()` in-process with five stream requests and records each
   one's SSE frames as `{id, event, data}`:
   - `retrieval` (`snapshot_k` 3)
   - `harness` (`snapshot_k` 2)
   - `with_content` (retrieval with `include_content` and `include_trace`)
   - `failed` (unknown source)
+  - `image` (retrieval with one inline question image, showing it returned with `data: null`)
 
   Run-dependent values are normalised (`search_id` → `"fixture"`, `at_ms`/`duration_ms` → 0.0),
   and every float is rounded to 6 decimals, so the output is byte-stable across runs,

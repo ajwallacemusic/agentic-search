@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agentic_search.core.result import SearchResult
 from agentic_search.core.types import Budget, ImagePart, Query, TextPart
-from agentic_search.events import SearchEvent, SearchFinished
+from agentic_search.events import SearchEvent, SearchFinished, SearchStarted
 
 
 class ImageInput(BaseModel):
@@ -104,9 +104,20 @@ def resolve_budget(base: Budget, override: BudgetOverride | None,
     return Budget(**fields)
 
 
+def _without_image_bytes(question: dict[str, Any]) -> dict[str, Any]:
+    """The client already has its question images: send each back with `data` null (kind, uri
+    and mime kept) instead of echoing up to max_images * max_image_bytes."""
+    for part in question["content"]:
+        if part.get("kind") == "image":
+            part["data"] = None
+    return question
+
+
 def lean_result(result: SearchResult, *, include_content: bool, include_trace: bool) -> dict[str, Any]:
-    """The service's JSON view of a result: no trace unless asked, no hit content unless asked."""
+    """The service's JSON view of a result: no trace unless asked, no hit content unless asked,
+    and no question image bytes."""
     data = result.model_dump(mode="json", exclude=None if include_trace else {"trace"})
+    _without_image_bytes(data["question"])
     if not include_content:
         for ranked in data["hits"]:
             ranked["hit"].pop("content", None)
@@ -114,10 +125,15 @@ def lean_result(result: SearchResult, *, include_content: bool, include_trace: b
 
 
 def render_event(event: SearchEvent, *, include_content: bool, include_trace: bool) -> str:
-    """One event as a single-line JSON string; `search_finished` carries the lean result."""
+    """One event as a single-line JSON string. `search_finished` carries the lean result and
+    `search_started` its question without image bytes; other events are unchanged."""
     if isinstance(event, SearchFinished):
         data = event.model_dump(mode="json", exclude={"result"})
         data["result"] = lean_result(event.result, include_content=include_content,
                                      include_trace=include_trace)
+        return json.dumps(data, separators=(",", ":"))
+    if isinstance(event, SearchStarted):
+        data = event.model_dump(mode="json")
+        _without_image_bytes(data["question"])
         return json.dumps(data, separators=(",", ":"))
     return event.model_dump_json()

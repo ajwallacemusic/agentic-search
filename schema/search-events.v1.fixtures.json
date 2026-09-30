@@ -458,6 +458,331 @@
       "id": 17
     }
   ],
+  "image": [
+    {
+      "data": {
+        "at_ms": 0.0,
+        "budget": {
+          "max_cost_usd": null,
+          "max_seconds": 60.0,
+          "max_tokens": null,
+          "max_tool_calls": 32,
+          "max_turns": 4
+        },
+        "mode": "retrieval",
+        "question": {
+          "content": [
+            {
+              "kind": "text",
+              "text": "headache"
+            },
+            {
+              "data": null,
+              "kind": "image",
+              "mime": "image/png",
+              "uri": null
+            }
+          ]
+        },
+        "schema_version": 1,
+        "search_id": "fixture",
+        "seq": 0,
+        "setup_errors": {},
+        "sources": [
+          "docs"
+        ],
+        "turn": 0,
+        "type": "search_started"
+      },
+      "event": "search_started",
+      "id": 0
+    },
+    {
+      "data": {
+        "at_ms": 0.0,
+        "phase": "plan",
+        "schema_version": 1,
+        "search_id": "fixture",
+        "seq": 1,
+        "turn": 0,
+        "type": "phase_started"
+      },
+      "event": "phase_started",
+      "id": 1
+    },
+    {
+      "data": {
+        "at_ms": 0.0,
+        "duration_ms": 0.0,
+        "phase": "plan",
+        "schema_version": 1,
+        "search_id": "fixture",
+        "seq": 2,
+        "summary": {
+          "action": null,
+          "confidence": null,
+          "error": null,
+          "n_calls": 1,
+          "n_errors": null,
+          "n_hits": null,
+          "n_judged": null,
+          "n_new": null,
+          "n_ranked": null,
+          "n_relevant": null,
+          "note": null
+        },
+        "turn": 0,
+        "type": "phase_finished"
+      },
+      "event": "phase_finished",
+      "id": 2
+    },
+    {
+      "data": {
+        "at_ms": 0.0,
+        "phase": "query",
+        "schema_version": 1,
+        "search_id": "fixture",
+        "seq": 3,
+        "turn": 0,
+        "type": "phase_started"
+      },
+      "event": "phase_started",
+      "id": 3
+    },
+    {
+      "data": {
+        "arguments": {
+          "limit": 10,
+          "source": "docs",
+          "text": "headache"
+        },
+        "at_ms": 0.0,
+        "call_id": "t0.c0",
+        "name": "lexical_search",
+        "schema_version": 1,
+        "search_id": "fixture",
+        "seq": 4,
+        "source": "docs",
+        "turn": 0,
+        "type": "tool_call_started"
+      },
+      "event": "tool_call_started",
+      "id": 4
+    },
+    {
+      "data": {
+        "at_ms": 0.0,
+        "call_id": "t0.c0",
+        "duration_ms": 0.0,
+        "error": null,
+        "n_hits": 2,
+        "schema_version": 1,
+        "search_id": "fixture",
+        "seq": 5,
+        "turn": 0,
+        "type": "tool_call_finished"
+      },
+      "event": "tool_call_finished",
+      "id": 5
+    },
+    {
+      "data": {
+        "at_ms": 0.0,
+        "duration_ms": 0.0,
+        "phase": "query",
+        "schema_version": 1,
+        "search_id": "fixture",
+        "seq": 6,
+        "summary": {
+          "action": null,
+          "confidence": null,
+          "error": null,
+          "n_calls": 1,
+          "n_errors": 0,
+          "n_hits": 2,
+          "n_judged": null,
+          "n_new": 2,
+          "n_ranked": null,
+          "n_relevant": null,
+          "note": null
+        },
+        "turn": 0,
+        "type": "phase_finished"
+      },
+      "event": "phase_finished",
+      "id": 6
+    },
+    {
+      "data": {
+        "at_ms": 0.0,
+        "phase": "judge",
+        "schema_version": 1,
+        "search_id": "fixture",
+        "seq": 7,
+        "turn": 0,
+        "type": "phase_started"
+      },
+      "event": "phase_started",
+      "id": 7
+    },
+    {
+      "data": {
+        "at_ms": 0.0,
+        "duration_ms": 0.0,
+        "phase": "judge",
+        "schema_version": 1,
+        "search_id": "fixture",
+        "seq": 8,
+        "summary": {
+          "action": null,
+          "confidence": null,
+          "error": null,
+          "n_calls": null,
+          "n_errors": null,
+          "n_hits": null,
+          "n_judged": 2,
+          "n_new": null,
+          "n_ranked": null,
+          "n_relevant": 2,
+          "note": null
+        },
+        "turn": 0,
+        "type": "phase_finished"
+      },
+      "event": "phase_finished",
+      "id": 8
+    },
+    {
+      "data": {
+        "at_ms": 0.0,
+        "hits": [
+          {
+            "content": null,
+            "doc_id": "d1",
+            "first_turn": 0,
+            "judged": true,
+            "key": "docs:d1",
+            "p_relevant": 1.0,
+            "score": 1.0,
+            "snippet": "Aspirin reduces fever and relieves headache pain",
+            "source": "docs",
+            "title": "Aspirin"
+          }
+        ],
+        "n_relevant": 2,
+        "pool_size": 2,
+        "schema_version": 1,
+        "search_id": "fixture",
+        "seq": 9,
+        "turn": 0,
+        "type": "results_updated"
+      },
+      "event": "results_updated",
+      "id": 9
+    },
+    {
+      "data": {
+        "at_ms": 0.0,
+        "schema_version": 1,
+        "search_id": "fixture",
+        "seq": 10,
+        "turn": 0,
+        "type": "usage_updated",
+        "usage": {
+          "cost_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "tool_calls": 1,
+          "turns": 1
+        }
+      },
+      "event": "usage_updated",
+      "id": 10
+    },
+    {
+      "data": {
+        "at_ms": 0.0,
+        "result": {
+          "hits": [
+            {
+              "hit": {
+                "doc_id": "d1",
+                "metadata": {
+                  "title": "Aspirin"
+                },
+                "provenance": [
+                  {
+                    "call_id": "t0.c0",
+                    "rank": 0,
+                    "turn": 0
+                  }
+                ],
+                "raw_score": 0.0,
+                "source": "docs"
+              },
+              "judged": true,
+              "p_relevant": 1.0,
+              "rationale": "keyword match",
+              "score": 1.0
+            },
+            {
+              "hit": {
+                "doc_id": "d4",
+                "metadata": {
+                  "title": "Acetaminophen"
+                },
+                "provenance": [
+                  {
+                    "call_id": "t0.c0",
+                    "rank": 1,
+                    "turn": 0
+                  }
+                ],
+                "raw_score": 0.0,
+                "source": "docs"
+              },
+              "judged": true,
+              "p_relevant": 1.0,
+              "rationale": "keyword match",
+              "score": 0.998387
+            }
+          ],
+          "mode": "retrieval",
+          "question": {
+            "content": [
+              {
+                "kind": "text",
+                "text": "headache"
+              },
+              {
+                "data": null,
+                "kind": "image",
+                "mime": "image/png",
+                "uri": null
+              }
+            ]
+          },
+          "stop_reason": "single_pass",
+          "usage": {
+            "cost_usd": 0.0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "tool_calls": 1,
+            "turns": 1
+          }
+        },
+        "schema_version": 1,
+        "search_id": "fixture",
+        "seq": 11,
+        "stop_reason": "single_pass",
+        "turn": 0,
+        "type": "search_finished"
+      },
+      "event": "search_finished",
+      "id": 11
+    }
+  ],
   "retrieval": [
     {
       "data": {

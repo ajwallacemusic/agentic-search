@@ -7,8 +7,8 @@ import pytest
 
 from agentic_search.core.result import RankedHit, SearchResult
 from agentic_search.core.state import Trace, TraceEvent, Usage
-from agentic_search.core.types import Hit, ImagePart, Query, TextPart
-from agentic_search.events import PhaseStarted, SearchFinished
+from agentic_search.core.types import Budget, Hit, ImagePart, Query, TextPart
+from agentic_search.events import PhaseStarted, SearchFinished, SearchStarted
 from agentic_search.server.models import (
     ImageInput,
     RequestError,
@@ -253,3 +253,29 @@ class TestRenderEvent:
         output = render_event(event, include_content=False, include_trace=False)
 
         assert output == event.model_dump_json()
+
+
+class TestQuestionImagesNotEchoed:
+    """Question image bytes are replaced by null in service output; hit images are not."""
+
+    QUESTION = Query(content=[TextPart(text="q"), ImagePart(data=b"\x89PNG", mime="image/jpeg")])
+
+    def test_lean_result_nulls_question_image_data(self):
+        hit = Hit(source="s", doc_id="1", content=[ImagePart(data=b"hit-img")])
+        result = SearchResult(question=self.QUESTION, hits=[RankedHit(hit=hit, score=1.0)],
+                              stop_reason="controller_stop", usage=Usage(),
+                              trace=Trace(), mode="retrieval")
+        data = lean_result(result, include_content=True, include_trace=False)
+        assert data["question"]["content"][1] == {"kind": "image", "uri": None, "data": None,
+                                                  "mime": "image/jpeg"}
+        assert data["hits"][0]["hit"]["content"][0]["data"] == base64.b64encode(
+            b"hit-img").decode()  # hit content images still follow include_content
+
+    def test_render_event_projects_search_started(self):
+        event = SearchStarted(search_id="s", seq=0, turn=0, at_ms=0.0, question=self.QUESTION,
+                              mode="retrieval", sources=["docs"], budget=Budget())
+        data = json.loads(render_event(event, include_content=False, include_trace=False))
+        assert data["question"]["content"][1] == {"kind": "image", "uri": None, "data": None,
+                                                  "mime": "image/jpeg"}
+        assert data["question"]["content"][0] == {"kind": "text", "text": "q"}
+        assert data["type"] == "search_started" and data["budget"] == Budget().model_dump()

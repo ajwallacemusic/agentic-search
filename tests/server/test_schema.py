@@ -55,3 +55,8 @@ def test_normalise_rounds_floats_to_six_decimals():
 
     got = _normalise({"score": 0.123456789, "hits": [{"p": 1.0000004}], "n": 3, "at_ms": 5.5})
     assert got == {"score": 0.123457, "hits": [{"p": 1.0}], "n": 3, "at_ms": 0.0}
+
+
+def test_image_data_null_in_questions_is_described():
+    data = event_schema()["$defs"]["ImagePart"]["properties"]["data"]
+    assert "question" in data["description"] and "null" in data["description"]

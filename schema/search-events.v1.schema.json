@@ -232,6 +232,7 @@
               "type": "null"
             }
           ],
+          "description": "standard base64; null in the question of search_started and of a result, because the service does not echo question images back to the client",
           "title": "Data"
         },
         "kind": {

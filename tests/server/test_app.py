@@ -121,10 +121,29 @@ async def test_images_are_decoded_inline_only(app_factory, docs_backend):
             {"data": "AA=="}] * 5})
     assert ok.status_code == 200
     [img] = ok.json()["question"]["content"][1:]
-    assert base64.b64decode(img["data"]) == png
+    assert img == {"kind": "image", "uri": None, "data": None, "mime": "image/png"}  # not echoed
     assert bad.status_code == 400 and "base64" in bad.json()["detail"]
     assert uri.status_code == 422
     assert many.status_code == 400
+
+
+async def test_question_images_are_not_echoed(app_factory):
+    """The client has its images: search_started, search_finished and /v1/search carry the
+    image part with data null (kind, uri and mime kept)."""
+    app = app_factory()
+    image = {"data": base64.b64encode(b"\x89PNG-bytes").decode(), "mime": "image/jpeg"}
+    body = {"question": "q", "images": [image]}
+    async with client(app) as c:
+        one = await c.post("/v1/search", json=body)
+        stream = await c.post("/v1/search/stream", json=body)
+    frames, _ = parse_sse(stream.text)
+    started, finished = frames[0]["data"], frames[-1]["data"]
+    assert started["type"] == "search_started" and finished["type"] == "search_finished"
+    for question in (one.json()["question"], started["question"],
+                     finished["result"]["question"]):
+        text, img = question["content"]
+        assert text == {"kind": "text", "text": "q"}
+        assert img == {"kind": "image", "uri": None, "data": None, "mime": "image/jpeg"}
 
 
 async def test_harness_error_maps_to_400(app_factory):

@@ -25,6 +25,9 @@ _CASES: list[tuple[str, dict[str, Any]]] = [
     ("with_content", {"question": "fever", "mode": "retrieval", "include_content": True,
                       "include_trace": True}),
     ("failed", {"question": "anything", "sources": ["nope"]}),
+    # Question images are not echoed: the image part comes back with `data` null.
+    ("image", {"question": "headache", "mode": "retrieval", "snapshot_k": 1,
+               "images": [{"data": "iVBORw0KGgo=", "mime": "image/png"}]}),
 ]
 
 
@@ -40,6 +43,9 @@ def event_schema() -> dict[str, Any]:
         "present only when the request sets include_trace")
     defs["Hit"]["properties"]["content"]["description"] = (
         "present only when the request sets include_content")
+    defs["ImagePart"]["properties"]["data"]["description"] = (
+        "standard base64; null in the question of search_started and of a result, because "
+        "the service does not echo question images back to the client")
     return schema
 
 
