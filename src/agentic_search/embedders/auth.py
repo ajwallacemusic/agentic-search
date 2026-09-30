@@ -9,7 +9,7 @@ import asyncio
 import time
 from typing import Any, Protocol
 
-from agentic_search.core.secrets import register_secret
+from agentic_search.core.secrets import register_secret, scrub
 from agentic_search.embedders.base import EmbedderError
 
 GCP_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
@@ -78,7 +78,7 @@ class GcpAdc:
             except EmbedderError:
                 raise
             except Exception as exc:
-                raise EmbedderError(f"GCP credentials unavailable: {type(exc).__name__}: {exc}") from exc
+                raise EmbedderError(scrub(f"GCP credentials unavailable: {type(exc).__name__}: {exc}")) from exc
         register_secret(token)
         return {"Authorization": f"Bearer {token}"}
 
@@ -111,7 +111,7 @@ class AzureIdentity:
                 try:
                     access = await self._credential.get_token(self.scope)
                 except Exception as exc:
-                    raise EmbedderError(f"Azure credentials unavailable: {type(exc).__name__}: {exc}") from exc
+                    raise EmbedderError(scrub(f"Azure credentials unavailable: {type(exc).__name__}: {exc}")) from exc
                 self._token, self._expires_on = access.token, float(access.expires_on)
                 register_secret(self._token)
         return {"Authorization": f"Bearer {self._token}"}

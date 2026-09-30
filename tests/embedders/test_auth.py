@@ -102,3 +102,21 @@ def test_build_auth():
     assert isinstance(build_auth({"type": "azure_identity", "scope": "s"}), AzureIdentity)
     with pytest.raises(ValueError):
         build_auth({"type": "kerberos"})
+
+
+async def test_credential_failures_are_scrubbed():
+    from agentic_search.core.secrets import register_secret
+    register_secret("cred-secret-5150")
+
+    class BrokenGcp(FakeGoogleCreds):
+        def refresh(self, request):
+            raise RuntimeError("refresh failed for cred-secret-5150")
+
+    class BrokenAzure(FakeAzureCred):
+        async def get_token(self, scope):
+            raise RuntimeError("token failed for cred-secret-5150")
+
+    for auth in (GcpAdc(credentials=BrokenGcp()), AzureIdentity("s", credential=BrokenAzure())):
+        with pytest.raises(EmbedderError) as exc:
+            await auth.headers()
+        assert "cred-secret-5150" not in str(exc.value) and "***" in str(exc.value)

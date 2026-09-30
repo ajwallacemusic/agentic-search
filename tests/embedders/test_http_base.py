@@ -50,3 +50,33 @@ async def test_transport_errors_retry_then_fail():
     e = TEIEmbedder("http://tei", 1, client=mock(respond), max_retries=2, backoff_s=0.001)
     with pytest.raises(EmbedderError, match="ConnectError"):
         await e.embed([TextPart(text="x")], "query")
+
+
+async def test_secret_straddling_truncation_point_is_not_leaked():
+    """scrub() runs on the full text before truncation, so no fragment of a secret survives."""
+    from agentic_search.core.secrets import register_secret
+    secret = "straddle-secret-0123456789"
+    register_secret(secret)
+    body = "x" * 290 + secret
+    e = TEIEmbedder("http://tei", 1, client=mock(lambda r: httpx.Response(400, text=body)), backoff_s=0.001)
+    with pytest.raises(EmbedderError) as exc:
+        await e.embed([TextPart(text="x")], "query")
+    assert "straddle-s" not in str(exc.value)
+
+
+async def test_unreadable_image_is_embedder_error():
+    from agentic_search.embedders.http_generic import GenericHttpEmbedder
+    img = GenericHttpEmbedder("http://m", 1, request={"image": {"b64": "{{b64}}"}}, response_path="$.v",
+                              client=mock(lambda r: httpx.Response(200, json={"v": [1.0]})))
+    with pytest.raises(EmbedderError, match="http://m") as exc:
+        await img.embed([ImagePart(uri="/definitely/not/here.png")], "document")
+    assert isinstance(exc.value.__cause__, OSError)
+
+
+async def test_malformed_vectors_are_embedder_errors():
+    non_numeric = TEIEmbedder("http://tei", 1, client=mock(lambda r: httpx.Response(200, json=[["abc"]])))
+    with pytest.raises(EmbedderError, match="tei"):
+        await non_numeric.embed([TextPart(text="x")], "query")
+    not_a_list = TEIEmbedder("http://tei", 1, client=mock(lambda r: httpx.Response(200, json=[5])))
+    with pytest.raises(EmbedderError, match="tei"):
+        await not_a_list.embed([TextPart(text="x")], "query")

@@ -47,7 +47,9 @@ ACTION_CRITERIA = {
 
 
 class TypeSafeError(Exception):
-    pass
+    def __init__(self, message: str, usage: ModelUsage | None = None):
+        super().__init__(message)
+        self.usage = usage  # tokens already billed for the failed call, when known
 
 
 class TypeSafeDecider:
@@ -92,11 +94,16 @@ class TypeSafeDecider:
                     try:
                         body = resp.json()
                         usage = body.get("usage") or {}
-                        return body.get("answers") or {}, usage_with_cost(
+                        answers = body.get("answers") or {}
+                        cost = usage_with_cost(
                             int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)), self.price)
                     except (ValueError, AttributeError, TypeError) as exc:
                         raise TypeSafeError(scrub(f"{self.id}: malformed response: {type(exc).__name__}")) from exc
-                last = f"HTTP {resp.status_code}: {resp.text[:300]}"
+                    if not isinstance(answers, dict):
+                        raise TypeSafeError(f"{self.id}: malformed response: answers is not an object",
+                                            usage=cost)
+                    return answers, cost
+                last = scrub(f"HTTP {resp.status_code}: {resp.text}")[:300]
                 if resp.status_code not in RETRY_STATUSES:
                     break
             if attempt < self.max_retries:
@@ -121,14 +128,16 @@ class TypeSafeDecider:
             }
             try:
                 answers, u = await self._ask(state, questions)
-            except TypeSafeError:
-                # If at least one batch succeeded, return partial results; otherwise re-raise
+            except TypeSafeError as exc:
+                # If at least one batch succeeded, return partial results (plus whatever the failed
+                # call was billed); otherwise re-raise
                 if judgments:
-                    return JudgeResult(judgments=judgments, usage=usage)
+                    return JudgeResult(judgments=judgments, usage=usage.plus(exc.usage or ModelUsage()))
                 raise
             usage = usage.plus(u)
             for i, h in enumerate(batch):
-                p = (answers.get(f"d{i}") or {}).get("noul")
+                entry = answers.get(f"d{i}")
+                p = entry.get("noul") if isinstance(entry, dict) else None
                 if isinstance(p, (int, float)):
                     judgments.append(Judgment(key=h.key, p_relevant=min(1.0, max(0.0, float(p)))))
         return JudgeResult(judgments=judgments, usage=usage)
@@ -150,7 +159,9 @@ class TypeSafeDecider:
             "criteria": ACTION_CRITERIA,
         }}
         answers, usage = await self._ask(state, questions)
-        answer = answers.get("action") or {}
+        answer = answers.get("action")
+        if not isinstance(answer, dict):
+            answer = {}
         try:
             action = Action(answer["choice"])
         except (KeyError, ValueError) as exc:

@@ -186,3 +186,56 @@ async def test_live_typesafe():
         await d.close()
     p = {j.key: j.p_relevant for j in res.judgments}
     assert p["s:0"] > p["s:1"]
+
+
+async def test_secret_straddling_truncation_point_is_not_leaked():
+    from agentic_search.core.secrets import register_secret
+    secret = "ts-straddle-secret-98765"
+    register_secret(secret)
+    body = "x" * 290 + secret
+    d = TypeSafeDecider(api_key="ts-key-12345", client=client(lambda r: httpx.Response(400, text=body)))
+    with pytest.raises(TypeSafeError) as exc:
+        await d.judge(Query.of("q"), HITS[:1])
+    assert "ts-straddl" not in str(exc.value)
+
+
+async def test_non_dict_answers_is_typesafe_error_with_usage():
+    usage = {"input_tokens": 50, "output_tokens": 2}
+    d = TypeSafeDecider(api_key="ts-key-12345",
+                        client=client(lambda r: httpx.Response(200, json={"answers": [1, 2], "usage": usage})))
+    with pytest.raises(TypeSafeError, match="answers") as exc:
+        await d.judge(Query.of("q"), HITS[:1])
+    assert exc.value.usage.input_tokens == 50
+    view = ControllerView(question=Query.of("q"), turn=0, digest="", total_relevant=None, history=[],
+                          budget_remaining={})
+    with pytest.raises(TypeSafeError, match="answers"):
+        await d.decide(view)
+
+
+async def test_partial_batch_keeps_usage_of_malformed_paid_batch():
+    calls = {"n": 0}
+
+    def respond(req):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(200, json={"answers": {"d0": {"noul": 0.9}, "d1": {"noul": 0.2}},
+                                             "usage": {"input_tokens": 100, "output_tokens": 3}})
+        return httpx.Response(200, json={"answers": "oops", "usage": {"input_tokens": 40, "output_tokens": 1}})
+
+    d = TypeSafeDecider(api_key="ts-key-12345", client=client(respond), batch_size=2)
+    res = await d.judge(Query.of("q"), HITS)
+    assert len(res.judgments) == 2
+    assert res.usage.input_tokens == 140
+
+
+async def test_non_dict_answer_entries_are_treated_as_missing():
+    answers = {"d0": [0.9], "d1": {"noul": 0.3}, "action": "stop"}
+
+    d = TypeSafeDecider(api_key="ts-key-12345",
+                        client=client(lambda r: httpx.Response(200, json={"answers": answers})), batch_size=2)
+    res = await d.judge(Query.of("q"), HITS[:2])
+    assert [(j.key, j.p_relevant) for j in res.judgments] == [("s:1", 0.3)]
+    view = ControllerView(question=Query.of("q"), turn=0, digest="", total_relevant=None, history=[],
+                          budget_remaining={})
+    with pytest.raises(TypeSafeError, match="no usable choice"):
+        await d.decide(view)

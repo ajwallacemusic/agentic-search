@@ -56,7 +56,7 @@ class HttpEmbedder:
                         return resp.json()
                     except ValueError as exc:
                         raise EmbedderError(f"{self.id}: response is not JSON") from exc
-                last = f"HTTP {resp.status_code}: {resp.text[:300]}"
+                last = scrub(f"HTTP {resp.status_code}: {resp.text}")[:300]
                 if resp.status_code not in RETRY_STATUSES:
                     break
             if attempt < self.max_retries:
@@ -71,16 +71,24 @@ class HttpEmbedder:
 
         async def run(batch: list[Content]) -> list[Embedding]:
             async with self._sem:
-                return await self._embed_batch(batch, purpose)
+                try:
+                    return await self._embed_batch(batch, purpose)
+                except EmbedderError:
+                    raise
+                except (ValueError, TypeError, OSError, KeyError) as exc:  # e.g. unreadable image
+                    raise EmbedderError(scrub(f"{self.id}: {type(exc).__name__}: {exc}")) from exc
 
         results = await asyncio.gather(*(run(b) for b in batches))
-        vectors = [v for batch in results for v in batch]
-        if len(vectors) != len(items):
-            raise EmbedderError(f"{self.id}: expected {len(items)} vectors, got {len(vectors)}")
-        for v in vectors:
-            if len(v) != self.dim:
-                raise EmbedderError(f"{self.id}: expected dim {self.dim}, got {len(v)}")
-        return [[float(x) for x in v] for v in vectors]
+        try:
+            vectors = [v for batch in results for v in batch]
+            if len(vectors) != len(items):
+                raise EmbedderError(f"{self.id}: expected {len(items)} vectors, got {len(vectors)}")
+            for v in vectors:
+                if len(v) != self.dim:
+                    raise EmbedderError(f"{self.id}: expected dim {self.dim}, got {len(v)}")
+            return [[float(x) for x in v] for v in vectors]
+        except (ValueError, TypeError) as exc:
+            raise EmbedderError(scrub(f"{self.id}: malformed vector: {type(exc).__name__}: {exc}")) from exc
 
     async def _embed_batch(self, batch: list[Content], purpose: Purpose) -> list[Embedding]:
         raise NotImplementedError
