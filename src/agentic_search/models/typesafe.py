@@ -89,10 +89,13 @@ class TypeSafeDecider:
                 last = f"{type(exc).__name__}: {exc}"
             else:
                 if resp.status_code < 300:
-                    body = resp.json()
-                    usage = body.get("usage") or {}
-                    return body.get("answers") or {}, usage_with_cost(
-                        int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)), self.price)
+                    try:
+                        body = resp.json()
+                        usage = body.get("usage") or {}
+                        return body.get("answers") or {}, usage_with_cost(
+                            int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)), self.price)
+                    except (ValueError, AttributeError, TypeError) as exc:
+                        raise TypeSafeError(scrub(f"{self.id}: malformed response: {type(exc).__name__}")) from exc
                 last = f"HTTP {resp.status_code}: {resp.text[:300]}"
                 if resp.status_code not in RETRY_STATUSES:
                     break
@@ -116,7 +119,13 @@ class TypeSafeDecider:
                     "criteria": RELEVANCE_CRITERIA,
                 } for i in range(len(batch))
             }
-            answers, u = await self._ask(state, questions)
+            try:
+                answers, u = await self._ask(state, questions)
+            except TypeSafeError:
+                # If at least one batch succeeded, return partial results; otherwise re-raise
+                if judgments:
+                    return JudgeResult(judgments=judgments, usage=usage)
+                raise
             usage = usage.plus(u)
             for i, h in enumerate(batch):
                 p = (answers.get(f"d{i}") or {}).get("noul")
@@ -147,8 +156,10 @@ class TypeSafeDecider:
         except (KeyError, ValueError) as exc:
             raise TypeSafeError(f"{self.id}: no usable choice in response") from exc
         confidence = answer.get("confidence")
-        return Decision(action=action, usage=usage, note="typesafe",
-                        confidence=min(1.0, max(0.0, float(confidence))) if confidence is not None else 1.0)
+        confidence_val = 1.0
+        if confidence is not None and isinstance(confidence, (int, float)):
+            confidence_val = min(1.0, max(0.0, float(confidence)))
+        return Decision(action=action, usage=usage, note="typesafe", confidence=confidence_val)
 
     async def close(self) -> None:
         if self._client is not None and self._owns_client:

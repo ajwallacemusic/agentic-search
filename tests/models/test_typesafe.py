@@ -100,6 +100,81 @@ async def test_env_key_registered(monkeypatch):
     assert scrub("ts-env-key-777") == "***"
 
 
+async def test_malformed_2xx_response():
+    """2xx response with non-JSON body should raise TypeSafeError."""
+    def respond(req):
+        return httpx.Response(200, text="<html>Internal Server Error</html>")
+
+    d = TypeSafeDecider(api_key="ts-key-12345", client=client(respond))
+    with pytest.raises(TypeSafeError, match="malformed response"):
+        await d.judge(Query.of("q"), HITS[:1])
+
+
+async def test_non_numeric_confidence_in_decide():
+    """Non-numeric confidence should default to 1.0 in decide."""
+    def respond(req):
+        return httpx.Response(200, json={"answers": {"action": {"type": "choice", "choice": "broaden",
+                                                                 "confidence": "high"}}})
+
+    view = ControllerView(question=Query.of("q"), turn=0, digest="", total_relevant=None, history=[],
+                          budget_remaining={})
+    d = TypeSafeDecider(api_key="ts-key-12345", client=client(respond))
+    result = await d.decide(view)
+    assert result.action is Action.BROADEN and result.confidence == 1.0
+
+
+async def test_partial_batch_results():
+    """If second batch fails, first batch judgments should be returned."""
+    calls = {"n": 0}
+
+    def flaky(req):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # First batch succeeds
+            answers = {"d0": {"noul": 0.9}, "d1": {"noul": 0.1}}
+            return httpx.Response(200, json={"answers": answers,
+                                             "usage": {"input_tokens": 100, "output_tokens": 3}})
+        else:
+            # Second batch always fails
+            return httpx.Response(500, text="server error")
+
+    d = TypeSafeDecider(api_key="ts-key-12345", client=client(flaky), batch_size=2,
+                        backoff_s=0.001, max_retries=0)
+    res = await d.judge(Query.of("q"), HITS)  # 3 hits, 2 per batch
+    # Should have 2 judgments (first batch) not 3
+    assert len(res.judgments) == 2
+    assert [(j.key, j.p_relevant) for j in res.judgments] == [("s:0", 0.9), ("s:1", 0.1)]
+    assert res.usage.input_tokens == 100
+
+
+async def test_missing_answer_omitted():
+    """Hit with missing answer in response should be omitted."""
+    def respond(req):
+        # Only return answer for d0, not d1
+        answers = {"d0": {"noul": 0.8}}
+        return httpx.Response(200, json={"answers": answers,
+                                         "usage": {"input_tokens": 100, "output_tokens": 3}})
+
+    d = TypeSafeDecider(api_key="ts-key-12345", client=client(respond), batch_size=2)
+    res = await d.judge(Query.of("q"), HITS[:2])
+    assert len(res.judgments) == 1
+    assert res.judgments[0].key == "s:0" and res.judgments[0].p_relevant == 0.8
+
+
+async def test_401_no_retry():
+    """401 error should not retry (non-RETRY_STATUSES)."""
+    calls = {"n": 0}
+
+    def respond(req):
+        calls["n"] += 1
+        return httpx.Response(401, text="unauthorized")
+
+    d = TypeSafeDecider(api_key="ts-key-12345", client=client(respond), backoff_s=0.001)
+    with pytest.raises(TypeSafeError):
+        await d.judge(Query.of("q"), HITS[:1])
+    assert calls["n"] == 1  # Should make exactly one call, no retries
+
+
 @pytest.mark.live
 async def test_live_typesafe():
     if not os.environ.get("TYPESAFE_API_KEY"):
