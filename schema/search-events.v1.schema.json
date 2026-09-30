@@ -1,0 +1,1279 @@
+{
+  "$defs": {
+    "Budget": {
+      "properties": {
+        "max_cost_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Cost Usd"
+        },
+        "max_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 60.0,
+          "title": "Max Seconds"
+        },
+        "max_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Tokens"
+        },
+        "max_tool_calls": {
+          "default": 32,
+          "title": "Max Tool Calls",
+          "type": "integer"
+        },
+        "max_turns": {
+          "default": 4,
+          "title": "Max Turns",
+          "type": "integer"
+        }
+      },
+      "title": "Budget",
+      "type": "object"
+    },
+    "Hit": {
+      "properties": {
+        "content": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "image": "#/$defs/ImagePart",
+                "structured": "#/$defs/StructuredPart",
+                "text": "#/$defs/TextPart"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/TextPart"
+              },
+              {
+                "$ref": "#/$defs/ImagePart"
+              },
+              {
+                "$ref": "#/$defs/StructuredPart"
+              }
+            ]
+          },
+          "title": "Content",
+          "type": "array"
+        },
+        "doc_id": {
+          "title": "Doc Id",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "provenance": {
+          "items": {
+            "$ref": "#/$defs/OpRef"
+          },
+          "title": "Provenance",
+          "type": "array"
+        },
+        "raw_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Score"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "doc_id",
+        "source"
+      ],
+      "title": "Hit",
+      "type": "object"
+    },
+    "HitSummary": {
+      "properties": {
+        "content": {
+          "anyOf": [
+            {
+              "items": {
+                "discriminator": {
+                  "mapping": {
+                    "image": "#/$defs/ImagePart",
+                    "structured": "#/$defs/StructuredPart",
+                    "text": "#/$defs/TextPart"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/TextPart"
+                  },
+                  {
+                    "$ref": "#/$defs/ImagePart"
+                  },
+                  {
+                    "$ref": "#/$defs/StructuredPart"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
+        "doc_id": {
+          "title": "Doc Id",
+          "type": "string"
+        },
+        "first_turn": {
+          "title": "First Turn",
+          "type": "integer"
+        },
+        "judged": {
+          "default": false,
+          "title": "Judged",
+          "type": "boolean"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "p_relevant": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P Relevant"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "snippet": {
+          "title": "Snippet",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "required": [
+        "key",
+        "source",
+        "doc_id",
+        "snippet",
+        "score",
+        "first_turn"
+      ],
+      "title": "HitSummary",
+      "type": "object"
+    },
+    "ImagePart": {
+      "description": "An image, inline (`data`) or by reference (`uri`). In JSON, `data` is standard base64.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Data"
+        },
+        "kind": {
+          "const": "image",
+          "default": "image",
+          "title": "Kind",
+          "type": "string"
+        },
+        "mime": {
+          "default": "image/png",
+          "title": "Mime",
+          "type": "string"
+        },
+        "uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uri"
+        }
+      },
+      "title": "ImagePart",
+      "type": "object"
+    },
+    "OpRef": {
+      "properties": {
+        "call_id": {
+          "title": "Call Id",
+          "type": "string"
+        },
+        "rank": {
+          "title": "Rank",
+          "type": "integer"
+        },
+        "turn": {
+          "title": "Turn",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "turn",
+        "call_id",
+        "rank"
+      ],
+      "title": "OpRef",
+      "type": "object"
+    },
+    "PhaseFinished": {
+      "properties": {
+        "at_ms": {
+          "title": "At Ms",
+          "type": "number"
+        },
+        "duration_ms": {
+          "title": "Duration Ms",
+          "type": "number"
+        },
+        "phase": {
+          "enum": [
+            "plan",
+            "query",
+            "judge",
+            "decide",
+            "delegate"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "search_id": {
+          "title": "Search Id",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "summary": {
+          "$ref": "#/$defs/PhaseSummary"
+        },
+        "turn": {
+          "title": "Turn",
+          "type": "integer"
+        },
+        "type": {
+          "const": "phase_finished",
+          "default": "phase_finished",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id",
+        "seq",
+        "turn",
+        "at_ms",
+        "phase",
+        "duration_ms"
+      ],
+      "title": "PhaseFinished",
+      "type": "object"
+    },
+    "PhaseStarted": {
+      "properties": {
+        "at_ms": {
+          "title": "At Ms",
+          "type": "number"
+        },
+        "phase": {
+          "enum": [
+            "plan",
+            "query",
+            "judge",
+            "decide",
+            "delegate"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "search_id": {
+          "title": "Search Id",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "turn": {
+          "title": "Turn",
+          "type": "integer"
+        },
+        "type": {
+          "const": "phase_started",
+          "default": "phase_started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id",
+        "seq",
+        "turn",
+        "at_ms",
+        "phase"
+      ],
+      "title": "PhaseStarted",
+      "type": "object"
+    },
+    "PhaseSummary": {
+      "description": "Per-phase counts; only the fields relevant to the phase are set.",
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "enum": [
+                "continue",
+                "refine",
+                "broaden",
+                "switch_source",
+                "stop"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "n_calls": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "N Calls"
+        },
+        "n_errors": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "N Errors"
+        },
+        "n_hits": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "N Hits"
+        },
+        "n_judged": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "N Judged"
+        },
+        "n_new": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "N New"
+        },
+        "n_ranked": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "N Ranked"
+        },
+        "n_relevant": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "N Relevant"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "title": "PhaseSummary",
+      "type": "object"
+    },
+    "Query": {
+      "properties": {
+        "content": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "image": "#/$defs/ImagePart",
+                "structured": "#/$defs/StructuredPart",
+                "text": "#/$defs/TextPart"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/TextPart"
+              },
+              {
+                "$ref": "#/$defs/ImagePart"
+              },
+              {
+                "$ref": "#/$defs/StructuredPart"
+              }
+            ]
+          },
+          "title": "Content",
+          "type": "array"
+        }
+      },
+      "required": [
+        "content"
+      ],
+      "title": "Query",
+      "type": "object"
+    },
+    "RankedHit": {
+      "properties": {
+        "hit": {
+          "$ref": "#/$defs/Hit"
+        },
+        "judged": {
+          "default": false,
+          "title": "Judged",
+          "type": "boolean"
+        },
+        "p_relevant": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P Relevant"
+        },
+        "rationale": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rationale"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "hit",
+        "score"
+      ],
+      "title": "RankedHit",
+      "type": "object"
+    },
+    "ResultsUpdated": {
+      "properties": {
+        "at_ms": {
+          "title": "At Ms",
+          "type": "number"
+        },
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/HitSummary"
+          },
+          "title": "Hits",
+          "type": "array"
+        },
+        "n_relevant": {
+          "title": "N Relevant",
+          "type": "integer"
+        },
+        "pool_size": {
+          "title": "Pool Size",
+          "type": "integer"
+        },
+        "schema_version": {
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "search_id": {
+          "title": "Search Id",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "turn": {
+          "title": "Turn",
+          "type": "integer"
+        },
+        "type": {
+          "const": "results_updated",
+          "default": "results_updated",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id",
+        "seq",
+        "turn",
+        "at_ms",
+        "hits",
+        "pool_size",
+        "n_relevant"
+      ],
+      "title": "ResultsUpdated",
+      "type": "object"
+    },
+    "SearchFailed": {
+      "properties": {
+        "at_ms": {
+          "title": "At Ms",
+          "type": "number"
+        },
+        "error_type": {
+          "title": "Error Type",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "search_id": {
+          "title": "Search Id",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "turn": {
+          "title": "Turn",
+          "type": "integer"
+        },
+        "type": {
+          "const": "search_failed",
+          "default": "search_failed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id",
+        "seq",
+        "turn",
+        "at_ms",
+        "error_type",
+        "message"
+      ],
+      "title": "SearchFailed",
+      "type": "object"
+    },
+    "SearchFinished": {
+      "properties": {
+        "at_ms": {
+          "title": "At Ms",
+          "type": "number"
+        },
+        "result": {
+          "$ref": "#/$defs/SearchResult"
+        },
+        "schema_version": {
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "search_id": {
+          "title": "Search Id",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "stop_reason": {
+          "$ref": "#/$defs/StopReason"
+        },
+        "turn": {
+          "title": "Turn",
+          "type": "integer"
+        },
+        "type": {
+          "const": "search_finished",
+          "default": "search_finished",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id",
+        "seq",
+        "turn",
+        "at_ms",
+        "result",
+        "stop_reason"
+      ],
+      "title": "SearchFinished",
+      "type": "object"
+    },
+    "SearchResult": {
+      "properties": {
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/RankedHit"
+          },
+          "title": "Hits",
+          "type": "array"
+        },
+        "mode": {
+          "title": "Mode",
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/Query"
+        },
+        "stop_reason": {
+          "$ref": "#/$defs/StopReason"
+        },
+        "trace": {
+          "$ref": "#/$defs/Trace"
+        },
+        "usage": {
+          "$ref": "#/$defs/Usage"
+        }
+      },
+      "required": [
+        "question",
+        "hits",
+        "stop_reason",
+        "usage",
+        "trace",
+        "mode"
+      ],
+      "title": "SearchResult",
+      "type": "object"
+    },
+    "SearchStarted": {
+      "properties": {
+        "at_ms": {
+          "title": "At Ms",
+          "type": "number"
+        },
+        "budget": {
+          "$ref": "#/$defs/Budget"
+        },
+        "mode": {
+          "enum": [
+            "retrieval",
+            "harness",
+            "model"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/Query"
+        },
+        "schema_version": {
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "search_id": {
+          "title": "Search Id",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "setup_errors": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Setup Errors",
+          "type": "object"
+        },
+        "sources": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "turn": {
+          "title": "Turn",
+          "type": "integer"
+        },
+        "type": {
+          "const": "search_started",
+          "default": "search_started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id",
+        "seq",
+        "turn",
+        "at_ms",
+        "question",
+        "mode",
+        "sources",
+        "budget"
+      ],
+      "title": "SearchStarted",
+      "type": "object"
+    },
+    "StopReason": {
+      "enum": [
+        "controller_stop",
+        "no_plan",
+        "single_pass",
+        "delegate_done",
+        "budget_turns",
+        "budget_tool_calls",
+        "budget_tokens",
+        "budget_cost",
+        "budget_time"
+      ],
+      "title": "StopReason",
+      "type": "string"
+    },
+    "StructuredPart": {
+      "properties": {
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "kind": {
+          "const": "structured",
+          "default": "structured",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "title": "StructuredPart",
+      "type": "object"
+    },
+    "TextPart": {
+      "properties": {
+        "kind": {
+          "const": "text",
+          "default": "text",
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "TextPart",
+      "type": "object"
+    },
+    "ToolCallFinished": {
+      "properties": {
+        "at_ms": {
+          "title": "At Ms",
+          "type": "number"
+        },
+        "call_id": {
+          "title": "Call Id",
+          "type": "string"
+        },
+        "duration_ms": {
+          "title": "Duration Ms",
+          "type": "number"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolErrorInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "n_hits": {
+          "title": "N Hits",
+          "type": "integer"
+        },
+        "schema_version": {
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "search_id": {
+          "title": "Search Id",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "turn": {
+          "title": "Turn",
+          "type": "integer"
+        },
+        "type": {
+          "const": "tool_call_finished",
+          "default": "tool_call_finished",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id",
+        "seq",
+        "turn",
+        "at_ms",
+        "call_id",
+        "n_hits",
+        "duration_ms"
+      ],
+      "title": "ToolCallFinished",
+      "type": "object"
+    },
+    "ToolCallStarted": {
+      "properties": {
+        "arguments": {
+          "additionalProperties": true,
+          "title": "Arguments",
+          "type": "object"
+        },
+        "at_ms": {
+          "title": "At Ms",
+          "type": "number"
+        },
+        "call_id": {
+          "title": "Call Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "search_id": {
+          "title": "Search Id",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        },
+        "turn": {
+          "title": "Turn",
+          "type": "integer"
+        },
+        "type": {
+          "const": "tool_call_started",
+          "default": "tool_call_started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id",
+        "seq",
+        "turn",
+        "at_ms",
+        "call_id",
+        "name"
+      ],
+      "title": "ToolCallStarted",
+      "type": "object"
+    },
+    "ToolErrorInfo": {
+      "properties": {
+        "kind": {
+          "enum": [
+            "validation",
+            "backend",
+            "timeout",
+            "embedder",
+            "policy"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "title": "ToolErrorInfo",
+      "type": "object"
+    },
+    "Trace": {
+      "properties": {
+        "events": {
+          "items": {
+            "$ref": "#/$defs/TraceEvent"
+          },
+          "title": "Events",
+          "type": "array"
+        }
+      },
+      "title": "Trace",
+      "type": "object"
+    },
+    "TraceEvent": {
+      "properties": {
+        "at_ms": {
+          "title": "At Ms",
+          "type": "number"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms"
+        },
+        "turn": {
+          "title": "Turn",
+          "type": "integer"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "turn",
+        "at_ms"
+      ],
+      "title": "TraceEvent",
+      "type": "object"
+    },
+    "Usage": {
+      "properties": {
+        "cost_usd": {
+          "default": 0.0,
+          "title": "Cost Usd",
+          "type": "number"
+        },
+        "input_tokens": {
+          "default": 0,
+          "title": "Input Tokens",
+          "type": "integer"
+        },
+        "output_tokens": {
+          "default": 0,
+          "title": "Output Tokens",
+          "type": "integer"
+        },
+        "tool_calls": {
+          "default": 0,
+          "title": "Tool Calls",
+          "type": "integer"
+        },
+        "turns": {
+          "default": 0,
+          "title": "Turns",
+          "type": "integer"
+        }
+      },
+      "title": "Usage",
+      "type": "object"
+    },
+    "UsageUpdated": {
+      "properties": {
+        "at_ms": {
+          "title": "At Ms",
+          "type": "number"
+        },
+        "schema_version": {
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "search_id": {
+          "title": "Search Id",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "turn": {
+          "title": "Turn",
+          "type": "integer"
+        },
+        "type": {
+          "const": "usage_updated",
+          "default": "usage_updated",
+          "title": "Type",
+          "type": "string"
+        },
+        "usage": {
+          "$ref": "#/$defs/Usage"
+        }
+      },
+      "required": [
+        "search_id",
+        "seq",
+        "turn",
+        "at_ms",
+        "usage"
+      ],
+      "title": "UsageUpdated",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "discriminator": {
+    "mapping": {
+      "phase_finished": "#/$defs/PhaseFinished",
+      "phase_started": "#/$defs/PhaseStarted",
+      "results_updated": "#/$defs/ResultsUpdated",
+      "search_failed": "#/$defs/SearchFailed",
+      "search_finished": "#/$defs/SearchFinished",
+      "search_started": "#/$defs/SearchStarted",
+      "tool_call_finished": "#/$defs/ToolCallFinished",
+      "tool_call_started": "#/$defs/ToolCallStarted",
+      "usage_updated": "#/$defs/UsageUpdated"
+    },
+    "propertyName": "type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/SearchStarted"
+    },
+    {
+      "$ref": "#/$defs/PhaseStarted"
+    },
+    {
+      "$ref": "#/$defs/PhaseFinished"
+    },
+    {
+      "$ref": "#/$defs/ToolCallStarted"
+    },
+    {
+      "$ref": "#/$defs/ToolCallFinished"
+    },
+    {
+      "$ref": "#/$defs/ResultsUpdated"
+    },
+    {
+      "$ref": "#/$defs/UsageUpdated"
+    },
+    {
+      "$ref": "#/$defs/SearchFinished"
+    },
+    {
+      "$ref": "#/$defs/SearchFailed"
+    }
+  ],
+  "title": "SearchEvent v1"
+}

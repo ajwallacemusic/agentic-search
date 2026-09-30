@@ -73,6 +73,56 @@ async with load_harness("search.yaml") as h:
   content, or `snapshot_k=0` to turn them off.
 - `search()` is `stream()` drained to its final result. Consumers must ignore unknown event types.
 
+## Service
+
+`pip install 'agentic-search[server]'` adds an HTTP service that streams searches as
+server-sent events. Operators define named **profiles** (each a harness config) at startup;
+clients pick a profile and override per request, but never send credentials or datastores.
+
+```yaml
+# service.yaml
+service:
+  auth: {type: api_key, keys_env: SEARCH_API_KEYS}   # or {type: none}, which must be explicit
+  cors_origins: ["https://app.example.com"]
+  max_concurrent_searches: 16
+  default_profile: general
+profiles:
+  general:
+    backends: [{name: notes, type: files, root: ./docs, glob: "**/*.md"}]
+    driver: {type: anthropic, model: claude-sonnet-5-5}
+  strict:
+    backends: [{name: notes, type: files, root: ./docs, glob: "**/*.md"}]
+    driver: {type: anthropic, model: claude-sonnet-5-5}
+    limits: {max_budget: {max_turns: 2, max_cost_usd: 0.25}, allow_include_content: false}
+```
+
+```bash
+SEARCH_API_KEYS=key1,key2 agentic-search serve --config service.yaml --port 8080
+```
+
+| Endpoint | |
+|---|---|
+| `GET /healthz` | Liveness, no auth: `{"status": "ok" \| "degraded"}` |
+| `GET /v1/profiles` | Profiles with their sources, capabilities, budget and limits |
+| `POST /v1/search` | One-shot search; returns the result as JSON |
+| `POST /v1/search/stream` | The same search as `text/event-stream` |
+
+Request body: `{profile?, question, images?: [{data: <base64>, mime}], sources?, mode?, top_k?,
+budget?, include_content?, include_trace?}`, plus `snapshot_k?` for the stream. Send the key as
+`Authorization: Bearer <key>` or `X-API-Key`.
+
+- Each SSE frame is `id: <seq>`, `event: <type>`, `data: <event JSON>`; a `: keep-alive`
+  comment is sent after `keepalive_s` (default 15 s) of silence.
+- The final `search_finished` carries a lean result: no trace unless `include_trace`, no hit
+  content unless `include_content` (and the profile allows it).
+- A request's budget is capped by the profile's `limits.max_budget`.
+- Closing the connection cancels the search, including in-flight backend and model calls.
+- `401` bad key, `404` unknown profile, `422` invalid body, `429` too many concurrent searches,
+  `503` profile unavailable. Failures during a streamed search arrive as a `search_failed` event.
+- Images are always inline base64; the service never reads a client-supplied path or URI.
+- `agentic-search export-schema --out schema/` writes the event JSON Schema and golden SSE
+  fixtures that clients test against (committed under `schema/`).
+
 ## Modes
 
 | mode | what happens |
