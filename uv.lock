@@ -42,6 +42,9 @@ mysql = [
     { name = "aiomysql" },
     { name = "sqlglot" },
 ]
+neo4j = [
+    { name = "neo4j" },
+]
 openai = [
     { name = "openai" },
 ]
@@ -60,6 +63,7 @@ dev = [
     { name = "azure-identity" },
     { name = "google-auth", extra = ["requests"] },
     { name = "google-cloud-bigquery" },
+    { name = "neo4j" },
     { name = "openai" },
     { name = "opensearch-py", extra = ["async"] },
     { name = "psycopg", extra = ["binary", "pool"] },
@@ -77,6 +81,7 @@ requires-dist = [
     { name = "google-auth", extras = ["requests"], marker = "extra == 'gcp'", specifier = ">=2.29" },
     { name = "google-cloud-bigquery", marker = "extra == 'bigquery'", specifier = ">=3.25" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "neo4j", marker = "extra == 'neo4j'", specifier = ">=5.20" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.50" },
     { name = "opensearch-py", extras = ["async"], marker = "extra == 'opensearch'", specifier = ">=2.6" },
@@ -90,7 +95,7 @@ requires-dist = [
     { name = "sqlglot", marker = "extra == 'mysql'", specifier = ">=25,<31" },
     { name = "sqlglot", marker = "extra == 'postgres'", specifier = ">=25,<31" },
 ]
-provides-extras = ["anthropic", "openai", "local", "postgres", "mysql", "bigquery", "opensearch", "gcp", "azure"]
+provides-extras = ["anthropic", "openai", "local", "postgres", "mysql", "bigquery", "opensearch", "neo4j", "gcp", "azure"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -99,6 +104,7 @@ dev = [
     { name = "azure-identity", specifier = ">=1.17" },
     { name = "google-auth", extras = ["requests"], specifier = ">=2.29" },
     { name = "google-cloud-bigquery", specifier = ">=3.25" },
+    { name = "neo4j", specifier = ">=5.20" },
     { name = "openai", specifier = ">=1.50" },
     { name = "opensearch-py", extras = ["async"], specifier = ">=2.6" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
@@ -1681,6 +1687,18 @@ wheels = [
 ]
 
 [[package]]
+name = "neo4j"
+version = "6.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytz" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/59/46/7a562799679d0c9bd3f12d28b43591eb953efc975e1241536733c5d8bcd3/neo4j-6.3.1.tar.gz", hash = "sha256:e75530ca0691d69916c56acdb7401df4ee9e1d5084cfcfb3ede796db38667dcd", size = 242885, upload-time = "2026-09-15T08:08:32.67Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/08/a5/e33f76f4eb7e72c350e65802151884048325f889ab5d156ce4b6d9bde959/neo4j-6.3.1-py3-none-any.whl", hash = "sha256:a1b702d356f88885c27bdcf7dcd56af76423dbff4e26064e5bf5dbf47af53044", size = 331462, upload-time = "2026-09-15T08:08:31.252Z" },
+]
+
+[[package]]
 name = "networkx"
 version = "3.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2650,6 +2668,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3", size = 342432, upload-time = "2024-03-01T18:36:20.211Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427", size = 229892, upload-time = "2024-03-01T18:36:18.57Z" },
+]
+
+[[package]]
+name = "pytz"
+version = "2026.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b0/ed/fa23d28713004418bbf2407127f80f385bfb0bf4e677bef02c25c27b00ee/pytz-2026.4.tar.gz", hash = "sha256:464303645bafafd72418898368b2429458f709cf1eb6a15372fbcc396b64da63", size = 318444, upload-time = "2026-09-24T03:58:40.443Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d5/11/e3df59614bebe0ca50c905442603eda64ae7ac19811d4e4f74aa2d51ca85/pytz-2026.4-py2.py3-none-any.whl", hash = "sha256:9d514388fbc89ca0833203464272ac485b8828568ab73532f5020f17e892a0ff", size = 506747, upload-time = "2026-09-24T03:58:38.629Z" },
 ]
 
 [[package]]

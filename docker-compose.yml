@@ -34,3 +34,13 @@ services:
       test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
       interval: 3s
       retries: 60
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      NEO4J_AUTH: neo4j/agenticpass
+      NEO4J_server_memory_heap_max__size: 512m
+    ports: ["57687:7687", "57474:7474"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null || exit 1"]
+      interval: 3s
+      retries: 60

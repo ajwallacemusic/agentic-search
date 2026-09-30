@@ -19,6 +19,7 @@ postgres = ["psycopg[binary,pool]>=3.2", "sqlglot>=25,<31"]
 mysql = ["aiomysql>=0.2", "sqlglot>=25,<31"]
 bigquery = ["google-cloud-bigquery>=3.25", "sqlglot>=25,<31"]
 opensearch = ["opensearch-py[async]>=2.6"]
+neo4j = ["neo4j>=5.20"]
 gcp = ["google-auth[requests]>=2.29"]
 azure = ["azure-identity>=1.17"]
 
@@ -34,6 +35,7 @@ dev = [
   "aiomysql>=0.2",
   "google-cloud-bigquery>=3.25",
   "opensearch-py[async]>=2.6",
+  "neo4j>=5.20",
   "google-auth[requests]>=2.29",
   "azure-identity>=1.17",
 ]

@@ -84,8 +84,13 @@ async def backend(request):
     await b.close()
 
 
+def bare(doc_id):
+    """Multi-collection sources namespace ids as `<collection>/<pk>`; compare on the pk."""
+    return doc_id.split("/", 1)[1] if "/" in doc_id else doc_id
+
+
 def ids(hits):
-    return [h.doc_id for h in hits]
+    return [bare(h.doc_id) for h in hits]
 
 
 def text(hit):
@@ -142,7 +147,7 @@ async def test_vector(backend):
     [q] = await corpus.EMBEDDER.embed([TextPart(text="headache fever")], "query")
     hits = await backend.execute(Vector(source=backend.name, collection="docs", field="embedding",
                                         hyde_text="x", vector=q, limit=3))
-    assert hits[0].doc_id in {"d1", "d4"}
+    assert bare(hits[0].doc_id) in {"d1", "d4"}
 
 
 async def test_hybrid(backend):
@@ -152,7 +157,7 @@ async def test_hybrid(backend):
     [q] = await corpus.EMBEDDER.embed([TextPart(text="headache fever")], "query")
     hits = await backend.execute(Hybrid(source=backend.name, collection="docs", text="headache",
                                         field="embedding", vector=q, limit=3))
-    assert hits and hits[0].doc_id in {"d1", "d4"}
+    assert hits and bare(hits[0].doc_id) in {"d1", "d4"}
     assert all(h.raw_score is not None for h in hits)
 
 
@@ -164,7 +169,7 @@ async def test_regex(backend):
 
 async def test_fetch(backend):
     [f] = await backend.execute(Fetch(source=backend.name, collection="docs", doc_ids=["d3"]))
-    assert f.doc_id == "d3" and "printing" in text(f).lower()
+    assert bare(f.doc_id) == "d3" and "printing" in text(f).lower()
 
 
 async def test_aggregate(backend):
@@ -217,5 +222,5 @@ async def test_harness_end_to_end(backend):
     driver = ScriptedDriver([[call("lexical_search", source=backend.name, collection="docs", text="headache")]])
     h = Harness([backend], driver, embedders=[corpus.EMBEDDER], analyzer=KeywordJudge(["headache"]))
     res = await h.search("what treats headache?")
-    assert set(res.keys()) == {f"{backend.name}:d1", f"{backend.name}:d4"}
+    assert {bare(k.split(":", 1)[1]) for k in res.keys()} == {"d1", "d4"}
     assert all(r.judged and r.p_relevant == 1.0 for r in res.hits)
