@@ -188,7 +188,12 @@ def _restore_output_names(stmt: Any, written: Mapping[str, str], allow: SqlAllow
     so `SELECT Id FROM Studies` would return `id` and a row would no longer match its id column.
     Only the names of the results change; what the query reads does not."""
     from sqlglot import exp
+    from sqlglot.optimizer.scope import traverse_scope
 
+    by_table = {table: {column.lower(): column for column in columns}
+                for table, columns in allow.tables.items()}
+    # A column read through a derived table or CTE takes its stored name only when no two
+    # allowed columns share it in different case.
     stored: dict[str, str] = {}
     clashing: set[str] = set()
     for columns in allow.tables.values():
@@ -196,11 +201,21 @@ def _restore_output_names(stmt: Any, written: Mapping[str, str], allow: SqlAllow
             if stored.setdefault(column.lower(), column) != column:
                 clashing.add(column.lower())
     select = _output_select(stmt)
-    for projection in select.expressions if select is not None else []:
+    if select is None:
+        return
+    sources = next((scope.sources for scope in traverse_scope(stmt) if scope.expression is select), {})
+    for projection in select.expressions:
         if not isinstance(projection, exp.Alias):
             continue
         key = projection.alias.lower()
-        name = written.get(key) or (stored.get(key) if key not in clashing else None)
+        column = projection.this
+        source = sources.get(column.table) if isinstance(column, exp.Column) else None
+        if key in written:
+            name: str | None = written[key]
+        elif isinstance(source, exp.Table) and source.name in by_table:
+            name = by_table[source.name].get(key)
+        else:
+            name = stored.get(key) if key not in clashing else None
         if name is not None and name != projection.alias:
             projection.set("alias", exp.to_identifier(name))
 

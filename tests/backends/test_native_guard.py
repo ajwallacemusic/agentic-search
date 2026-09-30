@@ -560,3 +560,14 @@ def test_resolved_sql_quotes_names_that_need_it(query):
 def test_resolved_sql_keeps_safe_names_bare():
     out = guard_sql('SELECT id, "Dx" FROM visits', "postgres", 10, PG_ODD_NAMES)
     assert out == 'SELECT visits.id AS id, visits."Dx" AS "Dx" FROM public.visits AS visits LIMIT 10'
+
+
+def test_bigquery_result_names_follow_the_table_a_column_comes_from():
+    # `visits.id` and `Studies.Id` differ only in case, so the name comes from the source table.
+    allow = SqlAllowList(tables={"visits": frozenset({"id"}), "Studies": frozenset({"Id", "Modality"})},
+                         db="ds", catalog="p-1")
+    out = guard_sql("SELECT Id, s.Modality FROM Studies s", "bigquery", 10, allow)
+    assert out == "SELECT s.id AS Id, s.modality AS Modality FROM `p-1`.ds.Studies AS s LIMIT 10"
+    out = guard_sql("SELECT v.id, s.Id AS StudyId FROM visits v JOIN Studies s ON v.id = s.id",
+                    "bigquery", 10, allow)
+    assert "v.id AS id," in out and "s.id AS StudyId" in out
