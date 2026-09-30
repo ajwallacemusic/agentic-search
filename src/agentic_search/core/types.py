@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from enum import Enum
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Annotated, Any, Literal, Union
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
-from pydantic import BaseModel, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_serializer, model_validator
 
 # ---- Content ----------------------------------------------------------------
 
@@ -25,10 +26,18 @@ class TextPart(BaseModel):
 
 
 class ImagePart(BaseModel):
+    """An image, inline (`data`) or by reference (`uri`). In JSON, `data` is standard base64."""
+
+    model_config = ConfigDict(val_json_bytes="base64")
+
     kind: Literal["image"] = "image"
     uri: str | None = None
     data: bytes | None = None
     mime: str = "image/png"
+
+    @field_serializer("data", when_used="json")
+    def _data_as_base64(self, data: bytes | None) -> str | None:
+        return None if data is None else base64.b64encode(data).decode("ascii")
 
     @model_validator(mode="after")
     def _exactly_one_source(self) -> ImagePart:

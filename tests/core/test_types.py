@@ -126,3 +126,18 @@ def test_model_usage_plus_and_budget_defaults():
 def test_tool_error_render():
     e = ToolError(call_id="c1", kind="validation", message="bad field")
     assert e.render() == "ERROR [validation] bad field"
+
+
+def test_image_bytes_serialise_as_standard_base64():
+    import base64
+
+    from agentic_search.core.types import ImagePart, Query, TextPart
+
+    raw = bytes([0xFB, 0xFF, 0xBF, 0x00, 0x3E])  # not valid UTF-8; base64 uses '+' and '/'
+    q = Query(content=[TextPart(text="x"), ImagePart(data=raw)])
+    dumped = q.model_dump_json()
+    assert '"data":"+/+/AD4="' in dumped
+    assert Query.model_validate_json(dumped) == q
+    urlsafe = base64.urlsafe_b64encode(raw).decode()
+    assert ImagePart.model_validate_json(f'{{"data":"{urlsafe}"}}').data == raw
+    assert q.model_dump()["content"][1]["data"] == raw  # python mode keeps bytes
