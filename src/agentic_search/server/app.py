@@ -53,6 +53,8 @@ class _Gate:
 class _GatedStreamingResponse(StreamingResponse):
     """Releases the search slot however the response ends, even if the body never starts."""
 
+    close_timeout_s = 10.0  # bound on the shielded close, so a stuck body cannot pin the slot
+
     def __init__(self, *args: Any, release: Callable[[], None], **kwargs: Any):
         super().__init__(*args, **kwargs)
         self._release = release
@@ -62,8 +64,11 @@ class _GatedStreamingResponse(StreamingResponse):
             await super().__call__(scope, receive, send)
         finally:
             try:
-                with anyio.CancelScope(shield=True):
+                with anyio.move_on_after(self.close_timeout_s, shield=True) as bounded:
                     await self.body_iterator.aclose()
+                if bounded.cancelled_caught:
+                    logger.warning("closing a search stream took over %ss; releasing its slot",
+                                   self.close_timeout_s)
             finally:
                 self._release()
 
@@ -115,7 +120,9 @@ def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) ->
             if isinstance(outcome, BaseException):
                 logger.warning("closing profile %r failed: %s", name, _describe(outcome))
 
-    app = FastAPI(title="agentic-search", version=__version__, lifespan=lifespan)
+    docs: dict[str, Any] = {} if config.expose_docs else {
+        "docs_url": None, "redoc_url": None, "openapi_url": None}
+    app = FastAPI(title="agentic-search", version=__version__, lifespan=lifespan, **docs)
     # Added before CORS, so CORS is the outer layer and its headers reach 401/413 answers too.
     app.add_middleware(RequestGuard, keys=None if config.auth.type == "none" else keys,
                        max_body_bytes=config.body_limit())

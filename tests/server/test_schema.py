@@ -60,3 +60,27 @@ def test_normalise_rounds_floats_to_six_decimals():
 def test_image_data_null_in_questions_is_described():
     data = event_schema()["$defs"]["ImagePart"]["properties"]["data"]
     assert "question" in data["description"] and "null" in data["description"]
+
+
+def test_cli_serve_reports_config_errors(tmp_path, capsys):
+    bad = tmp_path / "service.yaml"
+    bad.write_text("- not\n- a mapping\n")
+    assert main(["serve", "--config", str(bad)]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("agentic-search: ") and "mapping" in err
+
+
+def test_cli_serve_passes_graceful_timeout(tmp_path, monkeypatch):
+    import uvicorn
+
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "a.txt").write_text("aspirin")
+    cfg = tmp_path / "service.yaml"
+    cfg.write_text("service: {auth: {type: none}}\n"
+                   "profiles:\n  p:\n    backends: [{name: n, type: files, root: docs}]\n"
+                   "    driver: {type: openai_compat, model: m, base_url: 'http://localhost:9/v1'}\n")
+    seen = []
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.append(kw))
+    assert main(["serve", "--config", str(cfg)]) == 0
+    assert main(["serve", "--config", str(cfg), "--graceful-timeout", "2.5"]) == 0
+    assert [kw["timeout_graceful_shutdown"] for kw in seen] == [10.0, 2.5]

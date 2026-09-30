@@ -145,3 +145,40 @@ async def test_consumer_cancel_scope_always_closes_stream(event_ready_at_cancel)
         scopes[0].cancel()                     # ... in the same tick as the cancel
     await asyncio.sleep(0.05)
     assert stream.closed
+
+
+async def test_watcher_exception_is_retrieved_when_body_is_closed(docs_backend):
+    """A watcher that failed while the consumer held a frame is still marked retrieved, so no
+    'Task exception was never retrieved' is logged when it is collected."""
+    import gc
+
+    loop = asyncio.get_running_loop()
+    reported = []
+    previous = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: reported.append(context))
+    try:
+        h = make_harness(docs_backend)
+        boom = asyncio.Event()
+
+        async def receive():
+            await boom.wait()
+            raise RuntimeError("receive failed")
+
+        body = sse_body(h.stream("q"), lambda e: e.model_dump_json(), keepalive_s=10,
+                        receive=receive)
+
+        async def consume(body):
+            await body.__anext__()  # search_started; the watcher is now running
+            boom.set()
+            for _ in range(5):
+                await asyncio.sleep(0)  # the watcher fails while we hold the frame
+            await body.aclose()
+
+        await asyncio.wait_for(consume(body), 5)
+        del body
+        for _ in range(3):
+            gc.collect()
+            await asyncio.sleep(0)
+    finally:
+        loop.set_exception_handler(previous)
+    assert [c for c in reported if "never retrieved" in c.get("message", "")] == []

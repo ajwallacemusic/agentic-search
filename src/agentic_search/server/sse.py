@@ -58,6 +58,8 @@ async def sse_body(stream: SearchStream, render: Callable[[SearchEvent], str], *
     finally:
         if watcher is not None:
             watcher.cancel()
+            if watcher.done() and not watcher.cancelled():
+                watcher.exception()  # it may have failed while the consumer held a frame
         if pending is not None and not pending.done():
             # In flight: its CancelledError runs the stream's own finally, which cancels the
             # search. wait() never raises the future's error; our own cancellation may still

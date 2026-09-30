@@ -37,8 +37,11 @@ async def test_live_stream_and_search(docs_backend):
 
 async def test_live_disconnect_cancels_backend_call(docs_backend):
     entered, cancelled = asyncio.Event(), asyncio.Event()
+    mode = {"slow": True}
 
     async def slow(op):
+        if not mode["slow"]:
+            return []
         entered.set()
         try:
             await asyncio.sleep(60)
@@ -48,7 +51,8 @@ async def test_live_disconnect_cancels_backend_call(docs_backend):
         return []
 
     docs_backend.execute = slow
-    app = create_app(service(keepalive_s=30), {"demo": make_harness(docs_backend)})
+    app = create_app(service(keepalive_s=30, max_concurrent_searches=1),
+                     {"demo": make_harness(docs_backend)})
     server, task, url = await serve(app)
     try:
         async with httpx.AsyncClient(base_url=url) as c:
@@ -58,6 +62,14 @@ async def test_live_disconnect_cancels_backend_call(docs_backend):
                         break
             await asyncio.wait_for(entered.wait(), 5)
         await asyncio.wait_for(cancelled.wait(), 5)
+        mode["slow"] = False
+        async with httpx.AsyncClient(base_url=url) as c:
+            for _ in range(100):  # the slot comes back once the response has wound down
+                again = await c.post("/v1/search", json={"question": "q"})
+                if again.status_code != 429:
+                    break
+                await asyncio.sleep(0.05)
+        assert again.status_code == 200  # the one slot is free again
     finally:
         server.should_exit = True
         await asyncio.wait_for(task, 10)

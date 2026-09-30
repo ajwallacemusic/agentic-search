@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import contextlib
 
 import pytest
 
@@ -314,6 +315,12 @@ async def test_stream_disconnect_with_blocked_send_cancels_search_and_frees_slot
             await asyncio.sleep(0.05)
     assert again.status_code == 200
     task.cancel()
+    # By now the app call has normally ended with starlette's ClientDisconnect (from the OSError
+    # our send raised), which the ASGI server would swallow; otherwise the cancel ends it.
+    from starlette.requests import ClientDisconnect
+
+    with contextlib.suppress(asyncio.CancelledError, ClientDisconnect):
+        await asyncio.wait_for(task, 5)
 
 
 def _keyed(monkeypatch, **kw):
@@ -482,3 +489,46 @@ async def test_lifespan_logs_failed_setup_and_close_errors(docs_backend, caplog,
     assert any("'down'" in m and "index offline" in m for m in messages), messages
     assert any("'down'" in m and "close failed" in m for m in messages), messages
     assert not any("sekrit-key" in m for m in messages)
+
+
+async def test_api_docs_are_off_by_default(app_factory):
+    async with client(app_factory()) as c:
+        off = [(await c.get(p)).status_code for p in ("/docs", "/redoc", "/openapi.json")]
+    async with client(app_factory(config=service(expose_docs=True))) as c:
+        on = [(await c.get(p)).status_code for p in ("/docs", "/redoc", "/openapi.json")]
+    assert off == [404, 404, 404] and on == [200, 200, 200]
+
+
+async def test_stuck_body_close_is_bounded_and_still_releases_slot(caplog, monkeypatch):
+    import logging
+
+    from starlette.requests import ClientDisconnect
+
+    from agentic_search.server.app import _GatedStreamingResponse
+
+    monkeypatch.setattr(_GatedStreamingResponse, "close_timeout_s", 0.05)
+    released, stuck = [], asyncio.Event()
+
+    async def body():
+        try:
+            yield b"first"
+            yield b"second"
+        finally:
+            await stuck.wait()  # a close that never finishes on its own
+
+    async def receive():
+        await asyncio.Event().wait()
+
+    async def send(message):
+        if message["type"] == "http.response.body" and message.get("body"):
+            raise OSError("client disconnected")
+
+    response = _GatedStreamingResponse(body(), release=lambda: released.append(1),
+                                       media_type="text/event-stream")
+    scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"}}
+    with caplog.at_level(logging.WARNING, logger="agentic_search.server"):
+        with pytest.raises(ClientDisconnect):  # starlette's wrapping of the OSError
+            await asyncio.wait_for(response(scope, receive, send), 5)
+    assert released == [1]
+    assert any("closing a search stream" in r.getMessage() for r in caplog.records
+               if r.name == "agentic_search.server")

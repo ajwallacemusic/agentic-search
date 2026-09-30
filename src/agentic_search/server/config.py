@@ -38,6 +38,10 @@ class AuthConfig(BaseModel):
         keys = [k.strip() for k in raw.split(",") if k.strip()]
         if not keys:
             raise ConfigError(f"environment variable {self.keys_env!r} holds no API keys")
+        if any(not all("\x21" <= c <= "\x7e" for c in k) for k in keys):
+            # Header values are latin-1 on the wire; only printable ASCII keys compare reliably.
+            raise ConfigError(f"environment variable {self.keys_env!r} holds an API key with "
+                              "characters outside printable ASCII (0x21-0x7E)")
         for k in keys:
             register_secret(k)
         return keys
@@ -55,6 +59,7 @@ class ServiceConfig(BaseModel):
     max_images: int = Field(default=4, ge=0)
     max_body_bytes: int | None = Field(default=None, ge=1)
     setup_retry_s: float = Field(default=30.0, ge=0)
+    expose_docs: bool = False  # serve /docs, /redoc and /openapi.json
 
     def body_limit(self) -> int:
         """`max_body_bytes`, or by default room for `max_images` base64 images plus 64 KiB."""
@@ -94,17 +99,27 @@ def load_service(path: str | Path) -> tuple[ServiceConfig, dict[str, Profile]]:
     optional `limits:` block. Every profile's harness is built here (not yet set up)."""
     path = Path(path)
     raw = yaml.safe_load(path.read_text()) or {}
+    if not isinstance(raw, dict):
+        raise ConfigError("service config must be a mapping with `service:` and `profiles:`")
     if not isinstance(raw.get("profiles"), dict) or not raw["profiles"]:
         raise ConfigError("service config needs a non-empty `profiles:` mapping")
+    service = raw.get("service") or {}
+    if not isinstance(service, dict):
+        raise ConfigError("invalid `service:` block: it must be a mapping")
     try:
-        config = ServiceConfig(**(raw.get("service") or {}))
+        config = ServiceConfig(**service)
     except ValueError as exc:
         raise ConfigError(f"invalid `service:` block: {exc}") from exc
     profiles: dict[str, Profile] = {}
     for name, cfg in raw["profiles"].items():
+        if not isinstance(cfg or {}, dict):
+            raise ConfigError(f"profile {name!r} must be a mapping")
         cfg = dict(cfg or {})
+        limits_raw = cfg.pop("limits", None) or {}
+        if not isinstance(limits_raw, dict):
+            raise ConfigError(f"profile {name!r} has invalid limits: it must be a mapping")
         try:
-            limits = ProfileLimits(**(cfg.pop("limits", None) or {}))
+            limits = ProfileLimits(**limits_raw)
         except ValueError as exc:
             raise ConfigError(f"profile {name!r} has invalid limits: {exc}") from exc
         profiles[str(name)] = Profile(harness=build_harness(cfg, base_dir=path.parent), limits=limits)

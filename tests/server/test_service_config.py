@@ -45,6 +45,10 @@ def test_load_service(tmp_path):
     ("service: {auth: {type: none}}\n", "profiles"),
     ("profiles: {a: {}}\n", "service"),
     ("service: {auth: {type: none}, bogus: 1}\nprofiles: {a: {}}\n", "service"),
+    ("- just\n- a list\n", "mapping"),
+    ("service: [1]\nprofiles: {a: {}}\n", "service"),
+    ("service: {auth: {type: none}}\nprofiles: {a: [1, 2]}\n", "'a'"),
+    ("service: {auth: {type: none}}\nprofiles: {a: {limits: [1]}}\n", "limits"),
 ])
 def test_load_service_errors(tmp_path, text, message):
     with pytest.raises(ConfigError, match=message):
@@ -177,3 +181,11 @@ class TestCheckProfiles:
 
         # Should not raise
         check_profiles(config, profiles)
+
+
+@pytest.mark.parametrize("raw", ["k-one,k\xe9y", "k one", "tab\tkey", "ok,\x7f"])
+def test_api_keys_must_be_printable_ascii(monkeypatch, raw):
+    monkeypatch.setenv("SEARCH_KEYS", raw)
+    with pytest.raises(ConfigError, match="printable ASCII") as info:
+        AuthConfig(type="api_key", keys_env="SEARCH_KEYS").keys()
+    assert "\xe9" not in str(info.value) and "key" not in str(info.value).split("SEARCH_KEYS")[0]

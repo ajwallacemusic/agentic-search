@@ -57,7 +57,7 @@ standard and URL-safe alphabets (`val_json_bytes="base64"`). Python-mode dumps k
 | `guard.py` | `RequestGuard` (API key before body, body size cap), `key_matches` |
 | `demo.py` | `demo_harness`, `demo_app`: an in-memory service needing no network or models, used for fixtures and client end-to-end tests |
 | `schema.py` | `event_schema`, `fixture_streams`, `render_files`, `export` |
-| `cli.py` | `serve` and `export-schema` subcommands |
+| `cli.py` | `serve` (with `--graceful-timeout`, default 10 s, passed to uvicorn's `timeout_graceful_shutdown`) and `export-schema` subcommands; a `ConfigError` from `serve` prints `agentic-search: <message>` to stderr and exits `2` |
 
 ## 4. Configuration
 
@@ -72,6 +72,7 @@ service:
   max_images: 4                                       # default 4 per request
   max_body_bytes: 53398869                            # default max_images*max_image_bytes*4//3 + 65536
   setup_retry_s: 30                                   # default 30, ≥0: failed-setup backoff
+  expose_docs: false                                  # default false: no /docs, /redoc, /openapi.json
 profiles:
   general: {<harness config as build_harness accepts>}
   strict:
@@ -80,14 +81,19 @@ profiles:
 ```
 
 - `service.auth` is required. `api_key` needs `keys_env`, a comma-separated list read at app
-  creation. An empty or unset variable is a `ConfigError`. Every key is registered for scrubbing.
+  creation. An empty or unset variable is a `ConfigError`, and so is any key with characters
+  outside printable ASCII (0x21–0x7E; the message does not include the key). Every key is
+  registered for scrubbing.
 - Unknown keys in `service:`, `auth:` and `limits:` are errors (`extra="forbid"`).
 - `limits.max_budget` maps `Budget` field names to positive ceilings. Unknown field names, or
   ceilings that are not a valid `Budget` value, are errors. A field it leaves out is capped at
   the profile harness budget's own value when that is not `None` (§5.1). `allow_include_content` defaults to
   true.
 - `load_service` builds every profile's harness with `build_harness(cfg, base_dir=<yaml dir>)`.
-  It does not set them up. Errors are raised as `ConfigError`.
+  It does not set them up. Errors are raised as `ConfigError`, including a YAML root, `service:`
+  block, profile or `limits:` value that is not a mapping.
+- `expose_docs` (default false): when false, FastAPI is created with `docs_url`, `redoc_url` and
+  `openapi_url` set to `None`, so `/docs`, `/redoc` and `/openapi.json` are `404`.
 - `create_app(config, profiles)` accepts `Profile` objects or bare `Harness` objects (default
   limits). It requires at least one profile, and `default_profile` must name one.
 
@@ -171,7 +177,9 @@ for `/v1/*`:
   search on both routes.
 - **Capacity:** there is a non-blocking gate of `max_concurrent_searches`. A search that cannot
   get a slot immediately returns `429`. The slot is held for the whole search: for streams, it is
-  released when the response ends in any way, even if the body never starts.
+  released when the response ends in any way, even if the body never starts. The body's shielded
+  `aclose()` is bounded to 10 s (`anyio.move_on_after(10, shield=True)`); on timeout a warning is
+  logged and the slot is still released.
 
 ## 6. Lean result
 
@@ -267,6 +275,9 @@ free port:
   cancelling the backend call, and closing the body cancelling it.
 - A live uvicorn stream and search; a live client disconnect cancels the backend call within
   seconds with `keepalive_s=30`.
-- The schema-drift test, the event-type coverage of the schema, `load_service` (valid and invalid),
-  `ProfileLimits` validation, `resolve_budget`, and the CLI `export-schema`.
+- The schema-drift test, the event-type coverage of the schema, `load_service` (valid, invalid and
+  non-mapping), `ProfileLimits` validation, `resolve_budget`, API keys outside printable ASCII,
+  the CLI `export-schema`, `serve` config errors (exit 2) and `--graceful-timeout`.
+- API docs off by default and on with `expose_docs`; a stuck body close is bounded and still
+  releases the slot.
 - An `ImagePart` JSON round trip with standard base64, accepting URL-safe input.
