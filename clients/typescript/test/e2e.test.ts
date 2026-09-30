@@ -10,22 +10,39 @@ let client: AgenticSearchClient;
 
 function waitFor(text: string, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`timed out waiting for ${text}; output:\n${output}`)), timeoutMs);
+    const finish = (error?: Error) => {
+      clearTimeout(timer);
+      server.stdout.off("data", check);
+      server.off("error", onError);
+      server.off("exit", onExit);
+      if (error) reject(error); else resolve();
+    };
+    const timer = setTimeout(() => finish(new Error(`timed out waiting for ${text}; output:\n${output}`)), timeoutMs);
     const check = () => {
-      if (output.includes(text)) {
-        clearTimeout(timer);
-        server.stdout.off("data", check);
-        resolve();
-      }
+      if (output.includes(text)) finish();
+    };
+    const onError = (err: Error) => finish(new Error(`server failed to start: ${err.message}; output:\n${output}`));
+    const onExit = (code: number | null) => {
+      if (!output.includes(text)) finish(new Error(`server exited (${code}) before ${text}; output:\n${output}`));
     };
     server.stdout.on("data", check);
+    server.on("error", onError);
+    server.on("exit", onExit);
     check();
   });
 }
 
+async function waitForCancel(before: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while ((output.match(/CANCELLED/g) ?? []).length === before) {
+    if (Date.now() > deadline) throw new Error(`server never cancelled; output:\n${output}`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
 beforeAll(async () => {
   const cwd = fileURLToPath(new URL(".", import.meta.url));
-  server = spawn("uv", ["run", "python", "serve_demo.py"], { cwd });
+  server = spawn("uv", ["run", "python", "serve_demo.py"], { cwd, detached: true });
   server.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
   server.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
   await waitFor("LISTENING", 60_000);
@@ -34,7 +51,9 @@ beforeAll(async () => {
 }, 70_000);
 
 afterAll(() => {
-  server?.kill();
+  if (server?.pid) {
+    try { process.kill(-server.pid, "SIGTERM"); } catch { /* already gone */ }
+  }
 });
 
 describe("against the real service", () => {
@@ -76,11 +95,7 @@ describe("against the real service", () => {
     for await (const ev of client.stream({ profile: "slow", question: "headache" })) {
       if (ev.type === "tool_call_started") break;
     }
-    const deadline = Date.now() + 10_000;
-    while ((output.match(/CANCELLED/g) ?? []).length === before) {
-      if (Date.now() > deadline) throw new Error(`server never cancelled; output:\n${output}`);
-      await new Promise((r) => setTimeout(r, 50));
-    }
+    await waitForCancel(before);
   }, 15_000);
 
   it("cancels the search when the caller aborts", async () => {
@@ -94,10 +109,6 @@ describe("against the real service", () => {
       }
     })()).rejects.toMatchObject({ name: "AbortError" });
     expect(seen.at(-1)).toBe("tool_call_started");
-    const deadline = Date.now() + 10_000;
-    while ((output.match(/CANCELLED/g) ?? []).length === before) {
-      if (Date.now() > deadline) throw new Error(`server never cancelled; output:\n${output}`);
-      await new Promise((r) => setTimeout(r, 50));
-    }
+    await waitForCancel(before);
   }, 15_000);
 });

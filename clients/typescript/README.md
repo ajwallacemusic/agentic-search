@@ -37,8 +37,13 @@ for await (const ev of client.stream({ profile: "general", question: "what treat
 - `search(request)` returns the lean result: no `trace` unless `include_trace`, no hit `content`
   unless `include_content`.
 - `profiles()` lists the service's profiles, sources and limits; `health()` is the liveness check.
-- HTTP failures reject with `AgenticSearchError` (`status`, `detail`): 401 bad key, 404 unknown
-  profile, 422 invalid request, 429 too many concurrent searches, 503 profile unavailable.
+- HTTP failures reject with `AgenticSearchError` (`status`, `detail`): 400 a request the service
+  can't run (for example `include_content` on a profile that forbids it, bad images, no profile
+  when there are several, or unknown `sources` on one-shot search), 401 bad key, 404 unknown
+  profile, 413 request body too large, 422 invalid request, 429 too many concurrent searches,
+  503 profile unavailable.
+- `results_updated` hits carry a snippet; full `content` comes only with `include_content`, if the
+  profile allows it.
 - Images go inline: `images: [{ data: <base64>, mime: "image/png" }]`.
 
 ## Develop
