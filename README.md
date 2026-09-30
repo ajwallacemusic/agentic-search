@@ -44,6 +44,7 @@ turn by turn:
 
 ```python
 from agentic_search import PhaseStarted, ResultsUpdated, SearchFailed, SearchFinished
+from agentic_search.config import load_harness
 
 async with load_harness("search.yaml") as h:
     async with h.stream("what treats headache?", snapshot_k=10) as events:
@@ -61,8 +62,11 @@ async with load_harness("search.yaml") as h:
 
 - Every event has `type`, `schema_version`, `search_id`, `seq` (0, 1, 2, … with no gaps),
   `turn` and `at_ms`. Events are Pydantic models; `ev.model_dump_json()` is ready for SSE.
-- The last event is always `search_finished` or `search_failed`. Invalid arguments raise
-  `HarnessError` from `stream()` itself.
+- The last event is always `search_finished` or `search_failed`, unless the stream is cancelled.
+  Only an invalid `mode`, `top_k` or `snapshot_k` raises `HarnessError` from `stream()` itself;
+  unknown sources and every other failure end the stream with `search_failed`.
+- Event `at_ms` counts from the start of the stream; trace `at_ms` counts from the trace's own
+  start, so the two are not comparable.
 - Leaving the `async with` block or cancelling the consuming task cancels the search, including
   in-flight backend and model calls.
 - Snapshots carry a scrubbed 300-character snippet per hit; pass `include_content=True` for full

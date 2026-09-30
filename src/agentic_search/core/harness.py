@@ -233,9 +233,10 @@ class Harness:
     def stream(self, question: str | Query, *, sources: list[str] | None = None,
                top_k: int = 20, mode: Mode | None = None, budget: Budget | None = None,
                snapshot_k: int = 10, include_content: bool = False) -> SearchStream:
-        """Run one search, yielding typed events as it progresses. Invalid arguments raise
-        HarnessError here, before any event; every other failure ends the stream with a
-        `search_failed` event. The last event is `search_finished` or `search_failed`."""
+        """Run one search, yielding typed events as it progresses. An invalid `mode`,
+        `top_k` or `snapshot_k` raises HarnessError here, before any event; every other failure
+        (including unknown sources) ends the stream with a `search_failed` event. The last event
+        is `search_finished` or `search_failed`, unless the stream is cancelled."""
         opts = self._options(question, sources, top_k, mode, budget, snapshot_k, include_content)
         return SearchStream(self._events(opts, []))
 
