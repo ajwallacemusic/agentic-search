@@ -23,6 +23,7 @@ neo4j = ["neo4j>=5.20"]
 milvus = ["pymilvus>=2.5,<4"]
 gcp = ["google-auth[requests]>=2.29"]
 azure = ["azure-identity>=1.17"]
+server = ["fastapi>=0.115", "uvicorn>=0.30"]
 
 [dependency-groups]
 dev = [
@@ -40,6 +41,8 @@ dev = [
   "pymilvus>=2.5,<4",
   "google-auth[requests]>=2.29",
   "azure-identity>=1.17",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
 ]
 
 [build-system]
