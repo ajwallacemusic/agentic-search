@@ -67,3 +67,11 @@ the named plan ships the feature that exposes them.
 - Stream tests' phase pairing check compares ordered `(phase, turn)` lists but not start-before-finish ordering, and would reject nested phases if any are added.
 - The `SearchStarted.mode` drift test compares against a hard-coded set rather than `harness._MODES`.
 - The delegate trace entry records the post-run turn while `phase_finished(delegate)` uses the start turn.
+
+## Plan 5 final review — deferred
+
+- CORS headers on `500` responses: `ServerErrorMiddleware` sits outside `CORSMiddleware`, so a browser client sees a generic `500` as a CORS failure.
+- A runtime `HarnessError` during `/v1/search` maps to `400`; some are not the client's fault (e.g. every backend failing mid-search) and might deserve a `5xx`.
+- Profile names that are not latin-1 cannot be sent back in the `X-Search-Profile` header.
+- Startup blocks for up to each backend's `discover_timeout` while the lifespan sets profiles up; document it (or set up in the background).
+- Per-key quotas and rate limiting over time (only a concurrency cap exists).

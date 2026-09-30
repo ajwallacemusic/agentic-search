@@ -86,6 +86,12 @@ service:
   cors_origins: ["https://app.example.com"]
   max_concurrent_searches: 16
   default_profile: general
+  keepalive_s: 15              # SSE keep-alive comment after this much silence
+  max_image_bytes: 10000000    # per image, decoded
+  max_images: 4                # per request
+  max_body_bytes: 53398869     # default: room for max_images base64 images + 64 KiB
+  setup_retry_s: 30            # a profile whose setup failed is retried after this long
+  expose_docs: false           # true serves /docs, /redoc and /openapi.json
 profiles:
   general:
     backends: [{name: notes, type: files, root: ./docs, glob: "**/*.md"}]
@@ -100,27 +106,47 @@ profiles:
 SEARCH_API_KEYS=key1,key2 agentic-search serve --config service.yaml --port 8080
 ```
 
+`serve` also takes `--host`, `--log-level` and `--graceful-timeout` (seconds open searches get
+on shutdown, default 10). A config error prints `agentic-search: <message>` and exits 2. API
+keys must be printable ASCII.
+
 | Endpoint | |
 |---|---|
-| `GET /healthz` | Liveness, no auth: `{"status": "ok" \| "degraded"}` |
+| `GET /healthz` | Liveness, no auth: `{"status": "ok" \| "degraded", "version": "<version>"}` |
 | `GET /v1/profiles` | Profiles with their sources, capabilities, budget and limits |
 | `POST /v1/search` | One-shot search; returns the result as JSON |
 | `POST /v1/search/stream` | The same search as `text/event-stream` |
 
 Request body: `{profile?, question, images?: [{data: <base64>, mime}], sources?, mode?, top_k?,
 budget?, include_content?, include_trace?}`, plus `snapshot_k?` for the stream. Send the key as
-`Authorization: Bearer <key>` or `X-API-Key`.
+`Authorization: Bearer <key>` or `X-API-Key`. The key is checked before the body is read.
 
 - Each SSE frame is `id: <seq>`, `event: <type>`, `data: <event JSON>`; a `: keep-alive`
   comment is sent after `keepalive_s` (default 15 s) of silence.
 - The final `search_finished` carries a lean result: no trace unless `include_trace`, no hit
-  content unless `include_content` (and the profile allows it).
+  content unless `include_content` (and the profile allows it). With
+  `allow_include_content: false`, `results_updated` snapshots still carry each hit's text
+  snippet and results still carry the judge's rationales; only the full `content` is withheld.
+- Question images are not echoed back: in `search_started`, `search_finished` and the
+  `/v1/search` body, each question image part keeps `kind` and `mime` but has `data: null`.
 - A request may lower any budget field. Each field is capped by the profile's
   `limits.max_budget` if set there, otherwise by the profile's own budget: to let clients raise
   a field, set `max_budget` for it explicitly.
-- Closing the connection cancels the search, including in-flight backend and model calls.
-- `401` bad key, `404` unknown profile, `422` invalid body, `429` too many concurrent searches,
-  `503` profile unavailable. Failures during a streamed search arrive as a `search_failed` event.
+- Closing the connection cancels the search, including in-flight backend and model calls, on
+  both `/v1/search` and `/v1/search/stream`.
+- Status codes:
+  - `400`: a request the service cannot run. Examples: `include_content` on a profile that
+    forbids it, invalid base64 or too many or too-large images, no `profile` when there are several
+    profiles and no default, and unknown `sources` on `/v1/search`.
+  - `401`: missing or bad key.
+  - `404`: unknown profile.
+  - `413`: body over `max_body_bytes`.
+  - `422`: invalid body.
+  - `429`: too many concurrent searches.
+  - `503`: profile unavailable (setup is retried after `setup_retry_s`).
+
+  Failures during a streamed search, such as unknown `sources`, arrive as a `search_failed`
+  event.
 - Images are always inline base64; the service never reads a client-supplied path or URI.
 - `agentic-search export-schema --out schema/` writes the event JSON Schema and golden SSE
   fixtures that clients test against (committed under `schema/`).
