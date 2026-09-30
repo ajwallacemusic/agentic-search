@@ -120,8 +120,10 @@ class SqlBackend:
         self.max_rows = max_rows
         self.sample_values = sample_values
         self.allowed_columns = columns
+        if native_functions is not None and columns is None:
+            raise ValueError("native_functions needs columns: the function list is part of the allow list")
         self.native_functions = (frozenset(f.upper() for f in native_functions)
-                                 if native_functions else DEFAULT_SQL_FUNCTIONS)
+                                 if native_functions is not None else DEFAULT_SQL_FUNCTIONS)
         self.skipped: list[str] = []
         self._tables: dict[str, TableInfo] | None = None
         self._discover_lock = asyncio.Lock()

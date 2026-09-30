@@ -407,3 +407,79 @@ def test_allow_list_accepts_exists_correlated_and_derived_queries(query, allow, 
 def test_allow_list_rejects_time_travel(query):
     with pytest.raises(NativeQueryRejected, match="past point in time"):
         guard_sql(query, "bigquery", 10, BQ)
+
+
+BQ_CAMEL = SqlAllowList(tables={"Studies": frozenset({"Id", "StudyDescription"})}, db="ds", catalog="p-1")
+PG_CAMEL = SqlAllowList(tables={"Studies": frozenset({"Id", "StudyDescription"})}, db="public")
+MY_CAMEL = SqlAllowList(tables={"Studies": frozenset({"Id", "StudyDescription"})})
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT StudyDescription FROM Studies",
+    "SELECT studydescription FROM Studies",
+    "SELECT `StudyDescription` FROM `Studies`",
+    "SELECT * FROM Studies",
+    "SELECT COUNT(*) FROM Studies",
+    "SELECT s.StudyDescription FROM Studies s",
+    "SELECT StudyDescription FROM p-1.ds.Studies".replace("p-1", "`p-1`"),
+])
+def test_bigquery_mixed_case_names_are_reachable(query):
+    out = guard_sql(query, "bigquery", 10, BQ_CAMEL)
+    assert "Studies" in out
+    assert "patient" not in out.lower()
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT StudyDescription FROM studies",  # table names are case-sensitive on BigQuery
+    "SELECT * FROM STUDIES",
+    "SELECT PatientName FROM Studies",
+    "SELECT StudyDescription FROM `p-1`.ds.studies",
+])
+def test_bigquery_mixed_case_allow_list_still_refuses(query):
+    with pytest.raises(NativeQueryRejected):
+        guard_sql(query, "bigquery", 10, BQ_CAMEL)
+
+
+@pytest.mark.parametrize("query", [
+    'SELECT "StudyDescription" FROM "Studies"',
+    'SELECT "Id", "StudyDescription" FROM "Studies"',
+    'SELECT * FROM "Studies"',
+    'SELECT COUNT(*) FROM "Studies"',
+    'SELECT s."StudyDescription" FROM "Studies" s',
+])
+def test_postgres_quoted_mixed_case_names_are_reachable(query):
+    out = guard_sql(query, "postgres", 10, PG_CAMEL)
+    assert '"Studies"' in out
+
+
+@pytest.mark.parametrize("query", [
+    'SELECT StudyDescription FROM "Studies"',  # unquoted folds to lower case, a different column
+    'SELECT "StudyDescription" FROM Studies',
+    'SELECT "PatientName" FROM "Studies"',
+    'SELECT * FROM "studies"',
+])
+def test_postgres_mixed_case_allow_list_still_refuses(query):
+    with pytest.raises(NativeQueryRejected):
+        guard_sql(query, "postgres", 10, PG_CAMEL)
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT StudyDescription FROM Studies",
+    "SELECT `StudyDescription` FROM `Studies`",
+    "SELECT * FROM Studies",
+])
+def test_mysql_mixed_case_names_are_reachable(query):
+    assert "Studies" in guard_sql(query, "mysql", 10, MY_CAMEL)
+
+
+def test_mysql_mixed_case_allow_list_still_refuses():
+    with pytest.raises(NativeQueryRejected):
+        guard_sql("SELECT PatientName FROM Studies", "mysql", 10, MY_CAMEL)
+
+
+def test_postgres_mixed_case_schema_stays_exact():
+    allow = SqlAllowList(tables={"docs": frozenset({"id"})}, db="Clinic")
+    assert guard_sql("SELECT id FROM docs", "postgres", 10, allow) == \
+        'SELECT docs.id AS id FROM "Clinic".docs AS docs LIMIT 10'
+    with pytest.raises(NativeQueryRejected):
+        guard_sql("SELECT id FROM clinic.docs", "postgres", 10, allow)

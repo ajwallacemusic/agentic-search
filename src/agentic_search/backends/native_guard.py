@@ -53,19 +53,35 @@ class SqlAllowList:
         if self.catalog is not None and self.db is None:
             raise ValueError("SqlAllowList: a catalog needs a db")
 
-    def schema(self) -> dict[str, Any]:
+    def resolved_tables(self, dialect: str) -> dict[str, frozenset[str]]:
+        """The allowed tables keyed the way a parsed query names them. A table name is exact,
+        because a qualified BigQuery table and a quoted Postgres table are case-sensitive, and
+        a column name goes through the dialect's own identifier normalization, which makes
+        BigQuery columns lower case and leaves Postgres and MySQL columns as stored."""
+        from sqlglot import exp
+        from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
+
+        def column_key(name: str) -> str:
+            return normalize_identifiers(exp.to_identifier(name, quoted=True), dialect=dialect).name
+
+        return {table: frozenset(column_key(c) for c in columns)
+                for table, columns in self.tables.items()}
+
+    def schema(self, dialect: str) -> Any:
         """The nested schema `qualify` resolves against: allowed columns only, sorted so `*`
-        expands in a stable order."""
+        expands in a stable order. Names are already resolved, so the schema keeps them as is."""
+        from sqlglot.schema import MappingSchema
+
         schema: dict[str, Any] = {table: {column: "UNKNOWN" for column in sorted(columns)}
-                                  for table, columns in self.tables.items()}
+                                  for table, columns in self.resolved_tables(dialect).items()}
         if self.db is not None:
             schema = {self.db: schema}
         if self.catalog is not None:
             schema = {self.catalog: schema}
-        return schema
+        return MappingSchema(schema, dialect=dialect, normalize=False)
 
 
-def _check_columns_by_scope(stmt: Any, dialect: str, allow: SqlAllowList) -> None:
+def _check_columns_by_scope(stmt: Any, dialect: str, allowed: Mapping[str, frozenset[str]]) -> None:
     """Check every qualified column again, without trusting `qualify`: its qualifier must name a
     source in scope, and that source must hold the column. A source is an allowed table with
     the column in its allowed set, or a derived table or CTE that outputs it."""
@@ -91,13 +107,40 @@ def _check_columns_by_scope(stmt: Any, dialect: str, allow: SqlAllowList) -> Non
                 if column.name not in source.expression.named_selects:
                     raise refuse(column)
             elif isinstance(source, exp.Table):
-                if column.name not in allow.tables.get(source.name, frozenset()):
+                if column.name not in allowed.get(source.name, frozenset()):
                     raise refuse(column)
             else:
                 raise refuse(column)
     for column in stmt.find_all(exp.Column):
         if column.table and id(column) not in seen:
             raise refuse(column)
+
+
+def _pin_table_qualifiers(stmt: Any, dialect: str, allow: SqlAllowList) -> None:
+    """Give every unqualified table the allow list's db and catalog before `qualify` runs.
+
+    BigQuery table names are case-sensitive only when qualified, so sqlglot lower-cases a bare
+    `Studies` and the query would run against `studies`. A CTE reference stays bare. A db or
+    catalog that the dialect would fold, such as a Postgres schema `Clinic`, is quoted to stay exact."""
+    from sqlglot import exp
+    from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
+
+    if allow.db is None:
+        return
+
+    def identifier(name: str) -> Any:
+        ident = exp.to_identifier(name)
+        if normalize_identifiers(ident.copy(), dialect=dialect).name != name:
+            ident = exp.to_identifier(name, quoted=True)
+        return ident
+
+    ctes = {cte.alias_or_name.lower() for cte in stmt.find_all(exp.CTE)}
+    for table in stmt.find_all(exp.Table):
+        if table.db or table.name.lower() in ctes:
+            continue
+        table.set("db", identifier(allow.db))
+        if allow.catalog is not None:
+            table.set("catalog", identifier(allow.catalog))
 
 
 def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
@@ -109,8 +152,9 @@ def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
     from sqlglot.errors import OptimizeError
     from sqlglot.optimizer.qualify import qualify
 
+    _pin_table_qualifiers(stmt, dialect, allow)
     try:
-        stmt = qualify(stmt, schema=allow.schema(), dialect=dialect, catalog=allow.catalog,
+        stmt = qualify(stmt, schema=allow.schema(dialect), dialect=dialect, catalog=allow.catalog,
                        db=allow.db, validate_qualify_columns=True, quote_identifiers=False)
     except OptimizeError as exc:
         raise NativeQueryRejected(
@@ -135,7 +179,8 @@ def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
     # that alias can be the name of a real table. The scope pass below cannot vouch for it.
     for lateral in stmt.find_all(exp.Lateral):
         raise NativeQueryRejected(f"{lateral.sql(dialect=dialect)[:40]}... is not allowed in native SQL")
-    _check_columns_by_scope(stmt, dialect, allow)
+    allowed = allow.resolved_tables(dialect)
+    _check_columns_by_scope(stmt, dialect, allowed)
     ctes = {cte.alias_or_name for cte in stmt.find_all(exp.CTE)}
     for table in stmt.find_all(exp.Table):
         # Time travel reads a table as it was, including rows deleted since.
@@ -145,7 +190,7 @@ def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
         if table.name in ctes and not table.db:
             continue
         # A query naming no column, such as COUNT(*), resolves against any table; check each one.
-        if (table.name not in allow.tables or (table.db or None) != allow.db
+        if (table.name not in allowed or (table.db or None) != allow.db
                 or (table.catalog or None) != allow.catalog):
             raise NativeQueryRejected(f"table {table.sql(dialect=dialect)} is not allowed in native SQL")
     for func in stmt.find_all(exp.Func):
