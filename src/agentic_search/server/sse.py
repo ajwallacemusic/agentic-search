@@ -18,7 +18,8 @@ def format_sse(event_type: str, data: str, event_id: int | None = None) -> bytes
     return ("\n".join(lines) + "\n\n").encode()
 
 
-async def _wait_for_disconnect(receive: Callable[[], Awaitable[dict[str, Any]]]) -> None:
+async def wait_for_disconnect(receive: Callable[[], Awaitable[dict[str, Any]]]) -> None:
+    """Return once the ASGI `receive` channel reports `http.disconnect`."""
     while True:
         message = await receive()
         if message.get("type") == "http.disconnect":
@@ -33,7 +34,7 @@ async def sse_body(stream: SearchStream, render: Callable[[SearchEvent], str], *
     of silence. If the client disconnects (seen via `receive`), the search is cancelled."""
     iterator = stream.__aiter__()
     pending: asyncio.Future[SearchEvent] | None = None
-    watcher = asyncio.ensure_future(_wait_for_disconnect(receive)) if receive else None
+    watcher = asyncio.ensure_future(wait_for_disconnect(receive)) if receive else None
     try:
         while True:
             if pending is None:

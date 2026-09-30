@@ -150,6 +150,11 @@ for `/v1/*`:
   search. `/v1/profiles` lists it with `available: false` and a scrubbed `error`.
 - In `/v1/search`, a `HarnessError`, for example unknown sources, returns `400` with the scrubbed
   message. Any other exception returns a generic `500`, with no detail leaked.
+- **`/v1/search` disconnect** (final review): the search runs as a task raced against
+  `sse.wait_for_disconnect(request.receive)`. If the client disconnects first, the search is
+  cancelled (and awaited) and the route returns an empty `499` that nobody reads; the slot is
+  released only once the search has stopped. Closing the connection therefore cancels the
+  search on both routes.
 - **Capacity:** there is a non-blocking gate of `max_concurrent_searches`. A search that cannot
   get a slot immediately returns `429`. The slot is held for the whole search: for streams, it is
   released when the response ends in any way, even if the body never starts.
@@ -240,7 +245,8 @@ free port:
 - `HarnessError` gives `400`, and capacity gives `429` for both routes.
 - Stream framing: ids equal `seq`, event equals `type`, the lean finish, `snapshot_k`, and
   `search_failed` as an event.
-- The slot is released after streams.
+- The slot is released after streams. A `/v1/search` client disconnect cancels the backend call
+  and frees the slot.
 - `format_sse`, keep-alives during silence without dropping events, disconnect via `receive`
   cancelling the backend call, and closing the body cancelling it.
 - A live uvicorn stream and search; a live client disconnect cancels the backend call within

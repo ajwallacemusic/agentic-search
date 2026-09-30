@@ -364,3 +364,49 @@ def test_body_cap_default_and_image_count_bound():
     assert service(max_body_bytes=77).body_limit() == 77
     with pytest.raises(ValidationError):
         SearchRequest(question="q", images=[{"data": "AA=="}] * 33)
+
+
+async def test_search_disconnect_cancels_search_and_frees_slot(docs_backend):
+    from agentic_search.core.harness import HarnessSettings
+
+    entered, cancelled = asyncio.Event(), asyncio.Event()
+    mode = {"slow": True}
+
+    async def execute(op):
+        if not mode["slow"]:
+            return []
+        entered.set()
+        try:
+            await asyncio.sleep(600)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return []
+
+    docs_backend.execute = execute
+    h = make_harness(docs_backend, settings=HarnessSettings(call_timeout=600))
+    app = create_app(service(max_concurrent_searches=1), {"demo": h})
+    scope = {"type": "http", "method": "POST", "path": "/v1/search",
+             "headers": [(b"content-type", b"application/json")], "query_string": b"",
+             "http_version": "1.1", "scheme": "http", "server": ("test", 80),
+             "client": ("t", 1), "root_path": "",
+             "asgi": {"version": "3.0", "spec_version": "2.4"}}
+    requested, sent = [], []
+
+    async def receive():
+        if not requested:
+            requested.append(1)
+            return {"type": "http.request", "body": b'{"question": "q"}', "more_body": False}
+        await entered.wait()  # the client goes away once the backend call is in flight
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        sent.append(message)
+
+    await asyncio.wait_for(app(scope, receive, send), 5)
+    assert cancelled.is_set()
+    assert sent[0]["type"] == "http.response.start" and sent[0]["status"] == 499
+    mode["slow"] = False
+    async with client(app) as c:
+        again = await c.post("/v1/search", json={"question": "q"})
+    assert again.status_code == 200

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable
 
 import anyio
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.responses import StreamingResponse
+from starlette.responses import Response, StreamingResponse
 
 from agentic_search import __version__
 from agentic_search.core.harness import Harness, HarnessError
@@ -25,7 +26,7 @@ from agentic_search.server.models import (
     render_event,
     resolve_budget,
 )
-from agentic_search.server.sse import sse_body
+from agentic_search.server.sse import sse_body, wait_for_disconnect
 
 
 class _Gate:
@@ -161,18 +162,37 @@ def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) ->
             })
         return {"profiles": out}
 
-    @app.post("/v1/search", dependencies=[Depends(require_key)])
-    async def search(req: SearchRequest) -> dict[str, Any]:
+    @app.post("/v1/search", dependencies=[Depends(require_key)], response_model=None)
+    async def search(req: SearchRequest, request: Request) -> dict[str, Any] | Response:
         name, profile = resolve(req.profile)
         opts = options(req, profile)
         await ready(name, profile)
         if not gate.try_acquire():
             raise HTTPException(429, "too many concurrent searches")
+        task = asyncio.ensure_future(profile.harness.search(opts.pop("question"), **opts))
+        watcher = asyncio.ensure_future(wait_for_disconnect(request.receive))
         try:
-            result = await profile.harness.search(opts.pop("question"), **opts)
+            await asyncio.wait({task, watcher}, return_when=asyncio.FIRST_COMPLETED)
+            if not task.done():
+                # The client went away: cancel the search and its in-flight calls. 499 is
+                # nginx's "client closed request"; nobody is left to read it.
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+                return Response(status_code=499)
+            result = task.result()
         except HarnessError as exc:
             raise HTTPException(400, scrub(str(exc))) from exc
         finally:
+            watcher.cancel()
+            if watcher.done() and not watcher.cancelled():
+                watcher.exception()
+            if not task.done():  # this handler itself was cancelled
+                task.cancel()
+                with anyio.CancelScope(shield=True):
+                    await asyncio.wait({task})  # hold the slot until the search has stopped
+                if not task.cancelled():
+                    task.exception()  # mark retrieved; nobody is waiting for this result
             gate.release()
         return lean_result(result, include_content=req.include_content,
                            include_trace=req.include_trace)
