@@ -185,6 +185,10 @@ def _check_braces(code: str) -> None:
 
 def guard_cypher(query: str, max_rows: int) -> str:
     """Reject write clauses and non-allowlisted procedures; wrap and cap with LIMIT."""
+    # Neo4j decodes \uXXXX escapes before tokenising, anywhere in the query, so an escape could
+    # hide a keyword, a brace or a quote from every check below.
+    if re.search(r"\\u", query, re.IGNORECASE):
+        raise NativeQueryRejected("unicode escapes are not allowed in native Cypher")
     code = _cypher_code(query)
     if ";" in code.strip().rstrip(";"):
         raise NativeQueryRejected("native Cypher must be exactly one statement")

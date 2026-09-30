@@ -246,3 +246,21 @@ def test_cypher_rejects_unbalanced_braces(bad):
 def test_cypher_allows_balanced_subquery_and_braces_in_strings():
     q = "MATCH (n) CALL { WITH n RETURN n.x AS x } RETURN n, x, '}' AS s, {a: 1} AS m"
     assert guard_cypher(q, 3) == f"CALL {{ {q} }} RETURN * LIMIT 3"
+
+
+def test_cypher_unicode_escape_bypasses():
+    # Neo4j decodes backslash-u XXXX escapes before tokenising, so escapes can hide CALL,
+    # braces, quotes or write keywords from the guard.
+    u = "\\" + "u"
+    for bad in [
+        f"{u}0043ALL dbms.listConfig() YIELD name, value RETURN name, value",
+        (f"UNWIND range(1,10) AS id RETURN id {u}007d RETURN id UNION ALL {u}0043ALL {u}007b "
+         "UNWIND range(1,10) AS id RETURN id"),
+        f"MATCH (n) WHERE n.x = 'x{u}0027' SET n.y = 1 RETURN n",
+        f"MATCH (n) {u}0043REATE (m) RETURN n",
+        f"MATCH (n) WHERE n.x = '{u.upper()}0043' RETURN n",
+        f"MATCH (n) WHERE n.x = '{u}u0043' RETURN n",
+    ]:
+        assert bad.count("\\") >= 1
+        with pytest.raises(NativeQueryRejected, match="unicode escapes"):
+            guard_cypher(bad, 5)
