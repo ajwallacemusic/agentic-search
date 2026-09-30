@@ -2,6 +2,7 @@ import pytest
 
 from agentic_search.backends.native_guard import (
     NativeQueryRejected,
+    SqlAllowList,
     guard_cypher,
     guard_opensearch,
     guard_sql,
@@ -264,3 +265,309 @@ def test_cypher_unicode_escape_bypasses():
         assert bad.count("\\") >= 1
         with pytest.raises(NativeQueryRejected, match="unicode escapes"):
             guard_cypher(bad, 5)
+
+
+BQ = SqlAllowList(tables={"visits": frozenset({"id", "dx", "note"})}, db="ds", catalog="p-1")
+PG = SqlAllowList(tables={"docs": frozenset({"id", "title"})}, db="public")
+
+
+def test_allow_list_resolves_and_qualifies():
+    assert guard_sql("SELECT dx FROM visits", "bigquery", 50, BQ) == (
+        "SELECT visits.dx AS dx FROM `p-1`.ds.visits AS visits LIMIT 50")
+    assert guard_sql("SELECT title FROM docs", "postgres", 50, PG) == (
+        "SELECT docs.title AS title FROM public.docs AS docs LIMIT 50")
+
+
+def test_allow_list_accepts_ctes_aggregates_and_backticks():
+    q = ("WITH c AS (SELECT dx, COUNT(*) AS n FROM `p-1.ds.visits` v "
+         "WHERE LOWER(v.note) LIKE '%pain%' GROUP BY dx) SELECT dx, n FROM c ORDER BY n DESC")
+    out = guard_sql(q, "bigquery", 10, BQ)
+    assert "COUNT(*)" in out and out.endswith("LIMIT 10")
+    assert guard_sql("SELECT `dx` FROM `p-1`.`ds`.`visits`", "bigquery", 5, BQ).endswith("LIMIT 5")
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT ssn FROM visits",
+    "SELECT dx FROM visits WHERE ssn = '1'",
+    "WITH ssn AS (SELECT 1 AS x) SELECT ssn FROM visits",
+])
+def test_allow_list_rejects_hidden_columns(query):
+    with pytest.raises(NativeQueryRejected, match="allowed tables and columns"):
+        guard_sql(query, "bigquery", 10, BQ)
+
+
+def test_alias_reusing_a_hidden_name_never_reads_it():
+    out = guard_sql("SELECT dx AS ssn, ssn FROM visits", "bigquery", 10, BQ)
+    assert "visits.ssn" not in out and "visits.dx" in out
+
+
+def test_star_expands_to_allowed_columns_only():
+    out = guard_sql("SELECT * FROM visits", "bigquery", 10, BQ)
+    assert out == ("SELECT visits.dx AS dx, visits.id AS id, visits.note AS note "
+                   "FROM `p-1`.ds.visits AS visits LIMIT 10")
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT COUNT(*) FROM people",
+    "SELECT COUNT(*) FROM `p-1.other.visits`",
+    "SELECT COUNT(*) FROM `q-2.ds.visits`",
+])
+def test_allow_list_rejects_other_tables(query):
+    with pytest.raises(NativeQueryRejected, match="table"):
+        guard_sql(query, "bigquery", 10, BQ)
+
+
+@pytest.mark.parametrize("query,name", [
+    ("SELECT EXTERNAL_QUERY('c', 'SELECT 1') FROM visits", "EXTERNAL_QUERY"),
+    ("SELECT SESSION_USER() FROM visits", "SESSION_USER"),
+    ("SELECT x FROM UNNEST([1, 2]) AS x", "UNNEST"),
+])
+def test_allow_list_rejects_functions_outside_the_list(query, name):
+    with pytest.raises(NativeQueryRejected):
+        guard_sql(query, "bigquery", 10, BQ)
+
+
+def test_allow_list_takes_custom_functions():
+    only_count = SqlAllowList(tables=BQ.tables, db="ds", catalog="p-1", functions=frozenset({"COUNT"}))
+    assert "COUNT(*)" in guard_sql("SELECT COUNT(*) FROM visits", "bigquery", 10, only_count)
+    with pytest.raises(NativeQueryRejected, match="LOWER"):
+        guard_sql("SELECT LOWER(dx) FROM visits", "bigquery", 10, only_count)
+
+
+def test_catalog_needs_db():
+    with pytest.raises(ValueError):
+        SqlAllowList(tables={"t": frozenset({"a"})}, catalog="p-1")
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT dx FROM visits GROUP BY dx HAVING MAX(ssn) > 1",
+    "SELECT COUNT(*) FROM visits HAVING MAX(ssn) > 1",
+    "SELECT dx FROM visits GROUP BY dx HAVING ssn > 1",
+    "SELECT v FROM visits v",
+    "SELECT visits FROM visits",
+    "SELECT COALESCE(v, NULL) FROM visits v",
+])
+def test_allow_list_rejects_hidden_columns_behind_having_and_whole_rows(query):
+    # qualify leaves an unqualified HAVING column alone, and a bare table alias selects every
+    # column of the real row, hidden ones included.
+    with pytest.raises(NativeQueryRejected, match="allowed tables and columns"):
+        guard_sql(query, "bigquery", 10, BQ)
+
+
+def test_allow_list_rejects_a_whole_row_in_postgres():
+    with pytest.raises(NativeQueryRejected, match="allowed tables and columns"):
+        guard_sql("SELECT docs FROM docs", "postgres", 10, PG)
+
+
+def test_allow_list_accepts_boolean_operators_and_having_on_an_alias():
+    out = guard_sql("SELECT dx, COUNT(*) AS n FROM visits WHERE dx = 'a' AND id = '1' OR note IS NULL "
+                    "GROUP BY dx HAVING n > 1 ORDER BY n DESC", "bigquery", 10, BQ)
+    assert "HAVING COUNT(*) > 1" in out and out.endswith("ORDER BY n DESC LIMIT 10")
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT a.title, docs.secret FROM docs a LEFT JOIN LATERAL "
+    "(SELECT secret FROM docs WHERE docs.id = a.id) docs ON TRUE",
+    "SELECT a.title FROM docs a, LATERAL (SELECT secret FROM docs) docs",
+    "SELECT a.title FROM docs a CROSS JOIN LATERAL (SELECT secret FROM docs) docs",
+    "SELECT a.title FROM docs a JOIN LATERAL (SELECT secret FROM docs) docs ON TRUE",
+    "SELECT title FROM docs WHERE EXISTS (SELECT 1 FROM (SELECT id FROM docs) docs WHERE docs.secret = 1)",
+    "SELECT title FROM docs WHERE EXISTS (SELECT 1 FROM docs d2 WHERE d2.id = docs.secret)",
+])
+def test_allow_list_rejects_lateral_and_hidden_columns_behind_a_shadowed_alias(query):
+    with pytest.raises(NativeQueryRejected):
+        guard_sql(query, "postgres", 10, PG)
+
+
+@pytest.mark.parametrize("query,allow,dialect", [
+    ("SELECT otherds.LOWER(dx) FROM visits", BQ, "bigquery"),
+    ("SELECT `other-proj`.ds.COUNT(dx) FROM visits", BQ, "bigquery"),
+    ("SELECT evil.lower(title) FROM docs", PG, "postgres"),
+])
+def test_allow_list_rejects_a_qualified_function_call(query, allow, dialect):
+    with pytest.raises(NativeQueryRejected, match="qualified function call"):
+        guard_sql(query, dialect, 10, allow)
+
+
+@pytest.mark.parametrize("query,allow,dialect", [
+    ("SELECT dx FROM visits v WHERE EXISTS (SELECT 1 FROM visits v2 WHERE v2.id = v.id)", BQ, "bigquery"),
+    ("SELECT title FROM docs WHERE NOT EXISTS (SELECT 1 FROM docs d2 WHERE d2.id = docs.id)", PG, "postgres"),
+    ("SELECT title FROM docs WHERE id IN (SELECT x.id FROM docs x WHERE x.id = docs.id)", PG, "postgres"),
+    ("SELECT d.title FROM (SELECT title, id FROM docs) d JOIN docs e ON d.id = e.id", PG, "postgres"),
+    ("SELECT * FROM docs a JOIN docs b ON a.id = b.id", PG, "postgres"),
+])
+def test_allow_list_accepts_exists_correlated_and_derived_queries(query, allow, dialect):
+    assert guard_sql(query, dialect, 10, allow).endswith("LIMIT 10")
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT dx FROM visits FOR SYSTEM_TIME AS OF '2026-01-01'",
+    "SELECT dx FROM visits FOR SYSTEM_TIME AS OF TIMESTAMP '2026-01-01'",
+])
+def test_allow_list_rejects_time_travel(query):
+    with pytest.raises(NativeQueryRejected, match="past point in time"):
+        guard_sql(query, "bigquery", 10, BQ)
+
+
+BQ_CAMEL = SqlAllowList(tables={"Studies": frozenset({"Id", "StudyDescription"})}, db="ds", catalog="p-1")
+PG_CAMEL = SqlAllowList(tables={"Studies": frozenset({"Id", "StudyDescription"})}, db="public")
+MY_CAMEL = SqlAllowList(tables={"Studies": frozenset({"Id", "StudyDescription"})})
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT StudyDescription FROM Studies",
+    "SELECT studydescription FROM Studies",
+    "SELECT `StudyDescription` FROM `Studies`",
+    "SELECT * FROM Studies",
+    "SELECT COUNT(*) FROM Studies",
+    "SELECT s.StudyDescription FROM Studies s",
+    "SELECT StudyDescription FROM p-1.ds.Studies".replace("p-1", "`p-1`"),
+])
+def test_bigquery_mixed_case_names_are_reachable(query):
+    out = guard_sql(query, "bigquery", 10, BQ_CAMEL)
+    assert "Studies" in out
+    assert "patient" not in out.lower()
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT StudyDescription FROM studies",  # table names are case-sensitive on BigQuery
+    "SELECT * FROM STUDIES",
+    "SELECT PatientName FROM Studies",
+    "SELECT StudyDescription FROM `p-1`.ds.studies",
+])
+def test_bigquery_mixed_case_allow_list_still_refuses(query):
+    with pytest.raises(NativeQueryRejected):
+        guard_sql(query, "bigquery", 10, BQ_CAMEL)
+
+
+@pytest.mark.parametrize("query", [
+    'SELECT "StudyDescription" FROM "Studies"',
+    'SELECT "Id", "StudyDescription" FROM "Studies"',
+    'SELECT * FROM "Studies"',
+    'SELECT COUNT(*) FROM "Studies"',
+    'SELECT s."StudyDescription" FROM "Studies" s',
+])
+def test_postgres_quoted_mixed_case_names_are_reachable(query):
+    out = guard_sql(query, "postgres", 10, PG_CAMEL)
+    assert '"Studies"' in out
+
+
+@pytest.mark.parametrize("query", [
+    'SELECT StudyDescription FROM "Studies"',  # unquoted folds to lower case, a different column
+    'SELECT "StudyDescription" FROM Studies',
+    'SELECT "PatientName" FROM "Studies"',
+    'SELECT * FROM "studies"',
+])
+def test_postgres_mixed_case_allow_list_still_refuses(query):
+    with pytest.raises(NativeQueryRejected):
+        guard_sql(query, "postgres", 10, PG_CAMEL)
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT StudyDescription FROM Studies",
+    "SELECT `StudyDescription` FROM `Studies`",
+    "SELECT * FROM Studies",
+])
+def test_mysql_mixed_case_names_are_reachable(query):
+    assert "Studies" in guard_sql(query, "mysql", 10, MY_CAMEL)
+
+
+def test_mysql_mixed_case_allow_list_still_refuses():
+    with pytest.raises(NativeQueryRejected):
+        guard_sql("SELECT PatientName FROM Studies", "mysql", 10, MY_CAMEL)
+
+
+def test_postgres_mixed_case_schema_stays_exact():
+    allow = SqlAllowList(tables={"docs": frozenset({"id"})}, db="Clinic")
+    assert guard_sql("SELECT id FROM docs", "postgres", 10, allow) == \
+        'SELECT docs.id AS id FROM "Clinic".docs AS docs LIMIT 10'
+    with pytest.raises(NativeQueryRejected):
+        guard_sql("SELECT id FROM clinic.docs", "postgres", 10, allow)
+
+
+PG_VISITS = SqlAllowList(tables={"visits": frozenset({"id", "dx"})}, db="public")
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT id, dx AS ssn FROM visits ORDER BY ssn || '' LIMIT 1",
+    "SELECT id, dx AS ssn FROM visits ORDER BY LENGTH(ssn)",
+    "SELECT id, dx AS ssn FROM visits WHERE id = '2' "
+    "ORDER BY 1 / (CASE WHEN ssn LIKE '1%' THEN 1 ELSE 0 END)",
+])
+def test_postgres_alias_inside_an_order_by_expression_is_refused(query):
+    # Postgres binds a select alias only when it is the whole sort term. Inside an expression the
+    # same name binds to the table column, which here is the hidden `ssn`.
+    with pytest.raises(NativeQueryRejected, match="allowed tables and columns"):
+        guard_sql(query, "postgres", 10, PG_VISITS)
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT id, dx AS ssn FROM visits ORDER BY ssn",
+    "SELECT id, dx AS ssn FROM visits ORDER BY ssn DESC",
+    "SELECT dx, COUNT(*) AS n FROM visits GROUP BY dx ORDER BY n DESC, dx",
+])
+def test_postgres_alias_as_a_whole_sort_term_is_accepted(query):
+    assert guard_sql(query, "postgres", 10, PG_VISITS).endswith("LIMIT 10")
+
+
+CTE_SHADOW = [
+    "SELECT * FROM people WHERE EXISTS (WITH people AS (SELECT 1 AS n) SELECT n FROM people)",
+    "SELECT * FROM (WITH people AS (SELECT 1 AS n) SELECT n FROM people) a, people",
+    "SELECT COUNT(*) FROM people WHERE EXISTS (WITH people AS (SELECT 1 AS n) SELECT n FROM people)",
+    "WITH people AS (SELECT * FROM people) SELECT * FROM people",
+]
+CTE_ALLOW = {"mysql": SqlAllowList(tables={"docs": frozenset({"id", "title"})}),
+             "postgres": SqlAllowList(tables={"docs": frozenset({"id", "title"})}, db="public"),
+             "bigquery": SqlAllowList(tables={"docs": frozenset({"id", "title"})}, db="ds", catalog="p-1")}
+
+
+@pytest.mark.parametrize("dialect", ["mysql", "postgres", "bigquery"])
+@pytest.mark.parametrize("query", CTE_SHADOW)
+def test_a_cte_name_covers_only_the_scope_that_declares_it(query, dialect):
+    # A CTE declared inside a subquery, or a non-recursive CTE's own body, does not rename the
+    # real table of that name elsewhere. MySQL has no db to pin, so only the scope tells them apart.
+    with pytest.raises(NativeQueryRejected, match="people"):
+        guard_sql(query, dialect, 10, CTE_ALLOW[dialect])
+
+
+@pytest.mark.parametrize("dialect", ["mysql", "postgres", "bigquery"])
+@pytest.mark.parametrize("query", [
+    "WITH people AS (SELECT id FROM docs) SELECT * FROM people",
+    "WITH people AS (SELECT id FROM docs) SELECT title FROM docs WHERE EXISTS (SELECT 1 FROM people)",
+    "WITH a AS (SELECT id FROM docs), b AS (SELECT id FROM a) SELECT * FROM b",
+    "SELECT x.id FROM (WITH people AS (SELECT id FROM docs) SELECT id FROM people) x",
+    "WITH RECURSIVE r AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r",
+])
+def test_a_cte_reference_in_its_own_scope_is_accepted(query, dialect):
+    assert guard_sql(query, dialect, 10, CTE_ALLOW[dialect]).endswith("LIMIT 10")
+
+
+PG_ODD_NAMES = SqlAllowList(tables={"visits": frozenset({"id", "Dx", "first name"})}, db="public")
+
+
+@pytest.mark.parametrize("query", [
+    'SELECT * FROM visits a JOIN visits b USING ("Dx")',
+    "SELECT * FROM visits a NATURAL JOIN visits b",
+    "SELECT * FROM visits",
+])
+def test_resolved_sql_quotes_names_that_need_it(query):
+    # Printed bare, `Dx` folds to a hidden lowercase `dx` on Postgres and `first name` is not SQL.
+    out = guard_sql(query, "postgres", 10, PG_ODD_NAMES)
+    assert '."Dx"' in out and ".Dx" not in out
+    assert '."first name"' in out and ".first name" not in out
+
+
+def test_resolved_sql_keeps_safe_names_bare():
+    out = guard_sql('SELECT id, "Dx" FROM visits', "postgres", 10, PG_ODD_NAMES)
+    assert out == 'SELECT visits.id AS id, visits."Dx" AS "Dx" FROM public.visits AS visits LIMIT 10'
+
+
+def test_bigquery_result_names_follow_the_table_a_column_comes_from():
+    # `visits.id` and `Studies.Id` differ only in case, so the name comes from the source table.
+    allow = SqlAllowList(tables={"visits": frozenset({"id"}), "Studies": frozenset({"Id", "Modality"})},
+                         db="ds", catalog="p-1")
+    out = guard_sql("SELECT Id, s.Modality FROM Studies s", "bigquery", 10, allow)
+    assert out == "SELECT s.id AS Id, s.modality AS Modality FROM `p-1`.ds.Studies AS s LIMIT 10"
+    out = guard_sql("SELECT v.id, s.Id AS StudyId FROM visits v JOIN Studies s ON v.id = s.id",
+                    "bigquery", 10, allow)
+    assert "v.id AS id," in out and "s.id AS StudyId" in out

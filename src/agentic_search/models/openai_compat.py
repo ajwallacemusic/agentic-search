@@ -6,7 +6,10 @@ from __future__ import annotations
 import base64
 import json
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from agentic_search.embedders.auth import Auth
 
 from agentic_search.core.types import Content, ImagePart, image_bytes, text_of
 from agentic_search.models.base import ToolCall, ToolSpec
@@ -31,7 +34,8 @@ class OpenAICompatClient:
     def __init__(self, model: str, *, base_url: str | None = None, api_key: str | None = None,
                  client: Any = None, supports_images: bool = False,
                  price_per_mtok: tuple[float, float] | None = None, id: str | None = None,
-                 max_tokens_param: str = "max_tokens", max_retries: int = 3):
+                 max_tokens_param: str = "max_tokens", max_retries: int = 3,
+                 auth: Auth | None = None):
         if client is None:
             from openai import AsyncOpenAI
             key = api_key or os.environ.get("OPENAI_API_KEY") or "unused"
@@ -41,6 +45,7 @@ class OpenAICompatClient:
         self.supports_images = supports_images
         self.price = price_per_mtok
         self.max_tokens_param = max_tokens_param
+        self.auth = auth
         self.id = id or f"openai:{model}"
 
     async def chat(self, system: str, messages: list[ChatMessage], *,
@@ -57,6 +62,9 @@ class OpenAICompatClient:
                 for t in tools]
         if tool_choice:
             kwargs["tool_choice"] = {"type": "function", "function": {"name": tool_choice}}
+        if self.auth is not None:
+            # Headers per call, so a short-lived token is refreshed rather than frozen at startup.
+            kwargs["extra_headers"] = await self.auth.headers()
         resp = await self._client.chat.completions.create(**kwargs)
         choice = resp.choices[0]
         msg = choice.message

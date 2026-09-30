@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from agentic_search.backends.base import (
@@ -16,7 +16,7 @@ from agentic_search.backends.base import (
     rrf_merge,
     strip_collection,
 )
-from agentic_search.backends.native_guard import guard_sql
+from agentic_search.backends.native_guard import DEFAULT_SQL_FUNCTIONS, SqlAllowList, guard_sql
 from agentic_search.backends.sql import (
     Dialect,
     Params,
@@ -105,7 +105,9 @@ class SqlBackend:
     def __init__(self, name: str, *, tables: list[str] | None = None,
                  id_columns: dict[str, str] | None = None, embedders: dict[str, str] | None = None,
                  vector_metric: str = "cosine", native_query: bool = False,
-                 description: str | None = None, max_rows: int = 100, sample_values: bool = True):
+                 description: str | None = None, max_rows: int = 100, sample_values: bool = True,
+                 columns: dict[str, list[str]] | None = None,
+                 native_functions: list[str] | None = None):
         if vector_metric not in METRICS:
             raise ValueError(f"vector_metric must be one of {METRICS}")
         self.name = name
@@ -117,6 +119,11 @@ class SqlBackend:
         self.description = description
         self.max_rows = max_rows
         self.sample_values = sample_values
+        self.allowed_columns = columns
+        if native_functions is not None and columns is None:
+            raise ValueError("native_functions needs columns: the function list is part of the allow list")
+        self.native_functions = (frozenset(f.upper() for f in native_functions)
+                                 if native_functions is not None else DEFAULT_SQL_FUNCTIONS)
         self.skipped: list[str] = []
         self._tables: dict[str, TableInfo] | None = None
         self._discover_lock = asyncio.Lock()
@@ -131,6 +138,12 @@ class SqlBackend:
 
     def _table_ref(self, table: str) -> str:
         return quote_ident(table, self.dialect)
+
+    def _native_db(self) -> str | None:
+        return None
+
+    def _native_catalog(self) -> str | None:
+        return None
 
     def _as_text(self, expr: str) -> str:
         return f"CAST({expr} AS {'TEXT' if self.dialect == 'postgres' else 'CHAR'})"
@@ -164,8 +177,31 @@ class SqlBackend:
     async def _ensure_tables(self) -> dict[str, TableInfo]:
         async with self._discover_lock:
             if self._tables is None:
-                self._tables = await self._discover_tables()
+                self._tables = self._restrict(await self._discover_tables())
             return self._tables
+
+    def _restrict(self, tables: dict[str, TableInfo]) -> dict[str, TableInfo]:
+        """Keep only the allowed tables and, in each, the allowed columns plus the id column."""
+        if self.allowed_columns is None:
+            return tables
+        allowed_tables = set(self.allowed_columns)
+        self.skipped = [note for note in self.skipped if note.split(" (", 1)[0] in allowed_tables]
+        kept: dict[str, TableInfo] = {}
+        for name, info in tables.items():
+            allowed = self.allowed_columns.get(name)
+            if allowed is None:
+                continue
+            keep = set(allowed) | {info.id_column}
+            kept[name] = replace(info, fields=[f for f in info.fields if f.name in keep],
+                                 fulltext=[cols for cols in info.fulltext if set(cols) <= keep])
+        return kept
+
+    def _allow_list(self, tables: dict[str, TableInfo]) -> SqlAllowList | None:
+        if self.allowed_columns is None:
+            return None
+        return SqlAllowList(tables={name: frozenset(t.columns) for name, t in tables.items()},
+                            db=self._native_db(), catalog=self._native_catalog(),
+                            functions=self.native_functions)
 
     async def discover(self, detail: DiscoverDetail = "full",
                        collection: str | None = None) -> Manifest:
@@ -317,7 +353,7 @@ class SqlBackend:
             raise UnsupportedOperation("native queries are disabled for this source")
         if op.dialect.lower() not in self.native_dialects:
             raise BackendError(f"dialect must be one of {self.native_dialects}, got {op.dialect!r}")
-        sql = guard_sql(op.query, self.dialect, min(op.limit, self.max_rows))
+        sql = guard_sql(op.query, self.dialect, min(op.limit, self.max_rows), self._allow_list(tables))
         table = tables.get(op.collection) if op.collection else (
             next(iter(tables.values())) if len(tables) == 1 else None)
         hits = []

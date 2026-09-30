@@ -90,7 +90,7 @@ def _files(cfg: dict[str, Any], ctx: BuildContext) -> Any:
 
 
 _SQL_KEYS = ("tables", "id_columns", "embedders", "vector_metric", "native_query", "description",
-             "max_rows", "sample_values")
+             "max_rows", "sample_values", "columns", "native_functions")
 
 
 def _backend_kwargs(cfg: dict[str, Any], ctx: BuildContext, keys: tuple[str, ...]) -> dict[str, Any]:
@@ -153,6 +153,14 @@ def _openai_compat(cfg: dict[str, Any], ctx: BuildContext) -> Any:
                               id=cfg.get("id"), supports_images=cfg.get("supports_images", False),
                               price_per_mtok=_price(cfg),
                               max_tokens_param=cfg.get("max_tokens_param", "max_tokens"))
+
+
+def _vertex_llm(cfg: dict[str, Any], ctx: BuildContext) -> Any:
+    from agentic_search.embedders.auth import build_auth
+    from agentic_search.models.vertex import vertex_client
+    return vertex_client(cfg["model"], project=cfg["project"], location=cfg.get("location", "global"),
+                         auth=build_auth(cfg["auth"]) if cfg.get("auth") else None, id=cfg.get("id"),
+                         supports_images=cfg.get("supports_images", True), price_per_mtok=_price(cfg))
 
 
 def _neo4j(cfg: dict[str, Any], ctx: BuildContext) -> Any:
@@ -240,6 +248,7 @@ for _kind, _type, _factory in [
     ("embedder", "http", _http_embedder),
     ("client", "anthropic", _anthropic),
     ("client", "openai_compat", _openai_compat),
+    ("client", "vertex", _vertex_llm),
     ("decider", "cross_encoder", _cross_encoder),
     ("decider", "llm_judge", _llm_judge),
     ("decider", "typesafe", _typesafe),

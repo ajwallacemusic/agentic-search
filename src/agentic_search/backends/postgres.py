@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import unquote, urlparse
 
@@ -43,6 +44,24 @@ def _require_psycopg() -> tuple[Any, Any, Any]:
         raise BackendError("PostgresBackend needs the `postgres` extra: pip install 'agentic-search[postgres]'") from exc
 
 
+PasswordProvider = Callable[[], Awaitable[str]]
+
+
+def _fresh_password_class(psycopg: Any, provider: PasswordProvider) -> type:
+    """An AsyncConnection that asks `provider` for a password at each new connection, so a
+    short-lived token (a Cloud SQL IAM token) is minted fresh rather than frozen into the DSN."""
+
+    class FreshPassword(psycopg.AsyncConnection):  # type: ignore[misc, name-defined]
+        @classmethod
+        async def connect(cls, conninfo: str = "", **kwargs: Any) -> Any:
+            password = await provider()
+            register_secret(password)
+            kwargs["password"] = password
+            return await super().connect(conninfo, **kwargs)
+
+    return FreshPassword
+
+
 class PostgresBackend(SqlBackend):
     dialect = "postgres"
     backend_type = "postgres"
@@ -51,7 +70,8 @@ class PostgresBackend(SqlBackend):
     def __init__(self, name: str, dsn: str, *, schema: str = "public",
                  text_search_config: str = "english", pool_size: int = 4,
                  statement_timeout_ms: int = 30_000, connect_timeout_s: float = 15,
-                 tsvector_columns: dict[str, str] | None = None, **kwargs: Any):
+                 tsvector_columns: dict[str, str] | None = None,
+                 password: PasswordProvider | None = None, **kwargs: Any):
         super().__init__(name, **kwargs)
         self.tsvector_columns = dict(tsvector_columns or {})
         self._tsv: dict[str, str] = {}
@@ -66,13 +86,14 @@ class PostgresBackend(SqlBackend):
         self.pool_size = pool_size
         self.statement_timeout_ms = int(statement_timeout_ms)
         self.connect_timeout_s = connect_timeout_s
+        self.password = password
         self._pool: Any = None
         self._pool_lock = asyncio.Lock()
 
     async def _get_pool(self) -> Any:
         async with self._pool_lock:
             if self._pool is None:
-                _, _, AsyncConnectionPool = _require_psycopg()
+                psycopg, _, AsyncConnectionPool = _require_psycopg()
 
                 timeout_ms = self.statement_timeout_ms
 
@@ -81,8 +102,12 @@ class PostgresBackend(SqlBackend):
                     await conn.execute("SET default_transaction_read_only = on")
                     await conn.execute(f"SET statement_timeout = {timeout_ms}")
 
+                connection_class = (_fresh_password_class(psycopg, self.password)
+                                    if self.password is not None else psycopg.AsyncConnection)
+
                 pool = AsyncConnectionPool(self.dsn, min_size=1, max_size=self.pool_size,
-                                           open=False, configure=configure)
+                                           open=False, configure=configure,
+                                           connection_class=connection_class)
                 try:
                     await pool.open(wait=True, timeout=self.connect_timeout_s)
                 except BaseException as exc:  # incl. CancelledError: don't leak a half-open pool
@@ -116,6 +141,9 @@ class PostgresBackend(SqlBackend):
 
     def _table_ref(self, table: str) -> str:
         return f"{quote_ident(self.schema, 'postgres')}.{quote_ident(table, 'postgres')}"
+
+    def _native_db(self) -> str | None:
+        return self.schema
 
     def _regex_expr(self, column_sql: str, placeholder: str) -> str:
         return f"{column_sql} ~ {placeholder}"
@@ -186,6 +214,14 @@ class PostgresBackend(SqlBackend):
         self.skipped = skipped
         self._tsv = tsv_of
         return tables
+
+    def _restrict(self, tables: dict[str, TableInfo]) -> dict[str, TableInfo]:
+        kept = super()._restrict(tables)
+        if self.allowed_columns is not None:
+            # A stored tsvector may index a hidden column, so it is used only when listed itself.
+            self._tsv = {t: col for t, col in self._tsv.items()
+                         if t in kept and col in self.allowed_columns.get(t, [])}
+        return kept
 
     # ---- lexical / vector ------------------------------------------------------
 
