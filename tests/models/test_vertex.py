@@ -63,3 +63,20 @@ def test_default_auth_is_application_default_credentials():
     fake = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
     c = vertex_client("gemini-3.8-flash", project="my-project-1", client=fake)
     assert isinstance(c.auth, GcpAdc)
+
+
+def test_no_price_warns_that_cost_reads_zero(caplog):
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    with caplog.at_level("WARNING", logger="agentic_search.models.vertex"):
+        vertex_client("gemini-3.8-flash", project="my-project-1", auth=FixedAuth(), client=fake)
+    [record] = [r for r in caplog.records if r.name == "agentic_search.models.vertex"]
+    assert record.levelname == "WARNING"
+    assert "price_per_mtok" in record.getMessage() and "0" in record.getMessage()
+
+
+def test_a_price_means_no_warning(caplog):
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    with caplog.at_level("WARNING", logger="agentic_search.models.vertex"):
+        vertex_client("gemini-3.8-flash", project="my-project-1", auth=FixedAuth(), client=fake,
+                      price_per_mtok=(0.3, 2.5))
+    assert not [r for r in caplog.records if r.name == "agentic_search.models.vertex"]
