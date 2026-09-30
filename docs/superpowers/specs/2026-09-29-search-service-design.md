@@ -195,8 +195,9 @@ The `/v1/search` body is exactly this lean result. The streamed `search_finished
 it as `result`. `search_started.question` gets the same image treatment. Every other event is
 its spec-1 JSON unchanged. A TypeScript client must therefore treat `ImagePart.data` as
 `string | null` and never expect its own question images back. `HitSummary.content` in
-snapshots is present only if the request set `include_content`, which is passed through to
-`Harness.stream`.
+snapshots is always present as a key: it is `null` unless the request set `include_content`
+(which is passed through to `Harness.stream`), unlike `hits[].hit.content` in results, where the
+key is removed.
 
 ## 7. SSE stream
 
