@@ -105,6 +105,9 @@ HTML §9.2.6:
   `loc.joined.by.dots: msg` (just `msg` without `loc`) joined by `; `; otherwise the status text
   (or `HTTP <status>` when it is empty), followed for a non-empty non-JSON body by ` — ` and the
   body with whitespace collapsed, truncated to 200 characters.
+- **Malformed bodies.** A 2xx body that is not JSON rejects with
+  `AgenticSearchError("response is not JSON", status, rawText)`; an SSE `data` that is not JSON
+  throws `AgenticSearchError("malformed event data", status, rawData)` from the stream.
 - **Stream semantics:**
   - Each SSE message's `data` is parsed as JSON. Known event types are yielded. Unknown types are
     passed to `onUnknownEvent(type, data)` and skipped.

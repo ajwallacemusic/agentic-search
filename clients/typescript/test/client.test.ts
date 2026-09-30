@@ -162,4 +162,22 @@ describe("AgenticSearchClient", () => {
     expect((await client.health()).status).toBe("ok");
     expect((await client.search({ question: "q" })).stop_reason).toBe("no_plan");
   });
+
+  it("throws AgenticSearchError when an SSE data line is not JSON", async () => {
+    const fetch = fakeFetch(() => sseResponse([frame(0, started), "event: phase_started\ndata: {not json\n\n"]));
+    const client = new AgenticSearchClient({ baseUrl: "http://svc", fetch });
+    const it = client.stream({ question: "q" });
+    expect((await it.next()).value).toMatchObject({ type: "search_started" });
+    const err = await it.next().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AgenticSearchError);
+    expect(err).toMatchObject({ message: "malformed event data", status: 200, detail: "{not json" });
+  });
+
+  it("throws AgenticSearchError when a 2xx body is not JSON", async () => {
+    const fetch = fakeFetch(() => new Response("<html>ok</html>", { status: 200 }));
+    const client = new AgenticSearchClient({ baseUrl: "http://svc", fetch });
+    const err = await client.search({ question: "q" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AgenticSearchError);
+    expect(err).toMatchObject({ message: "response is not JSON", status: 200, detail: "<html>ok</html>" });
+  });
 });

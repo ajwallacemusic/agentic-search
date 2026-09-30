@@ -135,7 +135,12 @@ export class AgenticSearchClient {
         { Accept: "text/event-stream" });
       if (!response.body) throw new AgenticSearchError("response has no body", response.status);
       for await (const message of parseSse(response.body)) {
-        const data: unknown = JSON.parse(message.data);
+        let data: unknown;
+        try {
+          data = JSON.parse(message.data);
+        } catch {
+          throw new AgenticSearchError("malformed event data", response.status, message.data);
+        }
         if (data === null || typeof data !== "object" || !isSearchEvent(data as { type?: unknown })) {
           options.onUnknownEvent?.(message.event, data);
           continue;
@@ -155,7 +160,12 @@ export class AgenticSearchClient {
 
   private async json<T>(method: string, path: string, body: unknown, signal?: AbortSignal): Promise<T> {
     const response = await this.request(method, path, body, signal, { Accept: "application/json" });
-    return (await response.json()) as T;
+    const text = await response.text();
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new AgenticSearchError("response is not JSON", response.status, text);
+    }
   }
 
   private async request(method: string, path: string, body: unknown, signal: AbortSignal | undefined,
