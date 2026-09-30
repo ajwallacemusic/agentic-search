@@ -75,3 +75,7 @@ the named plan ships the feature that exposes them.
 - Profile names that are not latin-1 cannot be sent back in the `X-Search-Profile` header.
 - Startup blocks for up to each backend's `discover_timeout` while the lifespan sets profiles up; document it (or set up in the background).
 - Per-key quotas and rate limiting over time (only a concurrency cap exists).
+- `/v1/profiles` reports `limits` as configured, not the effective budget ceilings (which now default to the profile budget).
+- `/v1/search` disconnect race: `suppress(CancelledError)` around awaiting the cancelled search can swallow a cancellation of the handler itself (finally still stops the search and releases the slot).
+- `agentic-search serve` still prints a traceback (not a one-line error, exit 2) for YAML syntax errors, a missing config file, and malformed harness configs (e.g. `backends: 5`).
+- Per-profile setup locks are created in `create_app`; reusing one app across event loops while a lock is contended raises.
