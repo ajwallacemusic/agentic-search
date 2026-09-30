@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Agentic search harness: plan, execute, analyze, decide over any datastore with swappable models."
 requires-python = ">=3.11"
 dependencies = [
-  "pydantic>=2.7",
+  "pydantic>=2.9",
   "numpy>=1.26",
   "rank-bm25>=0.2.2",
   "pyyaml>=6.0",
