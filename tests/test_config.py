@@ -222,3 +222,15 @@ def test_http_embedder_backoff_passes_through(tmp_path):
         "driver": {"type": "openai_compat", "model": "local", "base_url": "http://localhost:8000/v1"},
     }, base_dir=tmp_path)
     assert h.embedders.get("tei").backoff_s == 0.05
+
+
+def test_vertex_client_from_config(tmp_path):
+    from agentic_search.config import BuildContext, build
+    from agentic_search.embedders.auth import Bearer
+
+    ctx = BuildContext(base_dir=tmp_path)
+    c = build("client", {"type": "vertex", "model": "gemini-3.8-flash", "project": "my-project-1",
+                         "location": "us-central1", "auth": {"type": "bearer", "token": "t0k"}}, ctx)
+    assert c.id == "vertex:gemini-3.8-flash"
+    assert c.model == "google/gemini-3.8-flash"
+    assert isinstance(c.auth, Bearer)
