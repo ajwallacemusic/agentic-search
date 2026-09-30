@@ -60,7 +60,8 @@ def guard_sql(query: str, dialect: str, max_rows: int) -> str:
 
 _CYPHER_WRITE = re.compile(
     r"\b(CREATE|MERGE|DELETE|DETACH|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV)\b", re.IGNORECASE)
-_CYPHER_CALL = re.compile(r"\bCALL\s+([A-Za-z0-9_.]+)", re.IGNORECASE)
+_CYPHER_CALL = re.compile(r"(?<!\.)\bCALL\b\s*", re.IGNORECASE)
+_CYPHER_PROC_NAME = re.compile(r"[A-Za-z0-9_.]+")
 _CYPHER_ALLOWED_PROCS = {"db.index.fulltext.querynodes", "db.index.vector.querynodes",
                          "db.labels", "db.relationshiptypes", "db.propertykeys"}
 
@@ -156,6 +157,32 @@ _CYPHER_LIMIT = re.compile(r"\bLIMIT\s+(\d+)\s*;?\s*$", re.IGNORECASE)
 _CYPHER_RETURN = re.compile(r"\bRETURN\b", re.IGNORECASE)
 
 
+def _check_calls(code: str) -> None:
+    """After CALL allow only a `{` subquery or a plain, allowlisted dotted procedure name.
+    Anything else (a backtick-quoted name, `CALL (x) {`, ...) could hide a procedure."""
+    for call in _CYPHER_CALL.finditer(code):
+        rest = code[call.end():]
+        if rest.startswith("{"):
+            continue
+        name = _CYPHER_PROC_NAME.match(rest)
+        if name is None or rest[name.end():name.end() + 1] == "`":
+            raise NativeQueryRejected(
+                "CALL must be followed by a { subquery } or a plain allowlisted procedure name")
+        if name.group(0).lower() not in _CYPHER_ALLOWED_PROCS:
+            raise NativeQueryRejected(f"procedure {name.group(0)} is not allowed in native Cypher")
+
+
+def _check_braces(code: str) -> None:
+    """Unbalanced braces could close the `CALL { ... }` wrapper early and escape its LIMIT."""
+    depth = 0
+    for ch in code:
+        depth += {"{": 1, "}": -1}.get(ch, 0)
+        if depth < 0:
+            break
+    if depth != 0:
+        raise NativeQueryRejected("unbalanced braces in native Cypher")
+
+
 def guard_cypher(query: str, max_rows: int) -> str:
     """Reject write clauses and non-allowlisted procedures; wrap and cap with LIMIT."""
     code = _cypher_code(query)
@@ -164,9 +191,8 @@ def guard_cypher(query: str, max_rows: int) -> str:
     match = _CYPHER_WRITE.search(code)
     if match:
         raise NativeQueryRejected(f"{match.group(1).upper()} is not allowed in native Cypher")
-    for proc in _CYPHER_CALL.findall(code):
-        if proc.lower() not in _CYPHER_ALLOWED_PROCS:
-            raise NativeQueryRejected(f"procedure {proc} is not allowed in native Cypher")
+    _check_calls(code)
+    _check_braces(code)
     q = query.strip().rstrip(";").rstrip()
     # Extract existing LIMIT to use minimum of original and max_rows
     limit_match = _CYPHER_LIMIT.search(q)

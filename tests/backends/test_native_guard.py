@@ -129,7 +129,7 @@ def test_cypher_backtick_escaping():
     # Backtick bypass: in Cypher, backticks doubled mean literal backtick, no backslash escape
     # This query has a SET statement hidden by a fake escaped backtick
     with pytest.raises(NativeQueryRejected, match="SET"):
-        guard_cypher("MATCH (n) WITH n AS `a\` SET n.x=1 RETURN n AS `b`", 5)
+        guard_cypher(r"MATCH (n) WITH n AS `a\` SET n.x=1 RETURN n AS `b`", 5)
 
     # Doubled backticks should work (escaped backtick in identifier name)
     result = guard_cypher("MATCH (n) RETURN n AS `we``ird`", 5)
@@ -220,3 +220,29 @@ def test_sql_output_drops_comments():
 def test_opensearch_rejects_cross_index_reads(body):
     with pytest.raises(NativeQueryRejected, match="index"):
         guard_opensearch(body, 10)
+
+
+@pytest.mark.parametrize("bad", [
+    "CALL `dbms`.`listConfig`() YIELD name, value RETURN name, value",
+    "CALL `dbms.listConfig`() YIELD name RETURN name",
+    "CALL db.`labels`() YIELD label RETURN label",
+    "MATCH (n) CALL `apoc`.`create`.`node`(['x'], {}) YIELD node RETURN node",
+])
+def test_cypher_rejects_backtick_quoted_procedures(bad):
+    with pytest.raises(NativeQueryRejected, match="CALL"):
+        guard_cypher(bad, 5)
+
+
+@pytest.mark.parametrize("bad", [
+    "MATCH (n:docs) RETURN n.id AS id } RETURN id UNION ALL CALL { MATCH (n:docs) RETURN n.id AS id",
+    "MATCH (n) RETURN n }",
+    "MATCH (n) WHERE n.x = { RETURN n",
+])
+def test_cypher_rejects_unbalanced_braces(bad):
+    with pytest.raises(NativeQueryRejected, match="braces"):
+        guard_cypher(bad, 2)
+
+
+def test_cypher_allows_balanced_subquery_and_braces_in_strings():
+    q = "MATCH (n) CALL { WITH n RETURN n.x AS x } RETURN n, x, '}' AS s, {a: 1} AS m"
+    assert guard_cypher(q, 3) == f"CALL {{ {q} }} RETURN * LIMIT 3"

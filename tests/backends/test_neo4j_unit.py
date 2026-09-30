@@ -106,3 +106,92 @@ async def test_unreachable_is_backend_error_and_password_registered():
         await b.close()
     assert scrub("leak secretpw3 here") == "leak *** here"
     assert "secretpw3" not in scrub(str(excinfo.value))
+
+
+class _FakeResult:
+    def __init__(self, records):
+        self.records = records
+        self.consumed = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.consumed >= len(self.records):
+            raise StopAsyncIteration
+        self.consumed += 1
+        return self.records[self.consumed - 1]
+
+
+class _FakeDriver:
+    """Records every query object run; each run yields `records`."""
+
+    def __init__(self, records):
+        self.records = records
+        self.runs: list = []
+        self.work_timeouts: list = []
+        self.results: list[_FakeResult] = []
+
+    def session(self, **kwargs):
+        driver = self
+
+        class _Tx:
+            async def run(self, query, params):
+                driver.runs.append(query)
+                result = _FakeResult(driver.records)
+                driver.results.append(result)
+                return result
+
+        class _Session:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def execute_read(self, work):
+                driver.work_timeouts.append(getattr(work, "timeout", None))
+                return await work(_Tx())
+
+        return _Session()
+
+    async def close(self):
+        pass
+
+
+class _Row(dict):
+    pass
+
+
+def _native_backend(records, **kwargs):
+    from agentic_search.backends import neo4j as mod
+    b = mod.Neo4jBackend("neo", "bolt://localhost:1", native_query=True, **kwargs)
+    b._driver = _FakeDriver(records)
+    b._schema = mod._Schema(labels={"docs": mod._Label(name="docs", properties={"id": None})},
+                            relationship_types=[])
+    return b
+
+
+async def test_native_caps_rows_client_side():
+    """Even if the server returned more rows than the LIMIT wrapper allows, stop consuming at the cap."""
+    from agentic_search.core.types import Native
+    b = _native_backend([_Row(id=i) for i in range(7)], max_rows=2)
+    hits = await b.execute(Native(source="neo", dialect="cypher", query="MATCH (n:docs) RETURN n.id AS id",
+                                  limit=10))
+    assert len(hits) == 2
+    assert b._driver.results[0].consumed == 2
+
+
+async def test_queries_carry_server_side_timeout():
+    """The READ transaction function is wrapped in unit_of_work(timeout=...), which is how the
+    driver sends a server-side timeout for managed transactions."""
+    from agentic_search.core.types import Native
+    b = _native_backend([_Row(id=1)], query_timeout_s=7.5)
+    await b.execute(Native(source="neo", dialect="cypher", query="MATCH (n:docs) RETURN n.id AS id", limit=5))
+    assert b._driver.work_timeouts == [7.5]
+    assert b._driver.runs[0].startswith("CALL {")
+
+
+def test_query_timeout_defaults_to_30s():
+    from agentic_search.backends.neo4j import Neo4jBackend
+    assert Neo4jBackend("neo", "bolt://localhost:1").query_timeout_s == 30.0

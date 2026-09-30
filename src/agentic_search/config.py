@@ -159,7 +159,7 @@ def _neo4j(cfg: dict[str, Any], ctx: BuildContext) -> Any:
     from agentic_search.backends.neo4j import Neo4jBackend
     return Neo4jBackend(cfg["name"], cfg["uri"], **_backend_kwargs(
         cfg, ctx, ("user", "password", "database", "labels", "id_property", "embedders", "native_query",
-                   "description", "max_rows", "sample_values", "connect_timeout_s")))
+                   "description", "max_rows", "sample_values", "connect_timeout_s", "query_timeout_s")))
 
 
 def _milvus(cfg: dict[str, Any], ctx: BuildContext) -> Any:

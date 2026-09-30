@@ -168,7 +168,8 @@ class Neo4jBackend:
                  database: str | None = None, labels: list[str] | None = None,
                  id_property: str = "id", embedders: dict[str, str] | None = None,
                  native_query: bool = False, description: str | None = None, max_rows: int = 100,
-                 sample_values: bool = True, connect_timeout_s: float = 10):
+                 sample_values: bool = True, connect_timeout_s: float = 10,
+                 query_timeout_s: float = 30.0):
         register_secret(uri)
         register_secret(password)
         self.name = name
@@ -184,6 +185,7 @@ class Neo4jBackend:
         self.max_rows = max_rows
         self.sample_values = sample_values
         self.connect_timeout_s = float(connect_timeout_s)
+        self.query_timeout_s = float(query_timeout_s)
         self._driver: Any = None
         self._schema: _Schema | None = None
         self._lock = asyncio.Lock()
@@ -203,18 +205,29 @@ class Neo4jBackend:
                 raise BackendError(f"{type(exc).__name__}: {exc}") from exc
         return self._driver
 
-    async def _read(self, query: str, params: dict[str, Any] | None = None) -> list[Any]:
-        """Run one query in a READ transaction; returns records."""
+    async def _read(self, query: str, params: dict[str, Any] | None = None,
+                    max_records: int | None = None) -> list[Any]:
+        """Run one query in a READ transaction with a server-side timeout; returns records,
+        consuming at most `max_records` of them when given."""
         async def work(tx: Any) -> list[Any]:
             result = await tx.run(query, params or {})
-            return [record async for record in result]
+            records: list[Any] = []
+            if max_records is not None and max_records <= 0:
+                return records
+            async for record in result:
+                records.append(record)
+                if max_records is not None and len(records) >= max_records:
+                    break
+            return records
 
         try:
             driver = self._get_driver()
             neo4j = _require_neo4j()
             async with driver.session(database=self.database,
                                       default_access_mode=neo4j.READ_ACCESS) as session:
-                return await session.execute_read(work)
+                # A Query(timeout=...) object is only accepted by session.run; managed
+                # transactions take their server-side timeout from unit_of_work.
+                return await session.execute_read(neo4j.unit_of_work(timeout=self.query_timeout_s)(work))
         except BackendError:
             raise
         except Exception as exc:
@@ -556,10 +569,11 @@ class Neo4jBackend:
             raise UnsupportedOperation("native queries are disabled for this source")
         if op.dialect.lower() not in ("cypher", "neo4j"):
             raise BackendError(f"dialect must be cypher, got {op.dialect!r}")
-        query = guard_cypher(op.query, min(op.limit, self.max_rows))
+        cap = min(op.limit, self.max_rows)
+        query = guard_cypher(op.query, cap)
         multi = len(schema.labels) > 1
         hits = []
-        for i, row in enumerate(await self._read(query)):
+        for i, row in enumerate(await self._read(query, max_records=cap)):
             node_hit = None
             for key in row.keys():
                 value = row[key]

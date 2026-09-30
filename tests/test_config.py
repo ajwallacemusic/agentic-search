@@ -194,3 +194,12 @@ def test_build_graph_and_vector_backends(tmp_path, monkeypatch):
     }, base_dir=tmp_path)
     assert isinstance(h.backends["kg"], Neo4jBackend) and isinstance(h.backends["vec"], MilvusBackend)
     assert scrub("neo-pass-2468") == "***"
+
+
+def test_neo4j_query_timeout_passes_through(tmp_path):
+    h = build_harness({
+        "embedders": [{"type": "hash", "id": "hash64", "dim": 64}],
+        "backends": [{"name": "kg", "type": "neo4j", "uri": "bolt://graph:7687", "query_timeout_s": 4.5}],
+        "driver": {"type": "openai_compat", "model": "local", "base_url": "http://localhost:8000/v1"},
+    }, base_dir=tmp_path)
+    assert h.backends["kg"].query_timeout_s == 4.5
