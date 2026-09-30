@@ -1,7 +1,7 @@
 # Streaming Search Events — Design Spec
 
 - **Date:** 2026-09-29
-- **Status:** Draft for review
+- **Status:** Approved 2026-09-29; clarified during plan verification (§2 SearchStream, §3.2, §3.3, §4.6, §5, §7)
 - **Scope:** Streaming sub-project 1 of 3 (library core). Later specs: (2) standalone search
   service with SSE, startup config profiles and per-request overrides; (3) TypeScript client.
 
@@ -37,18 +37,22 @@ class Harness:
     def stream(self, question: str | Query, *, sources: list[str] | None = None,
                top_k: int = 20, mode: Mode | None = None, budget: Budget | None = None,
                snapshot_k: int = 10, include_content: bool = False
-               ) -> AsyncIterator[SearchEvent]: ...
+               ) -> SearchStream: ...
 
     async def search(self, question: str | Query, *, sources: list[str] | None = None,
                      top_k: int = 20, mode: Mode | None = None,
                      budget: Budget | None = None) -> SearchResult: ...  # unchanged
 ```
 
+`SearchStream` is an async iterator of `SearchEvent` and an async context manager; leaving the
+`async with` block closes it and cancels the search.
+
 Usage:
 
 ```python
 async with load_harness("search.yaml") as h:
-    async for ev in h.stream("statin myopathy risk", sources=["pubmed"], snapshot_k=10):
+  async with h.stream("statin myopathy risk", sources=["pubmed"], snapshot_k=10) as events:
+    async for ev in events:
         match ev:
             case PhaseStarted(phase="query"): ...
             case ResultsUpdated(hits=hits): ...
@@ -84,13 +88,13 @@ A new module `src/agentic_search/events.py` holds frozen Pydantic v2 models. Eac
 
 | `type` | Class | Emitted | Payload fields |
 |---|---|---|---|
-| `search_started` | `SearchStarted` | first, always | `question: Query`, `mode: str`, `sources: list[str]`, `budget: Budget`, `setup_errors: dict[str, str]` |
+| `search_started` | `SearchStarted` | first, once setup and source selection succeed | `question: Query`, `mode: str`, `sources: list[str]`, `budget: Budget`, `setup_errors: dict[str, str]` |
 | `phase_started` | `PhaseStarted` | before a phase | `phase: Phase` |
 | `phase_finished` | `PhaseFinished` | after that phase | `phase: Phase`, `duration_ms: float`, `summary: PhaseSummary` |
 | `tool_call_started` | `ToolCallStarted` | before each backend call | `call_id: str`, `source: str \| None`, `name: str`, `arguments: dict` |
-| `tool_call_finished` | `ToolCallFinished` | after each backend call | `call_id: str`, `n_hits: int`, `n_new: int`, `duration_ms: float`, `error: ToolErrorInfo \| None` |
+| `tool_call_finished` | `ToolCallFinished` | when each backend call completes | `call_id: str`, `n_hits: int`, `duration_ms: float`, `error: ToolErrorInfo \| None` (new-candidate counts are per turn, on `phase_finished("query")`, because de-duplication across concurrent calls is only settled once the turn's calls are pooled) |
 | `results_updated` | `ResultsUpdated` | after each judge phase; after each delegate tool round | `hits: list[HitSummary]`, `pool_size: int`, `n_relevant: int` |
-| `usage_updated` | `UsageUpdated` | after any phase that consumed model tokens or tool calls | `usage: Usage` (running totals) |
+| `usage_updated` | `UsageUpdated` | after each turn's `results_updated` point, after each `decide` phase, after each delegate tool round, and once after the delegate finishes | `usage: Usage` (running totals) |
 | `search_finished` | `SearchFinished` | last, on success | `result: SearchResult`, `stop_reason: StopReason` |
 | `search_failed` | `SearchFailed` | last, on error | `error_type: str`, `message: str` |
 
@@ -125,7 +129,8 @@ existing `ToolError`.
 
 ### 3.3 Ordering guarantees
 
-- `search_started` is `seq=0`.
+- `search_started` is `seq=0`, except when setup or source selection fails: then `search_failed`
+  is the only event.
 - Every `phase_started` has a matching `phase_finished` for the same phase and turn unless
   the search is cancelled or fails inside it.
 - Every `tool_call_started` has a matching `tool_call_finished` with the same `call_id`
@@ -250,16 +255,18 @@ test for concurrent first calls.
 
 Events go to the embedding application, not to a model, so `SourcePolicy` (which governs
 model visibility) does not filter them. Secrets registered with `core.secrets` are scrubbed
-from every string in every event payload. Full hit content appears only with
-`include_content=True`; by default a scrubbed 300-character snippet is the most content an
-event carries.
+from tool arguments, error messages, notes, hit titles and snippets. Two payloads are passed
+through unmodified: `SearchFinished.result` is exactly the object `search()` returns (its trace
+is already scrubbed; document content is not rewritten), and `HitSummary.content`, which appears
+only with `include_content=True`. By default a scrubbed 300-character snippet is the most
+document content an event carries.
 
 ## 5. Error handling
 
 | Situation | Behaviour |
 |---|---|
 | Invalid arguments | `HarnessError` raised from `stream()` / `search()` before any event |
-| Setup fails, no reachable backends, unknown sources | `search_failed`; `search()` raises the original `HarnessError` |
+| Setup fails, no reachable backends, unknown sources | `search_failed` as the only event; `search()` raises the original `HarnessError` |
 | Unexpected exception in the loop | `search_failed`; `search()` re-raises it |
 | One backend call fails | `tool_call_finished.error`; search continues (existing degradation) |
 | Judge/decider fails or times out | `phase_finished.summary.error`; fallback behaviour as today |
@@ -297,7 +304,9 @@ same scripted plan.
 ## 7. Files
 
 - Create: `src/agentic_search/events.py`, `src/agentic_search/core/emitter.py`,
-  `tests/test_events.py`, `tests/test_stream.py`
+  `src/agentic_search/core/result.py` (`RankedHit` and `SearchResult` move here from
+  `core/harness.py`, which re-exports them, so `events.py` can import them without a cycle),
+  `tests/test_events.py`, `tests/test_stream.py`, `tests/roles/test_role_events.py`
 - Modify: `src/agentic_search/core/harness.py`, `core/state.py`, `roles/planner.py`,
   `roles/executor.py`, `roles/analyzer.py`, `roles/controller.py`,
   `src/agentic_search/__init__.py`, `README.md`, `tests/contract/test_backend_contract.py`
