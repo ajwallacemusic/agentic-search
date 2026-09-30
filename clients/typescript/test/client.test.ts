@@ -63,6 +63,43 @@ describe("AgenticSearchClient", () => {
     await expect(stream.next()).rejects.toBeInstanceOf(AgenticSearchError);
   });
 
+  it("joins a FastAPI 422 detail array into the message and keeps the full array", async () => {
+    const detail = [
+      { loc: ["body", "question"], msg: "Field required", type: "missing" },
+      { loc: ["body", "top_k"], msg: "Input should be greater than 0", type: "greater_than" },
+      { msg: "no location", type: "x" },
+    ];
+    const fetch = fakeFetch(() => Response.json({ detail }, { status: 422, statusText: "Unprocessable Entity" }));
+    const client = new AgenticSearchClient({ baseUrl: "http://svc", fetch });
+    const err = await client.search({ question: "" }).catch((e: unknown) => e) as AgenticSearchError;
+    expect(err).toBeInstanceOf(AgenticSearchError);
+    expect(err.status).toBe(422);
+    expect(err.message).toBe("POST /v1/search failed with 422: body.question: Field required; "
+      + "body.top_k: Input should be greater than 0; no location");
+    expect(err.detail).toEqual(detail);
+  });
+
+  it("falls back to HTTP <status> for an empty error body with no status text", async () => {
+    const fetch = fakeFetch(() => new Response("", { status: 502, statusText: "" }));
+    const client = new AgenticSearchClient({ baseUrl: "http://svc", fetch });
+    const err = await client.health().catch((e: unknown) => e) as AgenticSearchError;
+    expect(err.status).toBe(502);
+    expect(err.message).toBe("GET /healthz failed with 502: HTTP 502");
+    expect(err.message.endsWith(":")).toBe(false);
+    expect(err.detail).toBe("");
+  });
+
+  it("appends a truncated, whitespace-collapsed excerpt of a non-JSON error body", async () => {
+    const html = `<html>\n  <body>\n    <h1>502 Bad Gateway</h1>\n${"x".repeat(300)}\n  </body>\n</html>\n`;
+    const fetch = fakeFetch(() => new Response(html, { status: 502, statusText: "Bad Gateway" }));
+    const client = new AgenticSearchClient({ baseUrl: "http://svc", fetch });
+    const err = await client.health().catch((e: unknown) => e) as AgenticSearchError;
+    const excerpt = html.replace(/\s+/g, " ").trim().slice(0, 200);
+    expect(excerpt).toHaveLength(200);
+    expect(err.message).toBe(`GET /healthz failed with 502: Bad Gateway — ${excerpt}`);
+    expect(err.detail).toBe(html);
+  });
+
   it("throws when the stream ends without a terminal event", async () => {
     const fetch = fakeFetch(() => sseResponse([frame(0, started)]));
     const client = new AgenticSearchClient({ baseUrl: "http://svc", fetch });

@@ -166,17 +166,41 @@ export class AgenticSearchClient {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, init);
     if (!response.ok) {
       const text = await response.text();
-      let detail: unknown = text;
-      try {
-        const parsed = JSON.parse(text) as { detail?: unknown };
-        detail = parsed.detail ?? parsed;
-      } catch {
-        // not JSON; keep the raw text
-      }
-      const summary = typeof detail === "string" ? detail : response.statusText;
+      const { summary, detail } = describeErrorBody(text, response);
       throw new AgenticSearchError(`${method} ${path} failed with ${response.status}: ${summary}`,
         response.status, detail);
     }
     return response;
   }
+}
+
+/**
+ * The message summary and `detail` for a non-2xx body. A JSON `detail` string is used as is; a
+ * FastAPI 422 `detail` array becomes `loc: msg` pairs; anything else falls back to the status
+ * text, plus a short excerpt of a non-JSON body. `detail` keeps the full parsed value or raw text.
+ */
+function describeErrorBody(text: string, response: Response): { summary: string; detail: unknown } {
+  const status = response.statusText || `HTTP ${response.status}`;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    const excerpt = text.replace(/\s+/g, " ").trim().slice(0, 200);
+    return { summary: excerpt ? `${status} — ${excerpt}` : status, detail: text };
+  }
+  const hasDetail = parsed !== null && typeof parsed === "object" && "detail" in parsed
+    && (parsed as { detail: unknown }).detail != null;
+  const detail = hasDetail ? (parsed as { detail: unknown }).detail : parsed;
+  if (!hasDetail) return { summary: status, detail };
+  if (typeof detail === "string" && detail) return { summary: detail, detail };
+  if (Array.isArray(detail) && detail.length > 0) {
+    const summary = detail.map((d: unknown) => {
+      if (d === null || typeof d !== "object") return String(d);
+      const { loc, msg } = d as { loc?: unknown; msg?: unknown };
+      const text = typeof msg === "string" ? msg : JSON.stringify(d);
+      return Array.isArray(loc) ? `${loc.join(".")}: ${text}` : text;
+    }).join("; ");
+    return { summary, detail };
+  }
+  return { summary: status, detail };
 }

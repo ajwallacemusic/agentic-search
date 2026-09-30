@@ -97,7 +97,11 @@ HTML §9.2.6:
   `Content-Type: application/json`.
 - **HTTP errors.** A non-2xx response rejects with `AgenticSearchError(message, status, detail)`.
   `detail` is the body's `detail` field when the body is JSON, otherwise the parsed body or the
-  raw text.
+  raw text, always in full. The message is `<METHOD> <path> failed with <status>: <summary>`,
+  where the summary is the `detail` string; or, for a FastAPI 422 `detail` array, each item as
+  `loc.joined.by.dots: msg` (just `msg` without `loc`) joined by `; `; otherwise the status text
+  (or `HTTP <status>` when it is empty), followed for a non-empty non-JSON body by ` — ` and the
+  body with whitespace collapsed, truncated to 200 characters.
 - **Stream semantics:**
   - Each SSE message's `data` is parsed as JSON. Known event types are yielded. Unknown types are
     passed to `onUnknownEvent(type, data)` and skipped.
