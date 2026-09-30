@@ -343,11 +343,13 @@ async def test_custom_base_exception_from_driver_stream_propagates(docs_backend)
 
 
 async def test_consumer_timeout_not_swallowed_by_stream_cleanup(docs_backend):
-    """Test that consumer's timeout is not swallowed by stream cleanup."""
-    cleanup_started = asyncio.Event()
+    """Test that consumer's timeout fires even during stream cleanup.
 
-    async def shielded_cleanup(op):
-        cleanup_started.set()
+    The timeout must expire while _events' finally block awaits the search task
+    during its shielded cleanup. Without the fix, contextlib.suppress swallows
+    the consumer's timeout and the test hangs.
+    """
+    async def long_sleep_with_shielded_cleanup(op):
         try:
             await asyncio.sleep(60)
         except asyncio.CancelledError:
@@ -356,7 +358,7 @@ async def test_consumer_timeout_not_swallowed_by_stream_cleanup(docs_backend):
             raise
         return []
 
-    docs_backend.execute = shielded_cleanup
+    docs_backend.execute = long_sleep_with_shielded_cleanup
     h = make(docs_backend, ScriptedDriver([[lex("headache")]]),
              settings=HarnessSettings(call_timeout=600))
 
@@ -365,8 +367,7 @@ async def test_consumer_timeout_not_swallowed_by_stream_cleanup(docs_backend):
             async with h.stream("q") as s:
                 async for ev in s:
                     if isinstance(ev, ToolCallStarted):
-                        await cleanup_started.wait()
-                        await asyncio.sleep(10)
+                        break  # Exit loop immediately; aclose() cancels search task
 
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(consume_with_timeout(), 5)

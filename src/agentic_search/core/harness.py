@@ -56,7 +56,6 @@ __all__ = ["Harness", "HarnessError", "HarnessSettings", "Mode", "RankedHit", "S
 
 class _TaskDone:
     """Sentinel object to detect when the search task finishes without emitting a terminal event."""
-    pass
 
 
 _TASK_DONE = _TaskDone()
@@ -267,7 +266,7 @@ class Harness:
 
     async def _events(self, opts: _Options,
                       failure: list[BaseException]) -> AsyncIterator[SearchEvent]:
-        queue: asyncio.Queue[SearchEvent] = asyncio.Queue()
+        queue: asyncio.Queue[SearchEvent | _TaskDone] = asyncio.Queue()
         emitter = EventEmitter(uuid.uuid4().hex, queue.put_nowait)
         task = asyncio.create_task(self._run_search(opts, emitter, failure))
         task.add_done_callback(lambda _t: queue.put_nowait(_TASK_DONE))
