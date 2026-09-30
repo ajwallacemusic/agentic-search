@@ -1,0 +1,113 @@
+"""TypeSafe decider against httpx.MockTransport; `test_live_typesafe` hits the real API when
+TYPESAFE_API_KEY is set."""
+
+import json
+import os
+
+import httpx
+import pytest
+
+from agentic_search.core.secrets import scrub
+from agentic_search.core.types import Hit, Query, TextPart
+from agentic_search.models.base import Action, ControllerView, Decider, TurnSummary
+from agentic_search.models.typesafe import TypeSafeDecider, TypeSafeError
+
+HITS = [Hit(doc_id=str(i), source="s", content=[TextPart(text=t)])
+        for i, t in enumerate(["aspirin relieves headache", "medieval castles", "ibuprofen for pain"])]
+
+
+def client(handler):
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+async def test_judge_batches_nouls_over_shared_state():
+    seen = []
+
+    def respond(req):
+        body = json.loads(req.content)
+        seen.append((req, body))
+        answers = {qid: {"type": "noul", "noul": 0.9 if "headache" in body["state"]["documents"][int(qid[1:])]["text"] else 0.1}
+                   for qid in body["questions"]}
+        return httpx.Response(200, json={"model": "jev-latest", "answers": answers,
+                                         "usage": {"input_tokens": 100, "output_tokens": 3}})
+
+    d = TypeSafeDecider(api_key="ts-key-12345", client=client(respond), batch_size=2,
+                        price_per_mtok=(1.0, 1.0))
+    assert isinstance(d, Decider) and d.id == "typesafe:jev-latest"
+    res = await d.judge(Query.of("what treats headache?"), HITS)
+    assert [(j.key, j.p_relevant) for j in res.judgments] == [("s:0", 0.9), ("s:1", 0.1), ("s:2", 0.1)]
+    assert len(seen) == 2 and res.usage.input_tokens == 200 and res.usage.cost_usd == pytest.approx(206e-6)
+    req, body = seen[0]
+    assert str(req.url) == "https://api.typesafe.ai/v1/systemone"
+    assert req.headers["authorization"] == "Bearer ts-key-12345"
+    assert body["model"] == "jev-latest" and body["state"]["query"] == "what treats headache?"
+    assert body["questions"]["d1"]["type"] == "noul"
+    assert "`documents[1].text`" in body["questions"]["d1"]["instructions"]
+    assert set(body["questions"]["d0"]["criteria"]) == {"true", "false"}
+
+
+async def test_decide_uses_choice():
+    def respond(req):
+        body = json.loads(req.content)
+        assert body["questions"]["action"]["type"] == "choice"
+        assert set(body["questions"]["action"]["criteria"]) == {a.value for a in Action}
+        return httpx.Response(200, json={"answers": {"action": {"type": "choice", "choice": "broaden",
+                                                                 "confidence": 0.8}}})
+
+    view = ControllerView(question=Query.of("q"), turn=1, digest="d", total_relevant=0,
+                          history=[TurnSummary(turn=0, n_calls=2, n_errors=0, n_new=3, n_new_relevant=0)],
+                          budget_remaining={"turns": 2})
+    d = await TypeSafeDecider(api_key="ts-key-12345", client=client(respond)).decide(view)
+    assert d.action is Action.BROADEN and d.confidence == 0.8
+
+
+async def test_errors_and_retries():
+    calls = {"n": 0}
+
+    def flaky(req):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(529, text="overloaded")
+        return httpx.Response(200, json={"answers": {"d0": {"noul": 0.5}}})
+
+    d = TypeSafeDecider(api_key="ts-key-12345", client=client(flaky), backoff_s=0.001)
+    assert (await d.judge(Query.of("q"), HITS[:1])).judgments[0].p_relevant == 0.5
+    assert calls["n"] == 2
+
+    bad = TypeSafeDecider(api_key="ts-key-12345", client=client(lambda r: httpx.Response(
+        401, text="invalid key ts-key-12345")), backoff_s=0.001)
+    with pytest.raises(TypeSafeError) as exc:
+        await bad.judge(Query.of("q"), HITS[:1])
+    assert "401" in str(exc.value) and "ts-key-12345" not in str(exc.value)
+
+    no_choice = TypeSafeDecider(api_key="ts-key-12345", client=client(lambda r: httpx.Response(
+        200, json={"answers": {}})))
+    view = ControllerView(question=Query.of("q"), turn=0, digest="", total_relevant=None, history=[],
+                          budget_remaining={})
+    with pytest.raises(TypeSafeError, match="no usable choice"):
+        await no_choice.decide(view)
+
+
+async def test_missing_key(monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    with pytest.raises(TypeSafeError, match="API key"):
+        await TypeSafeDecider(client=client(lambda r: httpx.Response(200))).judge(Query.of("q"), HITS[:1])
+
+
+async def test_env_key_registered(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-env-key-777")
+    TypeSafeDecider()
+    assert scrub("ts-env-key-777") == "***"
+
+
+@pytest.mark.live
+async def test_live_typesafe():
+    if not os.environ.get("TYPESAFE_API_KEY"):
+        pytest.skip("set TYPESAFE_API_KEY")
+    d = TypeSafeDecider()
+    try:
+        res = await d.judge(Query.of("what relieves headaches?"), HITS)
+    finally:
+        await d.close()
+    p = {j.key: j.p_relevant for j in res.judgments}
+    assert p["s:0"] > p["s:1"]
