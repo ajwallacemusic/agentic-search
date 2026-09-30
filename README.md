@@ -100,6 +100,9 @@ profiles:
     backends: [{name: notes, type: files, root: ./docs, glob: "**/*.md"}]
     driver: {type: anthropic, model: claude-sonnet-5-5}
     limits: {max_budget: {max_turns: 2, max_cost_usd: 0.25}, allow_include_content: false}
+  vertex:
+    backends: [{name: notes, type: files, root: ./docs, glob: "**/*.md"}]
+    driver: {type: vertex, model: gemini-3.8-flash, project: my-project, location: global}
 ```
 
 ```bash
@@ -162,7 +165,7 @@ budget?, include_content?, include_trace?}`, plus `snapshot_k?` for the stream. 
 
 ## Roles
 
-- **Driver**: plans and calls tools (`ToolCallingDriver` over `AnthropicClient` or `OpenAICompatClient`).
+- **Driver**: plans and calls tools (`ToolCallingDriver` over `AnthropicClient`, `OpenAICompatClient`, or `vertex_client(...)` for Gemini on Vertex).
 - **Analyzer decider**: judges relevance (`LLMJudge`, `CrossEncoderJudge`, `TypeSafeDecider`).
 - **Controller decider**: continue/refine/broaden/stop (`LLMJudge`, `TypeSafeDecider`, or the built-in heuristic).
 - **Backends**: files, Postgres + pgvector, MySQL, BigQuery, OpenSearch, Neo4j and Milvus (see below).
@@ -188,6 +191,18 @@ Every backend supports filters and fetch. All except Milvus also support regex a
 (`count`, `sum|avg|min|max:<column>`); `traverse` is Neo4j-only.
 Set `native_query: true` on a backend to let the planner run read-only native SQL / search bodies;
 they pass `backends/native_guard.py` (single SELECT, no DML/DDL/locks/scripts, row cap) first.
+Set `columns: {<table>: [<column>, ...]}` on a SQL backend to limit it to those tables and
+columns. Discovery shows only them, plus each table's id column. Native SQL is resolved against
+them with sqlglot's `qualify`, and the resolved query is what runs, so `SELECT *` reads only the
+allowed columns. A table, column or function outside the list is refused by name. Functions come
+from `DEFAULT_SQL_FUNCTIONS` unless `native_functions` names others; an empty list allows no functions.
+`native_functions` requires `columns`. A stored Postgres tsvector column is used only when listed
+in `columns`. The guard refuses LATERAL, schema-qualified function calls, time travel (FOR SYSTEM_TIME AS OF),
+and whole-row references. Table names match exactly; column names follow the dialect's case rules.
+
+`PostgresBackend(..., password=<async callable>)` asks for a password at each new connection,
+for a short-lived token such as a Cloud SQL IAM database token. The DSN then carries no password.
+
 Vector columns need `embedders: {<table>.<column>: <embedder id>}` so queries are embedded with the
 same model as the stored vectors. DSNs and passwords are masked in errors and traces.
 Milvus never loads collections by default (reads fail with "collection … is not loaded"); set
@@ -197,8 +212,9 @@ composite primary key are skipped unless `id_columns` names a column for them.
 
 **Connect with a read-only role/user.** Grant the credentials you configure only `SELECT` (or
 search/read) on the tables and indices you expose. The native-query guard and the read-only
-sessions are defence in depth, not a substitute: the guard's function check is a denylist and
-cannot anticipate every side-effecting function or extension.
+sessions are defence in depth, not a substitute: the guard's function check is a denylist unless
+`columns` is set, in which case it becomes an allow list; even so, it cannot anticipate every
+side-effecting function or extension.
 
 ```yaml
 backends:
