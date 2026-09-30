@@ -26,7 +26,12 @@ export interface TextPart {
   text: string;
 }
 
-/** `data` is standard base64; `uri` is set instead for images held by reference. */
+/**
+ * `data` is standard base64 when present.
+ * In the question the service echoes back (`search_started.question` and `SearchResult.question`), both `data` and `uri` are null;
+ * clients should keep their own copy of the images they sent.
+ * Hit content images (`Hit.content` and `HitSummary.content` with `include_content`) may carry `data` or `uri`.
+ */
 export interface ImagePart {
   kind: "image";
   uri: string | null;

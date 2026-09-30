@@ -11,19 +11,24 @@ import {
   EVENT_TYPES,
   SCHEMA_VERSION,
   isSearchEvent,
+  type Action,
   type Budget,
   type Hit,
   type HitSummary,
   type ImagePart,
+  type Mode,
   type OpRef,
+  type Phase,
   type PhaseSummary,
   type Query,
   type RankedHit,
   type SearchEvent,
   type SearchResult,
+  type StopReason,
   type StructuredPart,
   type TextPart,
   type ToolErrorInfo,
+  type ToolErrorKind,
   type Trace,
   type TraceEvent,
   type Usage,
@@ -39,7 +44,19 @@ type Exactly<T, L extends readonly (keyof T)[]> = Exclude<keyof T, L[number]> ex
 function fields<T>() {
   return <const L extends readonly (keyof T)[]>(list: Exactly<T, L>) => list;
 }
+
+/** Compile-time: `L` must list every member of union `T` and nothing else. */
+function allOf<T extends string>() {
+  return <const L extends readonly T[]>(list: Exclude<T, L[number]> extends never ? L : never) => list;
+}
+
 type EventOf<K extends SearchEvent["type"]> = Extract<SearchEvent, { type: K }>;
+
+const STOP_REASONS = allOf<StopReason>()(["controller_stop", "no_plan", "single_pass", "delegate_done", "budget_turns", "budget_tool_calls", "budget_tokens", "budget_cost", "budget_time"]);
+const PHASES = allOf<Phase>()(["plan", "query", "judge", "decide", "delegate"]);
+const MODES = allOf<Mode>()(["retrieval", "harness", "model"]);
+const ACTIONS = allOf<Action>()(["continue", "refine", "broaden", "switch_source", "stop"]);
+const TOOL_ERROR_KINDS = allOf<ToolErrorKind>()(["validation", "backend", "timeout", "embedder", "policy"]);
 
 const EVENT_FIELDS = {
   search_started: fields<EventOf<"search_started">>()(["type", "schema_version", "search_id", "seq", "turn", "at_ms", "question", "mode", "sources", "budget", "setup_errors"]),
@@ -94,13 +111,13 @@ describe("contract with the Python models (schema v1)", () => {
   });
 
   it("matches the schema's enumerations", () => {
-    const stop: string[] = schema.$defs.StopReason.enum;
-    expect(sorted(stop)).toEqual(sorted(["controller_stop", "no_plan", "single_pass", "delegate_done",
-      "budget_turns", "budget_tool_calls", "budget_tokens", "budget_cost", "budget_time"]));
-    const phase = schema.$defs.PhaseStarted.properties.phase.enum;
-    expect(sorted(phase)).toEqual(sorted(["plan", "query", "judge", "decide", "delegate"]));
-    const mode = schema.$defs.SearchStarted.properties.mode.enum;
-    expect(sorted(mode)).toEqual(sorted(["retrieval", "harness", "model"]));
+    expect(sorted(STOP_REASONS)).toEqual(sorted(schema.$defs.StopReason.enum));
+    expect(sorted(PHASES)).toEqual(sorted(schema.$defs.PhaseStarted.properties.phase.enum));
+    expect(sorted(MODES)).toEqual(sorted(schema.$defs.SearchStarted.properties.mode.enum));
+    // Action is nullable in PhaseSummary, so find the enum inside the anyOf branch
+    const actionEnumDef = schema.$defs.PhaseSummary.properties.action.anyOf.find((d: Record<string, unknown>) => d.enum);
+    expect(sorted(ACTIONS)).toEqual(sorted(actionEnumDef.enum));
+    expect(sorted(TOOL_ERROR_KINDS)).toEqual(sorted(schema.$defs.ToolErrorInfo.properties.kind.enum));
   });
 });
 
@@ -136,5 +153,38 @@ describe("golden SSE fixtures", () => {
     for (const h of full.hits) expect(h.hit.content?.length).toBeGreaterThan(0);
     const snapshot = fixtures.with_content!.find((f) => f.event === "results_updated")!.data.hits as HitSummary[];
     for (const s of snapshot) expect(s.content?.length).toBeGreaterThan(0);
+  });
+
+  it("echo back questions with null image data and uri", () => {
+    const image = fixtures.image!;
+    const started = image.find((f) => f.event === "search_started")!.data;
+    const question = started.question as Query;
+    const imagePartStarted = question.content.find((p) => (p as unknown as Record<string, unknown>).kind === "image") as ImagePart;
+    expect(imagePartStarted).toBeDefined();
+    expect(imagePartStarted.kind).toBe("image");
+    expect(imagePartStarted.data).toBeNull();
+    expect(imagePartStarted.uri).toBeNull();
+    expect(typeof imagePartStarted.mime).toBe("string");
+
+    const finished = image.find((f) => f.event === "search_finished")!.data;
+    const resultQuestion = (finished.result as SearchResult).question;
+    const imagePartFinished = resultQuestion.content.find((p) => (p as unknown as Record<string, unknown>).kind === "image") as ImagePart;
+    expect(imagePartFinished).toBeDefined();
+    expect(imagePartFinished.kind).toBe("image");
+    expect(imagePartFinished.data).toBeNull();
+    expect(imagePartFinished.uri).toBeNull();
+    expect(typeof imagePartFinished.mime).toBe("string");
+  });
+});
+
+describe("schema required-field sets", () => {
+  it("SearchResult.required excludes trace and only includes the five core fields", () => {
+    expect(sorted(schema.$defs.SearchResult.required as string[])).toEqual(sorted(["hits", "mode", "question", "stop_reason", "usage"]));
+    expect(schema.$defs.SearchResult.required).not.toContain("trace");
+  });
+
+  it("Hit.required excludes content and only includes the two core fields", () => {
+    expect(sorted(schema.$defs.Hit.required as string[])).toEqual(sorted(["doc_id", "source"]));
+    expect(schema.$defs.Hit.required).not.toContain("content");
   });
 });
