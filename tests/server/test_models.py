@@ -58,15 +58,20 @@ class TestBuildQuery:
 
         assert query.content[1].data == raw_data
 
-    def test_unpadded_url_safe_base64_decodes(self):
-        """Unpadded URL-safe base64 input decodes after adding padding."""
-        raw_data = b"\x00\x01\x02"
-        encoded = base64.urlsafe_b64encode(raw_data).decode().rstrip("=")
-        assert "=" not in encoded
+    @pytest.mark.parametrize("raw_data", [b"\xfb", b"\xfb\xff"])
+    def test_unpadded_url_safe_base64_decodes(self, raw_data):
+        """Unpadded URL-safe base64 (1 and 2-byte payloads) decode after adding padding."""
+        # 1-byte and 2-byte payloads produce 2 and 3 character base64 respectively,
+        # both needing padding to reach a multiple of 4
+        url_safe_padded = base64.urlsafe_b64encode(raw_data).decode()
+
+        # Remove padding - this makes the base64 unpadded
+        url_safe_unpadded = url_safe_padded.rstrip("=")
+        assert len(url_safe_unpadded) % 4 != 0, "Test setup: must need padding"
 
         req = SearchRequest(
             question="test",
-            images=[ImageInput(data=encoded)]
+            images=[ImageInput(data=url_safe_unpadded)]
         )
         query = build_query(req, max_images=1, max_image_bytes=10_000_000)
 
@@ -104,6 +109,16 @@ class TestBuildQuery:
         with pytest.raises(RequestError, match="images\\[0\\]\\.data is not valid base64"):
             build_query(req, max_images=1, max_image_bytes=10_000_000)
 
+    @pytest.mark.parametrize("invalid_data", ["A", "AAAAA"])
+    def test_invalid_base64_length_raises_error(self, invalid_data):
+        """Base64 data with length that is 1 mod 4 raises RequestError."""
+        req = SearchRequest(
+            question="test",
+            images=[ImageInput(data=invalid_data)]
+        )
+        with pytest.raises(RequestError, match="images\\[0\\]\\.data is not valid base64"):
+            build_query(req, max_images=1, max_image_bytes=10_000_000)
+
     def test_image_larger_than_max_bytes_raises_error(self):
         """Image larger than max_image_bytes raises RequestError after decoding."""
         raw_data = b"x" * 100
@@ -116,20 +131,21 @@ class TestBuildQuery:
             build_query(req, max_images=1, max_image_bytes=50)
 
     def test_oversized_encoded_data_rejects_before_decoding(self):
-        """Oversized encoded data raises RequestError without decoding."""
-        # Create data that's larger than max_image_bytes * 4//3 + 4
-        # This ensures we reject before decoding
-        max_bytes = 100
-        # Base64 encoded size is roughly raw_size * 4/3, so if we want to reject
-        # before decoding, we check if encoded size > max_bytes * 4//3 + 4
+        """Oversized encoded data with invalid chars rejects before decoding attempt."""
+        # Use invalid base64 characters (@) and make it exceed the pre-decode threshold.
+        # With invalid data, we need to verify the error is from the pre-decode size check
+        # ("larger than") not from the base64 validation ("not valid base64").
+        max_bytes = 10
         threshold = max_bytes * 4 // 3 + 4
-        large_data = base64.b64encode(b"x" * (max_bytes + 100)).decode()
-        assert len(large_data) > threshold
+        # Create data that is both oversized AND invalid base64
+        oversized_invalid = "@" * (threshold + 10)
+        assert len(oversized_invalid) > threshold
 
         req = SearchRequest(
             question="test",
-            images=[ImageInput(data=large_data)]
+            images=[ImageInput(data=oversized_invalid)]
         )
+        # Pre-decode check should trigger first, producing "larger than" message
         with pytest.raises(RequestError, match="images\\[0\\] is larger than"):
             build_query(req, max_images=1, max_image_bytes=max_bytes)
 

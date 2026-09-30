@@ -1,4 +1,3 @@
-import os
 import textwrap
 
 import pytest
@@ -70,19 +69,19 @@ def test_resolve_budget():
 class TestAuthConfig:
     """Tests for AuthConfig.keys() guard function."""
 
-    def test_keys_parses_comma_separated_with_whitespace(self):
+    def test_keys_parses_comma_separated_with_whitespace(self, monkeypatch):
         """Key parsing strips whitespace and skips empty tokens."""
         auth = AuthConfig(type="api_key", keys_env="MY_KEYS")
-        os.environ["MY_KEYS"] = " key1 , ,key2 "
+        monkeypatch.setenv("MY_KEYS", " key1 , ,key2 ")
 
         keys = auth.keys()
 
         assert keys == ["key1", "key2"]
 
-    def test_keys_are_registered_for_scrubbing(self):
+    def test_keys_are_registered_for_scrubbing(self, monkeypatch):
         """Keys are registered and then scrubbed from text."""
         auth = AuthConfig(type="api_key", keys_env="MY_KEYS")
-        os.environ["MY_KEYS"] = "secret_key_1,secret_key_2"
+        monkeypatch.setenv("MY_KEYS", "secret_key_1,secret_key_2")
 
         keys = auth.keys()
 
@@ -92,19 +91,18 @@ class TestAuthConfig:
         assert keys[0] not in scrubbed
         assert "***" in scrubbed
 
-    def test_unset_variable_raises_config_error(self):
+    def test_unset_variable_raises_config_error(self, monkeypatch):
         """Unset environment variable raises ConfigError."""
         auth = AuthConfig(type="api_key", keys_env="NONEXISTENT_VAR")
-        if "NONEXISTENT_VAR" in os.environ:
-            del os.environ["NONEXISTENT_VAR"]
+        monkeypatch.delenv("NONEXISTENT_VAR", raising=False)
 
         with pytest.raises(ConfigError, match="NONEXISTENT_VAR"):
             auth.keys()
 
-    def test_empty_variable_raises_config_error(self):
+    def test_empty_variable_raises_config_error(self, monkeypatch):
         """Empty environment variable raises ConfigError."""
         auth = AuthConfig(type="api_key", keys_env="MY_EMPTY")
-        os.environ["MY_EMPTY"] = ""
+        monkeypatch.setenv("MY_EMPTY", "")
 
         with pytest.raises(ConfigError, match="MY_EMPTY"):
             auth.keys()
