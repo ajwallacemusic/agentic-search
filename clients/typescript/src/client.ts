@@ -16,7 +16,10 @@ export interface ClientOptions {
   apiKey?: string;
   /** Custom fetch (tests, proxies, older runtimes). Defaults to the global `fetch`. */
   fetch?: typeof fetch;
-  /** Extra headers on every request. */
+  /**
+   * Extra headers on every request. The client's own `Accept`, `Content-Type` (on requests with a
+   * body) and `Authorization` (when `apiKey` is set) take precedence over these.
+   */
   headers?: Record<string, string>;
 }
 
@@ -157,9 +160,10 @@ export class AgenticSearchClient {
 
   private async request(method: string, path: string, body: unknown, signal: AbortSignal | undefined,
     extra: Record<string, string>): Promise<Response> {
-    const headers: Record<string, string> = { ...this.headers, ...extra };
-    if (body !== undefined) headers["Content-Type"] = "application/json";
-    if (this.apiKey) headers["Authorization"] = `Bearer ${this.apiKey}`;
+    const headers = new Headers(this.headers);
+    for (const [name, value] of Object.entries(extra)) headers.set(name, value);
+    if (body !== undefined) headers.set("Content-Type", "application/json");
+    if (this.apiKey) headers.set("Authorization", `Bearer ${this.apiKey}`);
     const init: RequestInit = { method, headers };
     if (body !== undefined) init.body = JSON.stringify(body);
     if (signal) init.signal = signal;

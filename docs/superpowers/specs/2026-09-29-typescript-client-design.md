@@ -12,8 +12,8 @@ with typed results and live, typed progress events.
 
 ### Goals
 
-1. No runtime dependencies. It uses the standard `fetch`, `ReadableStream` and `TextDecoder`
-   APIs, so it works in browsers, Node ≥ 18, Deno and Bun.
+1. No runtime dependencies. It uses the standard `fetch`, `Headers`, `ReadableStream` and
+   `TextDecoder` APIs, so it works in browsers, Node ≥ 18, Deno and Bun.
 2. `stream()` is an async iterator of a discriminated `SearchEvent` union that mirrors schema v1.
 3. Leaving the loop, or aborting an `AbortSignal`, closes the connection, and the service then
    cancels the search.
@@ -83,6 +83,9 @@ HTML §9.2.6:
 `new AgenticSearchClient({baseUrl, apiKey?, fetch?, headers?})`:
 - A trailing slash on `baseUrl` is trimmed.
 - `apiKey` is sent as `Authorization: Bearer`.
+- `headers` are added to every request, merged case-insensitively through a `Headers` object; the
+  client's own `Accept`, `Content-Type` (when there is a body) and `Authorization` (when `apiKey`
+  is set) replace any user header of the same name.
 - `fetch` defaults to the global one, and a `TypeError` is thrown if none exists.
 
 | Method | Request |

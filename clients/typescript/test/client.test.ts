@@ -32,13 +32,29 @@ describe("AgenticSearchClient", () => {
     expect(seen.map((e) => e.type)).toEqual(["search_started", "phase_started", "search_finished"]);
     const [url, init] = fetch.mock.calls[0]!;
     expect(url).toBe("http://svc/v1/search/stream");
-    const headers = init!.headers as Record<string, string>;
-    expect(headers["Authorization"]).toBe("Bearer k1");
-    expect(headers["Accept"]).toBe("text/event-stream");
+    const headers = new Headers(init!.headers);
+    expect(headers.get("Authorization")).toBe("Bearer k1");
+    expect(headers.get("Accept")).toBe("text/event-stream");
+    expect(headers.get("Content-Type")).toBe("application/json");
     expect(JSON.parse(init!.body as string)).toEqual({ question: "q", snapshot_k: 3 });
     const last = seen[2]!;
     if (last.type !== "search_finished") throw new Error("narrowing");
     expect(last.result.stop_reason).toBe("no_plan");
+  });
+
+  it("lets its own Authorization and Content-Type win over user headers, case-insensitively", async () => {
+    const fetch = fakeFetch(() => Response.json(finished.result));
+    const client = new AgenticSearchClient({ baseUrl: "http://svc", apiKey: "k1", fetch,
+      headers: { authorization: "Bearer other", "content-type": "text/plain", "x-trace": "t1" } });
+    await client.search({ question: "q" });
+    const init = fetch.mock.calls[0]![1]!;
+    expect(init.headers).toBeInstanceOf(Headers);
+    const headers = new Headers(init.headers);
+    const entries = [...headers.entries()];
+    expect(entries.filter(([k]) => k === "authorization")).toEqual([["authorization", "Bearer k1"]]);
+    expect(entries.filter(([k]) => k === "content-type")).toEqual([["content-type", "application/json"]]);
+    expect(headers.get("Accept")).toBe("application/json");
+    expect(headers.get("X-Trace")).toBe("t1");
   });
 
   it("skips unknown event types and reports them", async () => {
