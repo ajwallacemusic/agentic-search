@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from agentic_search.backends.base import BackendError
@@ -23,8 +25,97 @@ _SQL_FUNC_DENYLIST = re.compile(
 )
 
 
-def guard_sql(query: str, dialect: str, max_rows: int) -> str:
-    """Allow exactly one SELECT/set-operation with no DML/DDL/locking; cap or add LIMIT."""
+DEFAULT_SQL_FUNCTIONS = frozenset({
+    "COUNT", "COUNT_IF", "SUM", "AVG", "MIN", "MAX", "APPROX_DISTINCT",
+    "LOWER", "UPPER", "LENGTH", "TRIM", "SUBSTRING", "CONCAT", "COALESCE",
+    "STARTS_WITH", "ENDS_WITH", "CONTAINS", "REGEXP_LIKE",
+    "CAST", "TRY_CAST", "IF", "CASE", "ROUND", "ABS", "SAFE_DIVIDE",
+    "DATE", "EXTRACT", "DATE_TRUNC", "TIMESTAMP_TRUNC", "DATEDIFF", "CURRENT_DATE",
+    "CURRENT_TIMESTAMP",
+})
+"""Uppercase sqlglot names (`Expression.sql_name()`, or the name of an unknown function).
+BigQuery's CONTAINS_SUBSTR parses as CONTAINS and REGEXP_CONTAINS as REGEXP_LIKE."""
+
+
+@dataclass(frozen=True)
+class SqlAllowList:
+    """What native SQL may read: tables and their columns, and functions by sqlglot name.
+
+    `db` is the Postgres schema or BigQuery dataset every allowed table sits in; `catalog` is
+    the BigQuery project. An unqualified table is read as one of these."""
+
+    tables: Mapping[str, frozenset[str]]
+    db: str | None = None
+    catalog: str | None = None
+    functions: frozenset[str] = DEFAULT_SQL_FUNCTIONS
+
+    def __post_init__(self) -> None:
+        if self.catalog is not None and self.db is None:
+            raise ValueError("SqlAllowList: a catalog needs a db")
+
+    def schema(self) -> dict[str, Any]:
+        """The nested schema `qualify` resolves against: allowed columns only, sorted so `*`
+        expands in a stable order."""
+        schema: dict[str, Any] = {table: {column: "UNKNOWN" for column in sorted(columns)}
+                                  for table, columns in self.tables.items()}
+        if self.db is not None:
+            schema = {self.db: schema}
+        if self.catalog is not None:
+            schema = {self.catalog: schema}
+        return schema
+
+
+def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
+    """Resolve every column against the allowed columns and return the resolved query.
+
+    The resolved query is what runs, so `*` reads only allowed columns and a reference that
+    `qualify` binds to a select alias never reaches a hidden column of the same name."""
+    from sqlglot import exp
+    from sqlglot.errors import OptimizeError
+    from sqlglot.optimizer.qualify import qualify
+
+    try:
+        stmt = qualify(stmt, schema=allow.schema(), dialect=dialect, catalog=allow.catalog,
+                       db=allow.db, validate_qualify_columns=True, quote_identifiers=False)
+    except OptimizeError as exc:
+        raise NativeQueryRejected(
+            f"native SQL may use only the allowed tables and columns: {exc}") from exc
+    # After a clean resolve, a column with no table is an alias reference. `qualify` leaves one
+    # where it cannot tell alias from table column (HAVING) and where a bare table alias names
+    # the whole row (`SELECT v FROM t v`); both can read a hidden column. Only ORDER BY on a
+    # select alias, which `qualify` has already checked, may stay unqualified.
+    for whole_row in stmt.find_all(exp.TableColumn):
+        raise NativeQueryRejected(
+            f"native SQL may use only the allowed tables and columns: "
+            f"{whole_row.sql(dialect=dialect)} names a whole row, not a column")
+    for column in stmt.find_all(exp.Column):
+        if column.table:
+            continue
+        order = column.find_ancestor(exp.Order)
+        if order is None or not isinstance(order.parent, exp.Query):
+            raise NativeQueryRejected(
+                f"native SQL may use only the allowed tables and columns: "
+                f"{column.sql(dialect=dialect)} is not a qualified allowed column")
+    ctes = {cte.alias_or_name for cte in stmt.find_all(exp.CTE)}
+    for table in stmt.find_all(exp.Table):
+        if table.name in ctes and not table.db:
+            continue
+        # A query naming no column, such as COUNT(*), resolves against any table; check each one.
+        if (table.name not in allow.tables or (table.db or None) != allow.db
+                or (table.catalog or None) != allow.catalog):
+            raise NativeQueryRejected(f"table {table.sql(dialect=dialect)} is not allowed in native SQL")
+    for func in stmt.find_all(exp.Func):
+        if isinstance(func, exp.Connector):  # AND, OR and XOR are operators, not functions
+            continue
+        name = (func.name if isinstance(func, exp.Anonymous) else func.sql_name()).upper()
+        if name not in allow.functions:
+            raise NativeQueryRejected(f"function {name} is not allowed in native SQL")
+    return stmt
+
+
+def guard_sql(query: str, dialect: str, max_rows: int, allow: SqlAllowList | None = None) -> str:
+    """Allow exactly one SELECT/set-operation with no DML/DDL/locking; cap or add LIMIT.
+    With `allow`, also resolve it against the allowed tables, columns and functions."""
     import sqlglot
     from sqlglot import exp
 
@@ -47,6 +138,8 @@ def guard_sql(query: str, dialect: str, max_rows: int) -> str:
             func_name = node.name if isinstance(node, exp.Anonymous) else node.sql_name()
             if _SQL_FUNC_DENYLIST.match(func_name):
                 raise NativeQueryRejected(f"function {func_name} is not allowed in native SQL")
+    if allow is not None:
+        stmt = _apply_allow_list(stmt, dialect, allow)
     limit = stmt.args.get("limit")
     current = None
     if limit is not None:
