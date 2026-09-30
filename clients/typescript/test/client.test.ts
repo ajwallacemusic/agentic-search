@@ -70,6 +70,34 @@ describe("AgenticSearchClient", () => {
     expect(unknown).toEqual(["thinking"]);
   });
 
+  it("reports data.type for unknown events, falling back to the SSE event name", async () => {
+    const unnamed = `data: ${JSON.stringify({ ...base, seq: 1, type: "thinking" })}\n\n`; // event name "message"
+    const noType = `event: odd\ndata: 42\n\n`;
+    const fetch = fakeFetch(() => sseResponse([frame(0, started), unnamed, noType, frame(2, finished)]));
+    const client = new AgenticSearchClient({ baseUrl: "http://svc", fetch });
+    const unknown: [string, unknown][] = [];
+    const types: string[] = [];
+    for await (const ev of client.stream({ question: "q" }, { onUnknownEvent: (t, d) => unknown.push([t, d]) })) {
+      types.push(ev.type);
+    }
+    expect(types).toEqual(["search_started", "search_finished"]);
+    expect(unknown.map(([t]) => t)).toEqual(["thinking", "odd"]);
+    expect(unknown[1]![1]).toBe(42);
+  });
+
+  it("treats an event with another schema_version as unknown", async () => {
+    const v2 = { ...phase, schema_version: 2 };
+    const fetch = fakeFetch(() => sseResponse([frame(0, started), frame(1, v2), frame(2, finished)]));
+    const client = new AgenticSearchClient({ baseUrl: "http://svc", fetch });
+    const unknown: [string, unknown][] = [];
+    const types: string[] = [];
+    for await (const ev of client.stream({ question: "q" }, { onUnknownEvent: (t, d) => unknown.push([t, d]) })) {
+      types.push(ev.type);
+    }
+    expect(types).toEqual(["search_started", "search_finished"]);
+    expect(unknown).toEqual([["phase_started", v2]]);
+  });
+
   it("throws AgenticSearchError with the service detail on HTTP errors", async () => {
     const fetch = fakeFetch(() => new Response(JSON.stringify({ detail: "unknown profile 'x'" }), { status: 404 }));
     const client = new AgenticSearchClient({ baseUrl: "http://svc", fetch });

@@ -4,6 +4,7 @@ import {
   type Mode,
   type SearchEvent,
   type SearchResult,
+  SCHEMA_VERSION,
   isSearchEvent,
   isTerminal,
 } from "./events.js";
@@ -50,7 +51,11 @@ export interface CallOptions {
 }
 
 export interface StreamOptions extends CallOptions {
-  /** Called for event types this client does not know (a newer server); they are skipped. */
+  /**
+   * Called for events this client does not know (a newer server): an unknown `type`, or a
+   * `schema_version` other than `SCHEMA_VERSION`. They are skipped. `type` is the event's `type`
+   * field when it is a string, else the SSE event name.
+   */
   onUnknownEvent?: (type: string, data: unknown) => void;
 }
 
@@ -142,8 +147,12 @@ export class AgenticSearchClient {
         } catch {
           throw new AgenticSearchError("malformed event data", response.status, message.data);
         }
-        if (data === null || typeof data !== "object" || !isSearchEvent(data as { type?: unknown })) {
-          options.onUnknownEvent?.(message.event, data);
+        const fields = data !== null && typeof data === "object"
+          ? data as { type?: unknown; schema_version?: unknown }
+          : undefined;
+        if (!fields || !isSearchEvent(fields) || fields.schema_version !== SCHEMA_VERSION) {
+          const type = typeof fields?.type === "string" ? fields.type : message.event;
+          options.onUnknownEvent?.(type, data);
           continue;
         }
         const event = data as SearchEvent;

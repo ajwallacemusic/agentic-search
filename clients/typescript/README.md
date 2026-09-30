@@ -32,8 +32,9 @@ for await (const ev of client.stream({ profile: "general", question: "what treat
   event, not an exception.
 - Breaking out of the loop or aborting `signal` closes the connection, and the service cancels
   the search. An aborted stream rejects with the runtime's `AbortError`.
-- Event types this client does not know (from a newer server) are skipped and reported to
-  `onUnknownEvent`.
+- Events this client does not know (from a newer server: an unknown `type`, or a
+  `schema_version` other than `SCHEMA_VERSION`) are skipped and reported to
+  `onUnknownEvent(type, data)`.
 - `search(request)` returns the lean result: no `trace` unless `include_trace`, no hit `content`
   unless `include_content`.
 - `profiles()` lists the service's profiles, sources and limits; `health()` is the liveness check.

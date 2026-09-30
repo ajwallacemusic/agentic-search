@@ -109,8 +109,12 @@ HTML §9.2.6:
   `AgenticSearchError("response is not JSON", status, rawText)`; an SSE `data` that is not JSON
   throws `AgenticSearchError("malformed event data", status, rawData)` from the stream.
 - **Stream semantics:**
-  - Each SSE message's `data` is parsed as JSON. Known event types are yielded. Unknown types are
-    passed to `onUnknownEvent(type, data)` and skipped.
+  - Each SSE message's `data` is parsed as JSON. Known event types with
+    `schema_version === SCHEMA_VERSION` are yielded. Anything else (an unknown type, a
+    non-object, or another `schema_version`) is passed to `onUnknownEvent(type, data)` and
+    skipped, where `type` is `data.type` when it is a string, else the SSE event name. A
+    terminal event with another `schema_version` is therefore skipped too, and the stream then
+    ends with the status-0 error.
   - The generator returns after the terminal event, `search_finished` or `search_failed`.
     `search_failed` is yielded like any other event, never thrown.
   - If the body ends before a terminal event and the stream was not aborted, it throws
