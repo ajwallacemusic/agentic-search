@@ -57,3 +57,10 @@ the named plan ships the feature that exposes them.
 - Milvus caches a positive load state forever; a collection released later gives a server error instead of "not loaded".
 - The Cypher guard and wrapper rely on `CALL { WITH x … }`, which Neo4j flags as deprecated in favour of `CALL (x) { … }`; revisit when it is removed.
 - Native Cypher rejects any backslash-u sequence (Neo4j decodes them before tokenising); queries needing non-ASCII literals must use literal characters or parameters.
+
+## Plan 4 final review — deferred
+
+- Generic BaseModel-aware scrubbing in `scrub_data`; today it does not descend into BaseModel payloads, so event builders must scrub such fields by hand (e.g. `PhaseSummary.note`).
+- SSE payload size of `SearchFinished` (full trace plus content): the service layer should offer a lean projection.
+- Snapshot ranking and the turn summary each sort the pool; share one sort.
+- `NullEmitter` still constructs event objects before discarding them.
