@@ -117,7 +117,8 @@ class _Coll:
     pk: str
     text_fields: list[str]
     output_fields: list[str]
-    vector_metrics: dict[str, str] = field(default_factory=dict)
+    pk_type: str = "VARCHAR"
+    vector_metrics: dict[str, str | None] = field(default_factory=dict)  # None: metric unknown
     sparse_field: str | None = None
     bm25_inputs: list[str] = field(default_factory=list)
 
@@ -140,7 +141,7 @@ class MilvusBackend:
     def __init__(self, name: str, uri: str, *, token: str | None = None, db_name: str | None = None,
                  collections: list[str] | None = None, embedders: dict[str, str] | None = None,
                  description: str | None = None, max_rows: int = 100, sample_values: bool = True,
-                 connect_timeout_s: float = 10.0):
+                 connect_timeout_s: float = 10.0, load_collections: bool = False):
         parsed = urlparse(uri)
         register_secret(token)
         register_secret(unquote(parsed.password or ""))
@@ -154,6 +155,7 @@ class MilvusBackend:
         self.max_rows = max_rows
         self.sample_values = sample_values
         self.connect_timeout_s = float(connect_timeout_s)
+        self.load_collections = load_collections
         self._client: Any = None
         self._collections: dict[str, _Coll] | None = None
         self._loaded: set[str] = set()
@@ -220,25 +222,26 @@ class MilvusBackend:
         bm25 = [fn for fn in functions if _type_name(fn.get("type")) == "BM25"]
         bm25_inputs = [i for fn in bm25 for i in fn.get("input_field_names", [])]
         sparse = bm25[0]["output_field_names"][0] if bm25 else None
-        pk = next((f["name"] for f in desc["fields"] if f.get("is_primary")), None)
-        if pk is None:
+        pk_field = next((f for f in desc["fields"] if f.get("is_primary")), None)
+        if pk_field is None:
             raise BackendError(f"collection {name!r} has no primary key")
+        pk, pk_type = pk_field["name"], _type_name(pk_field["type"])
         metrics = await self._metrics(name)
         specs: list[FieldSpec] = []
         text_fields: list[str] = []
         output_fields: list[str] = []
-        vector_metrics: dict[str, str] = {}
+        vector_metrics: dict[str, str | None] = {}
         for f in desc["fields"]:
             fname, tname = f["name"], _type_name(f["type"])
             params = f.get("params") or {}
             if tname == "SPARSE_FLOAT_VECTOR":
                 continue
             if tname in _VECTOR_TYPES:
-                metric = metrics.get(fname, "COSINE")
+                metric = metrics.get(fname)
                 vector_metrics[fname] = metric
                 specs.append(FieldSpec(name=fname, type=FieldType.VECTOR, vector_dim=int(params["dim"])
                                        if params.get("dim") is not None else None,
-                                       vector_metric=metric.lower(),
+                                       vector_metric=metric.lower() if metric else None,
                                        embedder_id=self.embedders.get(f"{name}.{fname}")))
                 continue
             ftype = _SCALAR_TYPES.get(tname, FieldType.JSON)
@@ -254,7 +257,7 @@ class MilvusBackend:
                 filterable=ftype is not FieldType.JSON,
                 sortable=ftype in (FieldType.INT, FieldType.FLOAT), sample_values=samples))
         count = await self._count(name)
-        return _Coll(info=CollectionInfo(name=name, fields=specs, count=count), pk=pk,
+        return _Coll(info=CollectionInfo(name=name, fields=specs, count=count), pk=pk, pk_type=pk_type,
                      text_fields=text_fields, output_fields=output_fields,
                      vector_metrics=vector_metrics, sparse_field=sparse, bm25_inputs=bm25_inputs)
 
@@ -290,9 +293,17 @@ class MilvusBackend:
         return values if len(values) <= SAMPLE_DISTINCT_MAX else None
 
     async def _load(self, name: str) -> None:
-        if name not in self._loaded:
+        """Make sure `name` is loaded. Loading changes server state, so it happens only when the
+        source opted in with `load_collections=True`; otherwise an unloaded collection is an error."""
+        if name in self._loaded:
+            return
+        if self.load_collections:
             await self._call("load_collection", name)
-            self._loaded.add(name)
+        else:
+            state = await self._call("get_load_state", name, timeout=self.connect_timeout_s)
+            if _type_name((state or {}).get("state")) != "LOADED":
+                raise BackendError(f"collection {name} is not loaded")
+        self._loaded.add(name)
 
     async def discover(self, detail: DiscoverDetail = "full",
                        collection: str | None = None) -> Manifest:
@@ -328,14 +339,16 @@ class MilvusBackend:
         params: dict[str, Any] = {}
         return (filter_expr(f, coll.fields, params) if f is not None else ""), params
 
-    async def _search(self, coll: _Coll, data: Any, anns_field: str, metric: str, f: Filter | None,
+    async def _search(self, coll: _Coll, data: Any, anns_field: str, metric: str | None, f: Filter | None,
                       limit: int, colls: dict[str, _Coll]) -> list[Hit]:
         expr, params = self._filter(f, coll)
         await self._load(coll.info.name)
         kwargs: dict[str, Any] = {"filter_params": params} if params else {}
+        # Unknown metric: let the server use the index's own metric rather than guessing one.
+        search_params = {"metric_type": metric} if metric else {}
         results = await self._call("search", coll.info.name, data=[data], anns_field=anns_field,
                                    filter=expr, limit=limit, output_fields=coll.output_fields,
-                                   search_params={"metric_type": metric}, consistency_level="Strong",
+                                   search_params=search_params, consistency_level="Strong",
                                    **kwargs)
         hits = []
         for r in (results[0] if results else []):
@@ -363,9 +376,9 @@ class MilvusBackend:
         return await self._search(coll, vector, field_name, coll.vector_metrics[field_name], f, limit, colls)
 
     async def execute(self, op: QueryOp) -> list[Hit]:
-        colls = await self._ensure()
         if not isinstance(op, (Lexical, Vector, Hybrid, FilterOnly, Fetch)):
             raise UnsupportedOperation(f"milvus backend does not support {op.type}")
+        colls = await self._ensure()
         if isinstance(op, Fetch):
             return await self._fetch(op, colls)
         coll = self._resolve(op.collection, colls)
@@ -391,7 +404,14 @@ class MilvusBackend:
 
     async def _fetch(self, op: Fetch, colls: dict[str, _Coll]) -> list[Hit]:
         coll = self._resolve(routed_collection(op, colls), colls)
-        ids = [strip_collection(i, coll.info.name) if len(colls) > 1 else i for i in op.doc_ids]
+        ids: list[Any] = [strip_collection(i, coll.info.name) if len(colls) > 1 else i for i in op.doc_ids]
+        if not ids:
+            return []
+        if coll.pk_type == "INT64":
+            try:
+                ids = [int(i) for i in ids]
+            except ValueError as exc:
+                raise BackendError(f"{coll.info.name!r} has an INT64 primary key; ids must be integers") from exc
         await self._load(coll.info.name)
         rows = await self._call("query", coll.info.name, filter=f"{coll.pk} in {{ids}}",
                                 filter_params={"ids": ids}, output_fields=coll.output_fields,

@@ -35,6 +35,7 @@ async def seed_milvus() -> None:
                 for (i, t, b, ty, y), v in zip(corpus.ROWS, vectors)]
         await client.insert("docs", rows)
         await client.flush("docs")
+        # The backend never loads collections by default (load_collections=False), so the seed does.
         await client.load_collection("docs")
     finally:
         await client.close()

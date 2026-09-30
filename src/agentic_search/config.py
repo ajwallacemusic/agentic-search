@@ -166,7 +166,7 @@ def _milvus(cfg: dict[str, Any], ctx: BuildContext) -> Any:
     from agentic_search.backends.milvus import MilvusBackend
     return MilvusBackend(cfg["name"], cfg["uri"], **_backend_kwargs(
         cfg, ctx, ("token", "db_name", "collections", "embedders", "description", "max_rows",
-                   "sample_values", "connect_timeout_s")))
+                   "sample_values", "connect_timeout_s", "load_collections")))
 
 
 _HTTP_EMBEDDER_KEYS = ("id", "batch_size", "concurrency", "timeout_s", "max_retries")

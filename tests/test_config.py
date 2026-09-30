@@ -203,3 +203,13 @@ def test_neo4j_query_timeout_passes_through(tmp_path):
         "driver": {"type": "openai_compat", "model": "local", "base_url": "http://localhost:8000/v1"},
     }, base_dir=tmp_path)
     assert h.backends["kg"].query_timeout_s == 4.5
+
+
+def test_milvus_load_collections_passes_through(tmp_path):
+    h = build_harness({
+        "backends": [{"name": "vec", "type": "milvus", "uri": "http://milvus:19530", "load_collections": True},
+                     {"name": "vec2", "type": "milvus", "uri": "http://milvus:19530"}],
+        "driver": {"type": "openai_compat", "model": "local", "base_url": "http://localhost:8000/v1"},
+    }, base_dir=tmp_path)
+    assert h.backends["vec"].load_collections is True
+    assert h.backends["vec2"].load_collections is False
