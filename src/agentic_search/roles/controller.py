@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from agentic_search.core.hooks import Hooks
+from agentic_search.core.secrets import scrub
 from agentic_search.core.state import SearchState
 from agentic_search.core.types import StopReason
+from agentic_search.events import PhaseFinished, PhaseStarted, PhaseSummary
 from agentic_search.models.base import Action, ControllerView, Decider, Decision
 
 
@@ -75,7 +78,10 @@ class Controller:
 
     async def decide(self, state: SearchState, *, digest: str | None = None) -> Decision:
         """`digest` is the turn digest rendered for this controller's decider (default state.digest)."""
+        state.emitter.emit(PhaseStarted, turn=state.turn, phase="decide")
+        t0 = time.perf_counter()
         by = "heuristic"
+        error: str | None = None
         if self.decider is None or not self._can_decide:
             decision = self.heuristic(state)
         else:
@@ -92,9 +98,13 @@ class Controller:
                 self._can_decide = False
                 decision = self.heuristic(state)
             except Exception as exc:
-                state.trace.add("decision_error", state.turn, decider=decider.id,
-                                error=f"{type(exc).__name__}: {str(exc)[:300]}")
+                error = scrub(f"{type(exc).__name__}: {exc}")[:300]
+                state.trace.add("decision_error", state.turn, decider=decider.id, error=error)
                 decision = self.heuristic(state)
         state.trace.add("decision", state.turn, action=decision.action.value, note=decision.note,
                         confidence=decision.confidence, by=by)
+        state.emitter.emit(PhaseFinished, turn=state.turn, phase="decide",
+                           duration_ms=(time.perf_counter() - t0) * 1000,
+                           summary=PhaseSummary(action=decision.action.value,
+                                                confidence=decision.confidence, error=error))
         return decision

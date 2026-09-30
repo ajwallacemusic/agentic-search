@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 
 from agentic_search.backends.base import Backend
 from agentic_search.backends.filters import filter_fields
+from agentic_search.core.emitter import EventEmitter, NullEmitter
 from agentic_search.core.hooks import Hooks, SourcePolicy
 from agentic_search.core.secrets import scrub
 from agentic_search.core.state import CandidatePool, Trace
@@ -27,6 +29,7 @@ from agentic_search.core.types import (
     required_capabilities,
 )
 from agentic_search.embedders.base import EmbedderRegistry
+from agentic_search.events import ToolCallFinished, ToolCallStarted, ToolErrorInfo
 from agentic_search.models.base import ToolCall
 from agentic_search.roles.tools import DiscoverRequest, parse_call
 
@@ -116,8 +119,11 @@ class Executor:
     # ---- execution ----------------------------------------------------------
 
     async def run(self, calls: list[ToolCall], *, question: Query, turn: int, pool: CandidatePool,
-                  trace: Trace, model_id: str | None = None) -> ExecResult:
-        outcomes = await asyncio.gather(*(self._run_one(c, question, turn, trace) for c in calls))
+                  trace: Trace, model_id: str | None = None,
+                  emitter: EventEmitter | None = None) -> ExecResult:
+        em = emitter or NullEmitter()
+        outcomes = await asyncio.gather(*(self._run_emitting(c, question, turn, trace, em)
+                                          for c in calls))
         result = ExecResult()
         for c, out in zip(calls, outcomes):
             if out.error is not None:
@@ -135,6 +141,20 @@ class Executor:
             result.outputs[c.id] = self._render_hits(out.hits, set(new), model_id)
             trace.add("tool_result", turn, call_id=c.id, n_hits=len(out.hits), n_new=len(new))
         return result
+
+    async def _run_emitting(self, c: ToolCall, question: Query, turn: int, trace: Trace,
+                            emitter: EventEmitter) -> _Outcome:
+        source = c.arguments.get("source")
+        emitter.emit(ToolCallStarted, turn=turn, call_id=c.id, name=c.name, arguments=c.arguments,
+                     source=source if isinstance(source, str) else None)
+        t0 = time.perf_counter()
+        out = await self._run_one(c, question, turn, trace)
+        err = out.error
+        emitter.emit(ToolCallFinished, turn=turn, call_id=c.id, n_hits=len(out.hits),
+                     duration_ms=(time.perf_counter() - t0) * 1000,
+                     error=None if err is None else ToolErrorInfo(
+                         kind=err.kind, message=scrub(err.message), source=err.source))
+        return out
 
     async def _run_one(self, c: ToolCall, question: Query, turn: int, trace: Trace) -> _Outcome:
         trace.add("tool_call", turn, call_id=c.id, name=c.name, arguments=c.arguments)

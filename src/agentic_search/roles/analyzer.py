@@ -8,8 +8,10 @@ import time
 from dataclasses import dataclass
 
 from agentic_search.core.hooks import Hooks, SourcePolicy
+from agentic_search.core.secrets import scrub
 from agentic_search.core.state import Candidate, SearchState
 from agentic_search.core.types import ModelUsage
+from agentic_search.events import PhaseFinished, PhaseStarted, PhaseSummary
 from agentic_search.models.base import Decider, JudgeRequest, ToolCall
 from agentic_search.roles.executor import ExecResult
 
@@ -42,14 +44,29 @@ class Analyzer:
         return cand.judged and cand.p_relevant is not None and cand.p_relevant >= self.relevant_threshold
 
     async def judge_keys(self, state: SearchState, keys: list[str]) -> ModelUsage:
+        """Judge the unjudged `keys`, bracketed by a `judge` phase on the state's emitter."""
+        state.emitter.emit(PhaseStarted, turn=state.turn, phase="judge")
+        t0 = time.perf_counter()
+        usage, n_judged, n_relevant, error = await self._judge(state, keys)
+        state.emitter.emit(PhaseFinished, turn=state.turn, phase="judge",
+                           duration_ms=(time.perf_counter() - t0) * 1000,
+                           summary=PhaseSummary(n_judged=n_judged, n_relevant=n_relevant,
+                                                error=error))
+        return usage
+
+    async def _judge(self, state: SearchState,
+                     keys: list[str]) -> tuple[ModelUsage, int, int, str | None]:
+        """Returns (usage, n_judged, n_relevant, last batch error)."""
         usage = ModelUsage()
+        n_judged = n_relevant_total = 0
+        error: str | None = None
         pending = [k for k in keys if not state.pool[k].judged]
         if not pending:
-            return usage
+            return usage, 0, 0, None
         if not self._can_judge or self.decider is None:
             for k in pending:
                 state.pool[k].unjudged_reason = "no judge configured"
-            return usage
+            return usage, 0, 0, None
         decider = self.decider
         for start in range(0, len(pending), self.batch_size):
             batch = pending[start:start + self.batch_size]
@@ -64,12 +81,13 @@ class Analyzer:
                 self._can_judge = False
                 for k in pending[start:]:
                     state.pool[k].unjudged_reason = f"{decider.id} does not judge"
-                return usage
+                return usage, n_judged, n_relevant_total, error
             except Exception as exc:
                 for k in batch:
                     state.pool[k].unjudged_reason = f"judge failed: {type(exc).__name__}"
+                error = scrub(f"{type(exc).__name__}: {exc}")[:300]
                 state.trace.add("judge_error", state.turn, decider=decider.id, n=len(batch),
-                                error=f"{type(exc).__name__}: {str(exc)[:300]}")
+                                error=error)
                 continue
             usage = usage.plus(result.usage)
             by_key = {j.key: j for j in result.judgments}
@@ -81,10 +99,12 @@ class Analyzer:
                     continue
                 cand.p_relevant, cand.rationale = j.p_relevant, j.rationale
                 cand.judged, cand.unjudged_reason = True, None
+                n_judged += 1
                 n_relevant += self.is_relevant(cand)
+            n_relevant_total += n_relevant
             state.trace.add("judge", state.turn, duration_ms=(time.perf_counter() - t0) * 1000,
                             decider=decider.id, n=len(batch), n_relevant=n_relevant)
-        return usage
+        return usage, n_judged, n_relevant_total, error
 
     async def analyze(self, state: SearchState, calls: list[ToolCall], result: ExecResult, *,
                       digest_model_id: str) -> AnalysisResult:
