@@ -6,6 +6,7 @@ import hmac
 from typing import Any
 
 from starlette.responses import JSONResponse
+from starlette.routing import get_route_path
 
 UNAUTHORIZED = "missing or invalid API key"
 TOO_LARGE = "request body too large"
@@ -30,7 +31,9 @@ class RequestGuard:
         self.app, self.keys, self.max_body_bytes, self.prefix = app, keys, max_body_bytes, prefix
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
-        if scope["type"] != "http" or not scope["path"].startswith(self.prefix):
+        # Match the path the router matches: `path` includes any `root_path` (proxy prefix or
+        # Mount), which the router strips, so checking the raw path would skip the guard.
+        if scope["type"] != "http" or not get_route_path(scope).startswith(self.prefix):
             await self.app(scope, receive, send)
             return
         headers: dict[bytes, str] = {}
@@ -59,13 +62,15 @@ class RequestGuard:
             chunks.append(body)
             if not message.get("more_body", False):
                 break
-        replayed = False
+        body_bytes: bytes | None = b"".join(chunks)
+        del chunks  # hold one copy of the body, not two
 
         async def replay() -> dict[str, Any]:
-            nonlocal replayed
-            if not replayed:
-                replayed = True
-                return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
+            nonlocal body_bytes
+            if body_bytes is not None:
+                message = {"type": "http.request", "body": body_bytes, "more_body": False}
+                body_bytes = None
+                return message
             return await receive()  # afterwards only http.disconnect: streams watch for it
 
         await self.app(scope, replay, send)

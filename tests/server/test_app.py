@@ -532,3 +532,33 @@ async def test_stuck_body_close_is_bounded_and_still_releases_slot(caplog, monke
     assert released == [1]
     assert any("closing a search stream" in r.getMessage() for r in caplog.records
                if r.name == "agentic_search.server")
+
+
+@pytest.mark.parametrize("root_path", ["/api", "/deep/prefix"])
+async def test_guard_applies_behind_a_root_path(app_factory, monkeypatch, root_path):
+    """Behind a proxy prefix (uvicorn --root-path, or a Mount) the ASGI `path` includes
+    `root_path`; the guard must still refuse bad keys unread and cap the body."""
+    app = app_factory(config=_keyed(monkeypatch, max_body_bytes=100))
+    reads, sent = [], []
+
+    def scope_for(headers):
+        path = f"{root_path}/v1/search"
+        return {"type": "http", "method": "POST", "path": path, "raw_path": path.encode(),
+                "headers": [(b"content-type", b"application/json"), *headers],
+                "query_string": b"", "http_version": "1.1", "scheme": "http",
+                "server": ("test", 80), "client": ("t", 1), "root_path": root_path,
+                "asgi": {"version": "3.0"}}
+
+    async def receive():
+        reads.append(1)
+        return {"type": "http.request", "body": b'{"question": "' + b"q" * 500 + b'"}',
+                "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    await asyncio.wait_for(app(scope_for([]), receive, send), 5)
+    assert reads == [] and sent[0]["status"] == 401
+    sent.clear()
+    await asyncio.wait_for(app(scope_for([(b"x-api-key", b"k-one")]), receive, send), 5)
+    assert sent[0]["status"] == 413
