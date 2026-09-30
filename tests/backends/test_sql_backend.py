@@ -367,3 +367,47 @@ async def test_bigquery_camel_case_columns_through_the_backend():
     with pytest.raises(NativeQueryRejected):
         await b.execute(Native(source="bq", collection="Studies", dialect="sql",
                                query="SELECT StudyDescription FROM studies"))
+
+
+class OutputNamedBigQuery(BigQueryBackend):
+    """Answers each native query with one row keyed by the query's own output names, the way
+    BigQuery names result fields."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__("bq", "p-1", "ds", client=object(), native_query=True, **kwargs)
+        self.queries: list[str] = []
+
+    async def _discover_tables(self) -> dict[str, TableInfo]:
+        fields = [_text(n) for n in ("Id", "Modality", "PatientName")]
+        return {"Studies": TableInfo("Studies", "Id", fields)}
+
+    async def _query(self, sql: str, params: list[Any] | None) -> list[dict[str, Any]]:
+        import sqlglot
+
+        self.queries.append(sql)
+        names = sqlglot.parse_one(sql, read="bigquery").named_selects
+        return [{name: "s1" if name.lower() == "id" else "CT" for name in names}]
+
+
+@pytest.mark.parametrize("query", [
+    "SELECT Modality, Id FROM Studies",
+    "SELECT modality, id FROM Studies",
+    "SELECT * FROM Studies",
+    "SELECT s.Modality, s.Id FROM Studies s",
+    "SELECT x.Modality, x.Id FROM (SELECT Modality, Id FROM Studies) x",
+])
+async def test_bigquery_native_rows_keep_stored_column_names(query):
+    b = OutputNamedBigQuery(columns={"Studies": ["Modality"]})
+    [hit] = await b.execute(Native(source="bq", collection="Studies", dialect="sql", query=query))
+    assert hit.doc_id == "s1"
+    assert hit.metadata == {"Id": "s1", "Modality": "CT"}
+
+
+async def test_bigquery_native_rows_keep_an_explicit_alias():
+    b = OutputNamedBigQuery(columns={"Studies": ["Modality"]})
+    [hit] = await b.execute(Native(source="bq", collection="Studies", dialect="sql",
+                                   query="SELECT Id, Modality AS ScanKind, COUNT(*) AS N FROM Studies "
+                                         "GROUP BY Id, Modality ORDER BY n DESC"))
+    assert hit.doc_id == "s1"
+    assert set(hit.metadata) == {"Id", "ScanKind", "N"}
+    assert "patientname" not in b.queries[0].lower()

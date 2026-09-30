@@ -155,6 +155,56 @@ def _pin_table_qualifiers(stmt: Any, dialect: str, allow: SqlAllowList) -> None:
             table.set("catalog", identifier(allow.catalog))
 
 
+def _output_select(query: Any) -> Any:
+    """The SELECT whose projections name the result columns: the first branch of a set operation."""
+    from sqlglot import exp
+
+    while isinstance(query, (exp.SetOperation, exp.Subquery)):
+        query = query.this
+    return query if isinstance(query, exp.Select) else None
+
+
+def _folds_case(dialect: str) -> bool:
+    from sqlglot.dialects.dialect import Dialect, NormalizationStrategy
+
+    return Dialect.get_or_raise(dialect).normalization_strategy is NormalizationStrategy.CASE_INSENSITIVE
+
+
+def _written_aliases(stmt: Any) -> dict[str, str]:
+    """The result column aliases as the query wrote them, keyed by their lower-case form."""
+    from sqlglot import exp
+
+    select = _output_select(stmt)
+    written: dict[str, str] = {}
+    for projection in select.expressions if select is not None else []:
+        if isinstance(projection, exp.Alias) and projection.alias:
+            written.setdefault(projection.alias.lower(), projection.alias)
+    return written
+
+
+def _restore_output_names(stmt: Any, written: Mapping[str, str], allow: SqlAllowList) -> None:
+    """Name each result column as the query wrote its alias or, failing that, as the column is
+    stored. A dialect that folds case, such as BigQuery, lower-cases every name while resolving,
+    so `SELECT Id FROM Studies` would return `id` and a row would no longer match its id column.
+    Only the names of the results change; what the query reads does not."""
+    from sqlglot import exp
+
+    stored: dict[str, str] = {}
+    clashing: set[str] = set()
+    for columns in allow.tables.values():
+        for column in columns:
+            if stored.setdefault(column.lower(), column) != column:
+                clashing.add(column.lower())
+    select = _output_select(stmt)
+    for projection in select.expressions if select is not None else []:
+        if not isinstance(projection, exp.Alias):
+            continue
+        key = projection.alias.lower()
+        name = written.get(key) or (stored.get(key) if key not in clashing else None)
+        if name is not None and name != projection.alias:
+            projection.set("alias", exp.to_identifier(name))
+
+
 def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
     """Resolve every column against the allowed columns and return the resolved query.
 
@@ -164,6 +214,7 @@ def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
     from sqlglot.errors import OptimizeError
     from sqlglot.optimizer.qualify import qualify
 
+    written = _written_aliases(stmt) if _folds_case(dialect) else None
     try:
         _pin_table_qualifiers(stmt, dialect, allow)
         stmt = qualify(stmt, schema=allow.schema(dialect), dialect=dialect, catalog=allow.catalog,
@@ -221,6 +272,8 @@ def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
         name = (func.name if isinstance(func, exp.Anonymous) else func.sql_name()).upper()
         if name not in allow.functions:
             raise NativeQueryRejected(f"function {name} is not allowed in native SQL")
+    if written is not None:
+        _restore_output_names(stmt, written, allow)
     return stmt
 
 
