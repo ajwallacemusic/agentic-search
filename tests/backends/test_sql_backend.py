@@ -10,7 +10,7 @@ from agentic_search.backends.mysql import MySQLBackend
 from agentic_search.backends.native_guard import NativeQueryRejected
 from agentic_search.backends.postgres import PostgresBackend
 from agentic_search.backends.sql_backend import SqlBackend, TableInfo, field_flags
-from agentic_search.core.types import FieldSpec, FieldType, Native
+from agentic_search.core.types import FieldSpec, FieldType, Lexical, Native
 
 
 class DistinctFails(SqlBackend):
@@ -198,3 +198,50 @@ def test_qualifiers_per_backend():
     assert (bq._native_catalog(), bq._native_db()) == ("p-1", "ds")
     pg = PostgresBackend("pg", "postgresql://u:p@h/db", schema="clinic")
     assert (pg._native_catalog(), pg._native_db()) == (None, "clinic")
+
+
+class FakePostgres(PostgresBackend):
+    """Postgres with a stored tsvector `search_vec` that indexes `dx` and the hidden `ssn`."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__("pg", "postgresql://u:p@h/db", **kwargs)
+        self.queries: list[str] = []
+
+    async def _discover_tables(self) -> dict[str, TableInfo]:
+        self._tsv = {"visits": "search_vec", "gone": "search_vec"}
+        self.skipped = ["gone (no primary key / id column)", "kept (composite primary key; set id_columns)"]
+        return {"visits": TableInfo("visits", "id", [_text("id"), _text("dx"), _text("ssn")])}
+
+    async def _query(self, sql: str, params: list[Any] | None) -> list[dict[str, Any]]:
+        self.queries.append(sql)
+        return []
+
+
+async def test_unlisted_stored_tsvector_is_not_used():
+    b = FakePostgres(columns={"visits": ["dx"]})
+    await b.execute(Lexical(source="pg", collection="visits", text="pain"))
+    [sql] = b.queries
+    assert "search_vec" not in sql
+    assert "ssn" not in sql
+    assert '"dx"' in sql
+
+
+async def test_listed_stored_tsvector_is_still_used():
+    b = FakePostgres(columns={"visits": ["dx", "search_vec"]})
+    await b.execute(Lexical(source="pg", collection="visits", text="pain"))
+    [sql] = b.queries
+    assert '"search_vec"' in sql
+    assert "ssn" not in sql
+
+
+async def test_no_columns_keeps_the_stored_tsvector():
+    b = FakePostgres()
+    await b.execute(Lexical(source="pg", collection="visits", text="pain"))
+    assert '"search_vec"' in b.queries[0]
+
+
+async def test_skipped_names_only_tables_that_survive_the_restriction():
+    b = FakePostgres(columns={"visits": ["dx"], "kept": ["x"]})
+    manifest = await b.discover()
+    assert manifest.description == "Skipped tables: kept (composite primary key; set id_columns)."
+    assert "gone" not in (manifest.description or "")

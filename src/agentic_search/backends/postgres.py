@@ -190,6 +190,14 @@ class PostgresBackend(SqlBackend):
         self._tsv = tsv_of
         return tables
 
+    def _restrict(self, tables: dict[str, TableInfo]) -> dict[str, TableInfo]:
+        kept = super()._restrict(tables)
+        if self.allowed_columns is not None:
+            # A stored tsvector may index a hidden column, so it is used only when listed itself.
+            self._tsv = {t: col for t, col in self._tsv.items()
+                         if t in kept and col in self.allowed_columns.get(t, [])}
+        return kept
+
     # ---- lexical / vector ------------------------------------------------------
 
     def _lexical_sql(self, op: Lexical, table: TableInfo, limit: int) -> tuple[str, list[Any]]:

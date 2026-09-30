@@ -182,6 +182,8 @@ class SqlBackend:
         """Keep only the allowed tables and, in each, the allowed columns plus the id column."""
         if self.allowed_columns is None:
             return tables
+        allowed_tables = set(self.allowed_columns)
+        self.skipped = [note for note in self.skipped if note.split(" (", 1)[0] in allowed_tables]
         kept: dict[str, TableInfo] = {}
         for name, info in tables.items():
             allowed = self.allowed_columns.get(name)
