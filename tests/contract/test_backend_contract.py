@@ -239,3 +239,19 @@ async def test_harness_end_to_end(backend):
     res = await h.search("what treats headache?")
     assert {bare(k.split(":", 1)[1]) for k in res.keys()} == {"d1", "d4"}
     assert all(r.judged and r.p_relevant == 1.0 for r in res.hits)
+
+
+async def test_stream_matches_search(backend):
+    await require(backend, Capability.LEXICAL)
+
+    def build():
+        driver = ScriptedDriver([[call("lexical_search", source=backend.name, collection="docs",
+                                       text="headache")]])
+        return Harness([backend], driver, embedders=[corpus.EMBEDDER],
+                       analyzer=KeywordJudge(["headache"]))
+
+    events = [ev async for ev in build().stream("what treats headache?")]
+    assert events[0].type == "search_started" and events[-1].type == "search_finished"
+    assert [e.seq for e in events] == list(range(len(events)))
+    direct = await build().search("what treats headache?")
+    assert events[-1].result.keys() == direct.keys()

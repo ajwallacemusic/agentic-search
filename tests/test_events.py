@@ -98,3 +98,12 @@ def test_null_emitter_is_state_default():
     assert isinstance(s.emitter, NullEmitter)
     ev = s.emitter.emit(PhaseStarted, turn=0, phase="plan")
     assert ev.phase == "plan"
+
+
+def test_public_exports():
+    import agentic_search as a
+
+    for name in ["SearchEvent", "SearchStream", "SearchStarted", "PhaseStarted", "PhaseFinished",
+                 "PhaseSummary", "ToolCallStarted", "ToolCallFinished", "ToolErrorInfo",
+                 "ResultsUpdated", "HitSummary", "UsageUpdated", "SearchFinished", "SearchFailed"]:
+        assert name in a.__all__ and hasattr(a, name)
