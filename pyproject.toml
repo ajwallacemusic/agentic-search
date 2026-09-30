@@ -8,6 +8,7 @@ dependencies = [
   "numpy>=1.26",
   "rank-bm25>=0.2.2",
   "pyyaml>=6.0",
+  "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
@@ -18,6 +19,8 @@ postgres = ["psycopg[binary,pool]>=3.2", "sqlglot>=25,<31"]
 mysql = ["aiomysql>=0.2", "sqlglot>=25,<31"]
 bigquery = ["google-cloud-bigquery>=3.25", "sqlglot>=25,<31"]
 opensearch = ["opensearch-py[async]>=2.6"]
+gcp = ["google-auth[requests]>=2.29"]
+azure = ["azure-identity>=1.17"]
 
 [dependency-groups]
 dev = [
@@ -31,6 +34,8 @@ dev = [
   "aiomysql>=0.2",
   "google-cloud-bigquery>=3.25",
   "opensearch-py[async]>=2.6",
+  "google-auth[requests]>=2.29",
+  "azure-identity>=1.17",
 ]
 
 [build-system]
