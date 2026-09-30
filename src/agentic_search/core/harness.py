@@ -3,20 +3,36 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import time
-from typing import Any, Literal, Sequence
+import uuid
+from typing import Any, AsyncIterator, Callable, Literal, Sequence
 
 from pydantic import BaseModel
 
 from agentic_search.backends.base import Backend
 from agentic_search.core.annotations import apply_annotations
+from agentic_search.core.emitter import EventEmitter
 from agentic_search.core.hooks import Hooks, SourcePolicy
 from agentic_search.core.result import RankedHit, SearchResult
 from agentic_search.core.secrets import scrub
 from agentic_search.core.state import Candidate, SearchState
 from agentic_search.core.types import Budget, Manifest, ModelUsage, Query, StopReason
 from agentic_search.embedders.base import Embedder, EmbedderRegistry
+from agentic_search.events import (
+    TERMINAL_EVENTS,
+    HitSummary,
+    PhaseFinished,
+    PhaseStarted,
+    PhaseSummary,
+    ResultsUpdated,
+    SearchEvent,
+    SearchFailed,
+    SearchFinished,
+    SearchStarted,
+    UsageUpdated,
+)
 from agentic_search.models.base import (
     Action,
     Decider,
@@ -34,6 +50,8 @@ from agentic_search.roles.tools import build_tool_specs
 
 Mode = Literal["retrieval", "harness", "model"]
 _MODES = ("retrieval", "harness", "model")
+__all__ = ["Harness", "HarnessError", "HarnessSettings", "Mode", "RankedHit", "SearchResult",
+           "SearchStream"]
 
 
 class HarnessError(Exception):
@@ -53,13 +71,50 @@ class HarnessSettings(BaseModel):
     discover_timeout: float | None = 300.0
 
 
+class _Options(BaseModel):
+    question: Query
+    sources: list[str] | None
+    top_k: int
+    mode: str
+    budget: Budget
+    snapshot_k: int
+    include_content: bool
+
+
+class SearchStream:
+    """Async iterator over one search's events; also an async context manager.
+
+    Leaving the `async with` block, calling `aclose()`, or cancelling the consuming task cancels
+    the search. Dropping the stream mid-iteration also cancels it once the generator is
+    garbage-collected; use `async with` when cancellation must be immediate."""
+
+    def __init__(self, gen: AsyncIterator[SearchEvent]):
+        self._gen = gen
+
+    def __aiter__(self) -> SearchStream:
+        return self
+
+    async def __anext__(self) -> SearchEvent:
+        return await self._gen.__anext__()
+
+    async def aclose(self) -> None:
+        await self._gen.aclose()  # type: ignore[attr-defined]
+
+    async def __aenter__(self) -> SearchStream:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.aclose()
+
+
 class _DelegateRuntime:
     """ToolRuntime for model-centric drivers: executes calls, enforces budgets, records the trace."""
 
     def __init__(self, state: SearchState, executor: Executor, controller: Controller, model_id: str,
-                 hooks: Hooks):
+                 hooks: Hooks, on_round: Callable[[], None] = lambda: None):
         self.state, self.executor, self.controller, self.model_id = state, executor, controller, model_id
         self.hooks = hooks
+        self.on_round = on_round
         self.exhausted: StopReason | None = None
         self.reported = ModelUsage()
 
@@ -96,9 +151,10 @@ class _DelegateRuntime:
         if allowed:
             result = await self.executor.run(allowed, question=state.question, turn=state.turn,
                                              pool=state.pool, trace=state.trace,
-                                             model_id=self.model_id)
+                                             model_id=self.model_id, emitter=state.emitter)
             state.usage.tool_calls += len(allowed)
             state.usage.turns += 1
+            self.on_round()
             state.turn += 1
             outputs = result.outputs
         texts = [outputs.get(c.id, message) for c in calls]
@@ -167,19 +223,81 @@ class Harness:
             self._ready = True
             return self.manifests
 
+    def stream(self, question: str | Query, *, sources: list[str] | None = None,
+               top_k: int = 20, mode: Mode | None = None, budget: Budget | None = None,
+               snapshot_k: int = 10, include_content: bool = False) -> SearchStream:
+        """Run one search, yielding typed events as it progresses. Invalid arguments raise
+        HarnessError here, before any event; every other failure ends the stream with a
+        `search_failed` event. The last event is `search_finished` or `search_failed`."""
+        opts = self._options(question, sources, top_k, mode, budget, snapshot_k, include_content)
+        return SearchStream(self._events(opts, []))
+
     async def search(self, question: str | Query, *, sources: list[str] | None = None,
                      top_k: int = 20, mode: Mode | None = None,
                      budget: Budget | None = None) -> SearchResult:
+        opts = self._options(question, sources, top_k, mode, budget, 0, False)
+        failure: list[BaseException] = []
+        async with contextlib.aclosing(self._events(opts, failure)) as events:
+            async for event in events:
+                if isinstance(event, SearchFinished):
+                    return event.result
+        raise failure[0]
+
+    def _options(self, question: str | Query, sources: list[str] | None, top_k: int,
+                 mode: Mode | None, budget: Budget | None, snapshot_k: int,
+                 include_content: bool) -> _Options:
         run_mode = mode or self.mode
         if run_mode not in _MODES:
             raise HarnessError(f"unknown mode {run_mode!r}; one of {_MODES}")
-        await self.setup()
-        query = Query.of(question) if isinstance(question, str) else question
-        manifests = self._select(sources)
-        state = SearchState(question=query, manifests=manifests, budget=budget or self.budget)
-        state.trace.set_listener(self.hooks.on_trace_event)
-        state.trace.add("setup", 0, sources=sorted(manifests), setup_errors=self.setup_errors,
-                        mode=run_mode)
+        if top_k < 1:
+            raise HarnessError(f"top_k must be at least 1, got {top_k}")
+        if snapshot_k < 0:
+            raise HarnessError(f"snapshot_k must be 0 or more, got {snapshot_k}")
+        return _Options(question=Query.of(question) if isinstance(question, str) else question,
+                        sources=sources, top_k=top_k, mode=run_mode, budget=budget or self.budget,
+                        snapshot_k=snapshot_k, include_content=include_content)
+
+    async def _events(self, opts: _Options,
+                      failure: list[BaseException]) -> AsyncIterator[SearchEvent]:
+        queue: asyncio.Queue[SearchEvent] = asyncio.Queue()
+        emitter = EventEmitter(uuid.uuid4().hex, queue.put_nowait)
+        task = asyncio.create_task(self._run_search(opts, emitter, failure))
+        try:
+            while True:
+                event = await queue.get()
+                yield event
+                if isinstance(event, TERMINAL_EVENTS):
+                    break
+        finally:
+            if not task.done():
+                task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    async def _run_search(self, opts: _Options, emitter: EventEmitter,
+                          failure: list[BaseException]) -> None:
+        turn = 0
+        try:
+            await self.setup()
+            manifests = self._select(opts.sources)
+            state = SearchState(question=opts.question, manifests=manifests, budget=opts.budget,
+                                emitter=emitter)
+            state.trace.set_listener(self.hooks.on_trace_event)
+            state.trace.add("setup", 0, sources=sorted(manifests), setup_errors=self.setup_errors,
+                            mode=opts.mode)
+            emitter.emit(SearchStarted, turn=0, question=opts.question, mode=opts.mode,
+                         sources=sorted(manifests), budget=opts.budget,
+                         setup_errors=dict(self.setup_errors))
+            result = await self._run_state(state, opts)
+            turn = state.turn
+            emitter.emit(SearchFinished, turn=turn, result=result, stop_reason=result.stop_reason)
+        except Exception as exc:
+            failure.append(exc)
+            emitter.emit(SearchFailed, turn=turn, error_type=type(exc).__name__,
+                         message=scrub(str(exc))[:500])
+
+    async def _run_state(self, state: SearchState, opts: _Options) -> SearchResult:
+        manifests = state.manifests
         s = self.settings
         executor = Executor({n: self.backends[n] for n in manifests}, manifests, self.embedders,
                             hooks=self.hooks, policy=self.policy, call_timeout=s.call_timeout,
@@ -191,13 +309,38 @@ class Harness:
                                 relevant_threshold=s.relevant_threshold,
                                 min_new_relevant=s.min_new_relevant, timeout=s.decider_timeout)
         tools = build_tool_specs(manifests)
+
+        def progress() -> None:
+            if opts.snapshot_k > 0:
+                self._emit_snapshot(state, analyzer, opts)
+            state.emitter.emit(UsageUpdated, turn=state.turn, usage=state.usage.model_copy())
+
         order: list[str] | None = None
-        if run_mode == "model":
-            reason, order = await self._run_delegate(state, executor, analyzer, controller, tools)
+        if opts.mode == "model":
+            reason, order = await self._run_delegate(state, executor, analyzer, controller, tools,
+                                                     progress)
         else:
-            reason = await self._run_loop(state, executor, analyzer, controller, tools,
-                                          single_pass=run_mode == "retrieval")
-        return self._finalize(state, reason, top_k, order, run_mode)
+            reason = await self._run_loop(state, executor, analyzer, controller, tools, progress,
+                                          single_pass=opts.mode == "retrieval")
+        return self._finalize(state, reason, opts.top_k, order, opts.mode)
+
+    def _emit_snapshot(self, state: SearchState, analyzer: Analyzer, opts: _Options) -> None:
+        ranked = state.pool.ranked(self.settings.judge_weight)
+        hits = [self._summary(c, score, opts.include_content)
+                for c, score in ranked[:opts.snapshot_k]]
+        state.emitter.emit(ResultsUpdated, turn=state.turn, hits=hits, pool_size=len(state.pool),
+                           n_relevant=sum(analyzer.is_relevant(c) for c, _ in ranked))
+
+    @staticmethod
+    def _summary(cand: Candidate, score: float, include_content: bool) -> HitSummary:
+        h = cand.hit
+        title = h.metadata.get("title")
+        return HitSummary(key=h.key, source=h.source, doc_id=h.doc_id,
+                          title=scrub(title) if isinstance(title, str) else None,
+                          snippet=scrub(h.snippet(300)), score=round(score, 6),
+                          p_relevant=cand.p_relevant, judged=cand.judged,
+                          first_turn=cand.first_turn,
+                          content=list(h.content) if include_content else None)
 
     def _select(self, sources: list[str] | None) -> dict[str, Manifest]:
         if sources is None:
@@ -208,8 +351,8 @@ class Harness:
         return {s: self.manifests[s] for s in sources}
 
     async def _run_loop(self, state: SearchState, executor: Executor, analyzer: Analyzer,
-                        controller: Controller, tools: list[ToolSpec], *,
-                        single_pass: bool) -> StopReason:
+                        controller: Controller, tools: list[ToolSpec],
+                        progress: Callable[[], None], *, single_pass: bool) -> StopReason:
         planner = Planner(self.driver, hooks=self.hooks,
                           max_calls_per_turn=self.settings.max_calls_per_turn)
         while True:
@@ -222,12 +365,22 @@ class Harness:
             calls = plan.calls[: state.budget.max_tool_calls - state.usage.tool_calls]
             if not calls:
                 return StopReason.NO_PLAN
+            state.emitter.emit(PhaseStarted, turn=state.turn, phase="query")
+            t0 = time.perf_counter()
             result = await executor.run(calls, question=state.question, turn=state.turn,
-                                        pool=state.pool, trace=state.trace, model_id=self.driver.id)
+                                        pool=state.pool, trace=state.trace, model_id=self.driver.id,
+                                        emitter=state.emitter)
+            state.emitter.emit(PhaseFinished, turn=state.turn, phase="query",
+                               duration_ms=(time.perf_counter() - t0) * 1000,
+                               summary=PhaseSummary(
+                                   n_calls=len(calls), n_new=len(result.new_keys),
+                                   n_hits=sum(len(k) for k in result.hits_per_call.values()),
+                                   n_errors=len(result.errors)))
             state.usage.tool_calls += len(calls)
             state.usage.turns += 1
             analysis = await analyzer.analyze(state, calls, result, digest_model_id=self.driver.id)
             state.usage.add_model(analysis.usage)
+            progress()
             state.digest, state.last_errors = analysis.digest, result.errors
             top = [c.hit.key for c, _ in state.pool.ranked(self.settings.judge_weight)[:20]]
             state.history.append(TurnSummary(
@@ -244,15 +397,18 @@ class Harness:
                 ctrl_digest = analyzer.render_digest(state, calls, result, self.controller_decider.id)
             decision = await controller.decide(state, digest=ctrl_digest)
             state.usage.add_model(decision.usage)
+            state.emitter.emit(UsageUpdated, turn=state.turn, usage=state.usage.model_copy())
             if decision.action is Action.STOP:
                 return StopReason.CONTROLLER_STOP
             state.last_decision = decision
             state.turn += 1
 
     async def _run_delegate(self, state: SearchState, executor: Executor, analyzer: Analyzer,
-                            controller: Controller,
-                            tools: list[ToolSpec]) -> tuple[StopReason, list[str] | None]:
-        runtime = _DelegateRuntime(state, executor, controller, self.driver.id, self.hooks)
+                            controller: Controller, tools: list[ToolSpec],
+                            progress: Callable[[], None]) -> tuple[StopReason, list[str] | None]:
+        runtime = _DelegateRuntime(state, executor, controller, self.driver.id, self.hooks,
+                                   on_round=progress)
+        state.emitter.emit(PhaseStarted, turn=state.turn, phase="delegate")
         request = DelegateRequest(question=state.question, context=render_manifests(state.manifests))
         request = await self.hooks.before_model_call(self.driver.id, request)
         t0 = time.perf_counter()
@@ -264,9 +420,13 @@ class Harness:
         state.trace.add("delegate", state.turn, duration_ms=(time.perf_counter() - t0) * 1000,
                         driver=self.driver.id, n_ranked=len(ranked), unknown_keys=unknown[:20],
                         note=result.note)
+        state.emitter.emit(PhaseFinished, turn=state.turn, phase="delegate",
+                           duration_ms=(time.perf_counter() - t0) * 1000,
+                           summary=PhaseSummary(n_ranked=len(ranked), note=result.note))
         if self.analyzer_decider is not None:
             keys = ranked or [c.hit.key for c in state.pool.candidates()]
             state.usage.add_model(await analyzer.judge_keys(state, keys))
+        progress()
         return (runtime.exhausted or StopReason.DELEGATE_DONE), (ranked or None)
 
     def _finalize(self, state: SearchState, reason: StopReason, top_k: int,
