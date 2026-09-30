@@ -427,7 +427,8 @@ class Harness:
                             progress: Callable[[], None]) -> tuple[StopReason, list[str] | None]:
         runtime = _DelegateRuntime(state, executor, controller, self.driver.id, self.hooks,
                                    on_round=progress)
-        state.emitter.emit(PhaseStarted, turn=state.turn, phase="delegate")
+        start_turn = state.turn  # the delegate run advances state.turn; pair events on this
+        state.emitter.emit(PhaseStarted, turn=start_turn, phase="delegate")
         request = DelegateRequest(question=state.question, context=render_manifests(state.manifests))
         request = await self.hooks.before_model_call(self.driver.id, request)
         t0 = time.perf_counter()
@@ -439,9 +440,10 @@ class Harness:
         state.trace.add("delegate", state.turn, duration_ms=(time.perf_counter() - t0) * 1000,
                         driver=self.driver.id, n_ranked=len(ranked), unknown_keys=unknown[:20],
                         note=result.note)
-        state.emitter.emit(PhaseFinished, turn=state.turn, phase="delegate",
+        state.emitter.emit(PhaseFinished, turn=start_turn, phase="delegate",
                            duration_ms=(time.perf_counter() - t0) * 1000,
-                           summary=PhaseSummary(n_ranked=len(ranked), note=result.note))
+                           summary=PhaseSummary(n_ranked=len(ranked),
+                                                note=scrub(result.note) if result.note else None))
         if self.analyzer_decider is not None:
             keys = ranked or [c.hit.key for c in state.pool.candidates()]
             state.usage.add_model(await analyzer.judge_keys(state, keys))

@@ -16,7 +16,7 @@ from agentic_search.events import (
     ToolCallStarted,
     UsageUpdated,
 )
-from agentic_search.models.base import Action
+from agentic_search.models.base import Action, DelegateResult
 from agentic_search.testing import (
     FailingDecider,
     KeywordJudge,
@@ -54,6 +54,9 @@ def assert_well_formed(events):
     started = {e.call_id for e in events if isinstance(e, ToolCallStarted)}
     finished = {e.call_id for e in events if isinstance(e, ToolCallFinished)}
     assert started == finished
+    opened = [(e.phase, e.turn) for e in events if isinstance(e, PhaseStarted)]
+    closed = [(e.phase, e.turn) for e in events if isinstance(e, PhaseFinished)]
+    assert opened == closed
     assert [e.at_ms for e in events] == sorted(e.at_ms for e in events)
 
 
@@ -371,3 +374,19 @@ async def test_consumer_timeout_not_swallowed_by_stream_cleanup(docs_backend):
 
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(consume_with_timeout(), 5)
+
+
+async def test_delegate_note_secret_is_scrubbed(docs_backend):
+    register_secret("sk-note-4242")
+
+    class NotingDriver(ScriptedDriver):
+        async def run_delegate(self, question, tools, runtime, budget, context=""):
+            result = await super().run_delegate(question, tools, runtime, budget, context=context)
+            return DelegateResult(ranked_keys=result.ranked_keys, usage=result.usage,
+                                  note="used key sk-note-4242")
+
+    h = make(docs_backend, NotingDriver(delegate_calls=[[lex("headache")]], delegate_keys=["docs:d1"]))
+    events = await collect(h.stream("q", mode="model"))
+    done = [e for e in events if isinstance(e, PhaseFinished) and e.phase == "delegate"][0]
+    assert done.summary.note is not None
+    assert all("sk-note-4242" not in e.model_dump_json() for e in events[:-1])
