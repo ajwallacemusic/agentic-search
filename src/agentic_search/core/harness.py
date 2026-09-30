@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from typing import Any, Literal, Sequence
 
@@ -308,8 +309,23 @@ class Harness:
         return SearchResult(question=state.question, hits=hits, stop_reason=reason,
                             usage=state.usage, trace=state.trace, mode=mode)
 
+    def _closeables(self) -> list[Any]:
+        """Backends, plus embedders, deciders, the driver and the objects they wrap (`inner`) or
+        hold (`client`), deduplicated by identity, that expose an async `close()`. Backends own their
+        clients and close them themselves, so they are not traversed."""
+        seen: dict[int, Any] = {id(b): b for b in self.backends.values()}
+        roots: list[Any] = [*(self.embedders.get(i) for i in self.embedders.ids()),
+                            self.analyzer_decider, self.controller_decider, self.driver]
+        while roots:
+            obj = roots.pop()
+            if obj is None or id(obj) in seen:
+                continue
+            seen[id(obj)] = obj
+            roots.extend(getattr(obj, attr, None) for attr in ("inner", "client"))
+        return [obj for obj in seen.values() if inspect.iscoroutinefunction(getattr(obj, "close", None))]
+
     async def close(self) -> None:
-        await asyncio.gather(*(b.close() for b in self.backends.values()), return_exceptions=True)
+        await asyncio.gather(*(o.close() for o in self._closeables()), return_exceptions=True)
 
     async def __aenter__(self) -> Harness:
         await self.setup()

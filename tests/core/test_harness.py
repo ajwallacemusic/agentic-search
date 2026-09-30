@@ -288,3 +288,40 @@ async def test_annotations_applied_and_result_serializes(docs_backend):
     assert '"stop_reason"' in res.model_dump_json()
     async with h:
         pass
+
+
+class _Closeable:
+    def __init__(self, log, name):
+        self.log, self.name = log, name
+
+    async def close(self):
+        self.log.append(self.name)
+
+
+async def test_close_closes_embedders_deciders_and_driver_client(docs_backend):
+    from agentic_search.embedders.base import CachedEmbedder
+    from agentic_search.embedders.local import HashEmbedder
+
+    log: list[str] = []
+
+    class ClosingEmbedder(HashEmbedder):
+        async def close(self):
+            log.append(self.id)
+
+    class ClosingDecider(KeywordJudge):
+        async def close(self):
+            log.append("decider")
+
+    class BrokenClose(HashEmbedder):
+        async def close(self):
+            raise RuntimeError("boom")
+
+    shared = ClosingDecider(["x"])  # referenced as both analyzer and controller: closed once
+    driver = ScriptedDriver([])
+    driver.client = _Closeable(log, "driver-client")
+    h = Harness([docs_backend], driver,
+                embedders=[docs_backend.embedder, ClosingEmbedder(id="e1"),
+                           CachedEmbedder(ClosingEmbedder(id="e2-inner")), BrokenClose(id="bad")],
+                analyzer=shared, controller=shared)
+    await h.close()
+    assert sorted(log) == ["decider", "driver-client", "e1", "e2-inner"]
