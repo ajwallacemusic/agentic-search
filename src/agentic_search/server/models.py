@@ -60,12 +60,32 @@ def build_query(req: SearchRequest, *, max_images: int, max_image_bytes: int) ->
         raise RequestError(f"at most {max_images} images per request")
     parts: list[Any] = [TextPart(text=req.question)]
     for i, img in enumerate(req.images):
+        # Reject empty data
+        if not img.data:
+            raise RequestError(f"images[{i}].data is empty")
+
+        # Reject oversized encoded input before decoding (optimization + safety)
+        # Base64 overhead: encoded size is roughly raw_size * 4/3
+        # So if encoded_size > max_bytes * 4/3 + 4, reject pre-decode
+        if len(img.data) > max_image_bytes * 4 // 3 + 4:
+            raise RequestError(f"images[{i}] is larger than {max_image_bytes} bytes")
+
+        # Convert URL-safe base64 to standard, add padding for unpadded input
+        normalized = img.data.replace("-", "+").replace("_", "/")
+        # Add padding to make length a multiple of 4 (only if needed)
+        padding_needed = len(normalized) % 4
+        if padding_needed:
+            normalized += "=" * (4 - padding_needed)
+
         try:
-            data = base64.b64decode(img.data.replace("-", "+").replace("_", "/"), validate=True)
+            data = base64.b64decode(normalized, validate=True)
         except (binascii.Error, ValueError) as exc:
             raise RequestError(f"images[{i}].data is not valid base64") from exc
+
+        # Check decoded size (post-decode safety check)
         if len(data) > max_image_bytes:
             raise RequestError(f"images[{i}] is larger than {max_image_bytes} bytes")
+
         parts.append(ImagePart(data=data, mime=img.mime))
     return Query(content=parts)
 

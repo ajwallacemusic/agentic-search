@@ -1,10 +1,12 @@
+import os
 import textwrap
 
 import pytest
 
 from agentic_search.config import ConfigError
+from agentic_search.core.secrets import scrub
 from agentic_search.core.types import Budget
-from agentic_search.server import ProfileLimits, load_service
+from agentic_search.server import AuthConfig, ProfileLimits, check_profiles, load_service
 from agentic_search.server.models import BudgetOverride, resolve_budget
 
 PROFILE = """
@@ -63,3 +65,103 @@ def test_resolve_budget():
                          {"max_turns": 3, "max_cost_usd": 0.5})
     assert (got.max_turns, got.max_tool_calls, got.max_cost_usd) == (3, 5, 0.5)
     assert resolve_budget(base, None, {}) == base
+
+
+class TestAuthConfig:
+    """Tests for AuthConfig.keys() guard function."""
+
+    def test_keys_parses_comma_separated_with_whitespace(self):
+        """Key parsing strips whitespace and skips empty tokens."""
+        auth = AuthConfig(type="api_key", keys_env="MY_KEYS")
+        os.environ["MY_KEYS"] = " key1 , ,key2 "
+
+        keys = auth.keys()
+
+        assert keys == ["key1", "key2"]
+
+    def test_keys_are_registered_for_scrubbing(self):
+        """Keys are registered and then scrubbed from text."""
+        auth = AuthConfig(type="api_key", keys_env="MY_KEYS")
+        os.environ["MY_KEYS"] = "secret_key_1,secret_key_2"
+
+        keys = auth.keys()
+
+        # After registration, scrub should redact the key (must be >= 4 chars to register)
+        text_with_key = f"token {keys[0]} in message"
+        scrubbed = scrub(text_with_key)
+        assert keys[0] not in scrubbed
+        assert "***" in scrubbed
+
+    def test_unset_variable_raises_config_error(self):
+        """Unset environment variable raises ConfigError."""
+        auth = AuthConfig(type="api_key", keys_env="NONEXISTENT_VAR")
+        if "NONEXISTENT_VAR" in os.environ:
+            del os.environ["NONEXISTENT_VAR"]
+
+        with pytest.raises(ConfigError, match="NONEXISTENT_VAR"):
+            auth.keys()
+
+    def test_empty_variable_raises_config_error(self):
+        """Empty environment variable raises ConfigError."""
+        auth = AuthConfig(type="api_key", keys_env="MY_EMPTY")
+        os.environ["MY_EMPTY"] = ""
+
+        with pytest.raises(ConfigError, match="MY_EMPTY"):
+            auth.keys()
+
+    def test_type_none_returns_empty_list(self):
+        """With type=none, keys() returns empty list."""
+        auth = AuthConfig(type="none")
+
+        keys = auth.keys()
+
+        assert keys == []
+
+
+class TestCheckProfiles:
+    """Tests for check_profiles validation function."""
+
+    def test_no_profiles_raises_error(self):
+        """Empty profiles dict raises ConfigError."""
+        from agentic_search.server import ServiceConfig
+
+        config = ServiceConfig(auth=AuthConfig(type="none"))
+
+        with pytest.raises(ConfigError, match="needs at least one profile"):
+            check_profiles(config, {})
+
+    def test_missing_default_profile_raises_error(self):
+        """Default profile not in profiles dict raises ConfigError."""
+        from agentic_search.server import ServiceConfig
+
+        config = ServiceConfig(
+            auth=AuthConfig(type="none"),
+            default_profile="missing"
+        )
+        profiles = {"exists": object()}
+
+        with pytest.raises(ConfigError, match="default_profile"):
+            check_profiles(config, profiles)
+
+    def test_valid_profiles_pass(self):
+        """Valid configuration passes check."""
+        from agentic_search.server import ServiceConfig
+
+        config = ServiceConfig(
+            auth=AuthConfig(type="none"),
+            default_profile="general"
+        )
+        profiles = {"general": object(), "strict": object()}
+
+        # Should not raise
+        check_profiles(config, profiles)
+
+    def test_no_default_profile_with_profiles_passes(self):
+        """When default_profile is None, check passes with any profiles."""
+        from agentic_search.server import ServiceConfig
+
+        config = ServiceConfig(auth=AuthConfig(type="none"))
+        profiles = {"any": object()}
+
+        # Should not raise
+        check_profiles(config, profiles)

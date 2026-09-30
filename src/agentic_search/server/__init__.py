@@ -5,7 +5,8 @@ from agentic_search.server.config import (
            Profile,
            ProfileLimits,
            ServiceConfig,
+           check_profiles,
            load_service,
 )
 
-__all__ = ["AuthConfig", "Profile", "ProfileLimits", "ServiceConfig", "load_service"]
+__all__ = ["AuthConfig", "Profile", "ProfileLimits", "ServiceConfig", "check_profiles", "load_service"]
