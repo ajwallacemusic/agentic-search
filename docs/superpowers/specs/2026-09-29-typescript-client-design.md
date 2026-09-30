@@ -160,7 +160,9 @@ the Python service (spec 2 §8).
 a free port. It prints `LISTENING <port>`, and `CANCELLED` whenever a `slow` backend call is
 cancelled. `test/e2e.test.ts` starts it with `uv run python serve_demo.py`, runs its tests, and
 kills it afterwards. It checks:
-- health and profiles;
+- health and profiles, including that the `/healthz`, profile and source objects have exactly
+  the keys of the hand-written `Health`, `ProfileInfo` and `SourceInfo` types (which are not in the
+  event schema, so the contract tests cannot cover them);
 - a streamed search ends in `search_finished` with gap-free `seq`, hits d1 and d4, and no trace;
 - one-shot search returns the same hits;
 - an unknown source gives a `search_failed` event;

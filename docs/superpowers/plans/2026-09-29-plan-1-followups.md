@@ -79,3 +79,10 @@ the named plan ships the feature that exposes them.
 - `/v1/search` disconnect race: `suppress(CancelledError)` around awaiting the cancelled search can swallow a cancellation of the handler itself (finally still stops the search and releases the slot).
 - `agentic-search serve` still prints a traceback (not a one-line error, exit 2) for YAML syntax errors, a missing config file, and malformed harness configs (e.g. `backends: 5`).
 - Per-profile setup locks are created in `create_app`; reusing one app across event loops while a lock is contended raises.
+
+## Plan 6 final review — deferred
+
+- Full value-type drift checking between the TS types and the schema (for example generating the TS types from the JSON Schema); the contract tests check field sets, nullability, enums and `$def` coverage only.
+- `parseSse` strips a leading BOM although `TextDecoder("utf-8")` already does by default; the strip is redundant.
+- `parseSse` re-scans and re-slices the buffer per line, so a very long line arriving in many chunks is parsed in quadratic time.
+- `test/e2e.test.ts` listens for the child's `error` event only inside `waitFor`; after startup no listener remains, so a later child `error` (for example from killing it) would surface as an unhandled error. Add a permanent listener.

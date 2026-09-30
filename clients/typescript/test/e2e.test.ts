@@ -2,7 +2,24 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { AgenticSearchClient, AgenticSearchError, type SearchEvent } from "../src/index.js";
+import {
+  AgenticSearchClient,
+  AgenticSearchError,
+  type Health,
+  type ProfileInfo,
+  type SearchEvent,
+  type SourceInfo,
+} from "../src/index.js";
+
+/** Compile-time: `L` must list every key of `T` and nothing else (as in contract.test.ts). */
+type Exactly<T, L extends readonly (keyof T)[]> = Exclude<keyof T, L[number]> extends never ? L : never;
+function fields<T>() {
+  return <const L extends readonly (keyof T)[]>(list: Exactly<T, L>) => list;
+}
+const PROFILE_FIELDS = fields<ProfileInfo>()(["name", "default", "available", "error", "mode", "budget", "limits", "sources", "setup_errors"]);
+const SOURCE_FIELDS = fields<SourceInfo>()(["name", "backend_type", "capabilities", "collections", "description"]);
+const HEALTH_FIELDS = fields<Health>()(["status", "version"]);
+const sorted = (xs: Iterable<string>) => [...xs].sort();
 
 let server: ChildProcessWithoutNullStreams;
 let output = "";
@@ -58,8 +75,16 @@ afterAll(() => {
 
 describe("against the real service", () => {
   it("reports health and profiles", async () => {
-    expect((await client.health()).status).toBe("ok");
+    const health = await client.health();
+    expect(health.status).toBe("ok");
+    expect(sorted(Object.keys(health))).toEqual(sorted(HEALTH_FIELDS));
     const profiles = await client.profiles();
+    // ProfileInfo, SourceInfo and Health are hand-written (not in the event schema): drift fails here.
+    for (const p of profiles) {
+      expect(sorted(Object.keys(p)), p.name).toEqual(sorted(PROFILE_FIELDS));
+      for (const s of p.sources) expect(sorted(Object.keys(s)), `${p.name}/${s.name}`).toEqual(sorted(SOURCE_FIELDS));
+    }
+    expect(profiles.some((p) => p.sources.length > 0)).toBe(true);
     expect(profiles.map((p) => p.name).sort()).toEqual(["demo", "slow"]);
     expect(profiles[0]!.sources[0]!.capabilities).toContain("lexical");
   });

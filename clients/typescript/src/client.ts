@@ -59,6 +59,11 @@ export interface StreamOptions extends CallOptions {
   onUnknownEvent?: (type: string, data: unknown) => void;
 }
 
+/**
+ * A source in a profile.
+ * Hand-written to mirror the service's `/v1/profiles` response; not part of the event schema, so the
+ * contract tests do not cover it. `test/e2e.test.ts` checks its exact keys against the real service.
+ */
 export interface SourceInfo {
   name: string;
   backend_type: string;
@@ -67,6 +72,11 @@ export interface SourceInfo {
   description: string | null;
 }
 
+/**
+ * A profile as listed by the service.
+ * Hand-written to mirror the service's `/v1/profiles` response; not part of the event schema, so the
+ * contract tests do not cover it. `test/e2e.test.ts` checks its exact keys against the real service.
+ */
 export interface ProfileInfo {
   name: string;
   default: boolean;
@@ -79,6 +89,11 @@ export interface ProfileInfo {
   setup_errors: Record<string, string>;
 }
 
+/**
+ * The liveness check.
+ * Hand-written to mirror the service's `/healthz` response; not part of the event schema, so the
+ * contract tests do not cover it. `test/e2e.test.ts` checks its exact keys against the real service.
+ */
 export interface Health {
   status: "ok" | "degraded";
   version: string;
