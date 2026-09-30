@@ -23,13 +23,6 @@ def is_hooked(embedder: Any) -> bool:
     return False
 
 
-def unwrap_hooked(embedder: Any) -> Any:
-    """Return the innermost non-HookedEmbedder in the chain, or None if all are hooked."""
-    if not isinstance(embedder, HookedEmbedder):
-        return embedder
-    return unwrap_hooked(embedder.inner)
-
-
 class HookedEmbedder:
     hooked = True  # mark as hooked for detection in chains
     def __init__(self, inner: Embedder, hooks: Any, *, source: str, policy: Any):

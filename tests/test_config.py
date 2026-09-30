@@ -213,3 +213,12 @@ def test_milvus_load_collections_passes_through(tmp_path):
     }, base_dir=tmp_path)
     assert h.backends["vec"].load_collections is True
     assert h.backends["vec2"].load_collections is False
+
+
+def test_http_embedder_backoff_passes_through(tmp_path):
+    h = build_harness({
+        "embedders": [{"type": "tei", "url": "http://tei:8080", "dim": 8, "id": "tei", "backoff_s": 0.05}],
+        "backends": [{"name": "notes", "type": "files", "root": ".", "glob": "none/*"}],
+        "driver": {"type": "openai_compat", "model": "local", "base_url": "http://localhost:8000/v1"},
+    }, base_dir=tmp_path)
+    assert h.embedders.get("tei").backoff_s == 0.05

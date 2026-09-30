@@ -38,3 +38,9 @@ async def test_generic_http_medsiglip_style():
     assert rec.body(0) == {"instances": [{"image_b64": base64.b64encode(b"img").decode(), "mime": "image/jpeg"}]}
     assert rec.body(1) == {"instances": [{"text": "pneumonia"}]}
     assert rec.requests[0].headers["authorization"] == "Bearer eyJ.azure-tok"
+
+
+def test_render_is_single_pass():
+    """Substituted values are never re-scanned: user text containing {{b64}} stays as typed."""
+    values = {"{{text}}": "say {{b64}} and {{mime}}", "{{b64}}": "QUJD", "{{mime}}": "image/png"}
+    assert render({"t": "{{text}}|{{b64}}"}, values) == {"t": "say {{b64}} and {{mime}}|QUJD"}

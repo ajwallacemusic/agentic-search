@@ -169,7 +169,7 @@ def _milvus(cfg: dict[str, Any], ctx: BuildContext) -> Any:
                    "sample_values", "connect_timeout_s", "load_collections")))
 
 
-_HTTP_EMBEDDER_KEYS = ("id", "batch_size", "concurrency", "timeout_s", "max_retries")
+_HTTP_EMBEDDER_KEYS = ("id", "batch_size", "concurrency", "timeout_s", "max_retries", "backoff_s")
 
 
 def _http_kwargs(cfg: dict[str, Any], extra: tuple[str, ...] = ()) -> dict[str, Any]:

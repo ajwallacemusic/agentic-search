@@ -15,7 +15,7 @@ from agentic_search.embedders.base import EmbedderError, Embedding, Purpose
 from agentic_search.embedders.http import HttpEmbedder
 
 _TOKEN = re.compile(r"\.([A-Za-z_][A-Za-z0-9_]*)|\[(\*|\d+)\]|\[['\"]([^'\"]+)['\"]\]")
-_PLACEHOLDERS = ("{{text}}", "{{b64}}", "{{mime}}")
+_PLACEHOLDER = re.compile(r"\{\{(?:text|b64|mime)\}\}")
 
 
 def json_path(value: Any, path: str) -> list[Any]:
@@ -48,11 +48,10 @@ def json_path(value: Any, path: str) -> list[Any]:
 
 
 def render(template: Any, values: dict[str, str]) -> Any:
-    """Substitute placeholders in every string of a JSON template."""
+    """Substitute placeholders in every string of a JSON template in a single pass, so a
+    substituted value (e.g. user text containing `{{b64}}`) is never itself re-substituted."""
     if isinstance(template, str):
-        for placeholder, value in values.items():
-            template = template.replace(placeholder, value)
-        return template
+        return _PLACEHOLDER.sub(lambda m: values.get(m.group(0), m.group(0)), template)
     if isinstance(template, dict):
         return {k: render(v, values) for k, v in template.items()}
     if isinstance(template, list):
