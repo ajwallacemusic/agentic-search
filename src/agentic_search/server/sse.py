@@ -42,6 +42,8 @@ async def sse_body(stream: SearchStream, render: Callable[[SearchEvent], str], *
             done, _ = await asyncio.wait(waiting, timeout=keepalive_s,
                                          return_when=asyncio.FIRST_COMPLETED)
             if watcher is not None and watcher in done:
+                if not watcher.cancelled():
+                    watcher.exception()
                 return  # client went away: the finally block cancels the search
             if pending not in done:
                 yield KEEPALIVE
@@ -55,10 +57,14 @@ async def sse_body(stream: SearchStream, render: Callable[[SearchEvent], str], *
     finally:
         if watcher is not None:
             watcher.cancel()
-        if pending is not None:
+        if pending is not None and not pending.done():
+            # In flight: its CancelledError runs the stream's own finally, which cancels the
+            # search. wait() never raises the future's error; our own cancellation may still
+            # interrupt it, and that is fine because the search is already being cancelled.
             pending.cancel()
-            # wait() never raises the future's own error; our own cancellation still propagates
             await asyncio.wait({pending})
-            if not pending.cancelled():
-                pending.exception()  # mark retrieved; the stream is being abandoned anyway
+        if pending is not None and pending.done() and not pending.cancelled():
+            pending.exception()  # mark retrieved; the stream is being abandoned anyway
+        # Nothing in flight now. aclose() cancels the search synchronously before its first
+        # await, so the search stops even if this await is itself re-cancelled.
         await stream.aclose()

@@ -1,5 +1,6 @@
 import asyncio
 
+import anyio
 import pytest
 
 from agentic_search.server.sse import KEEPALIVE, format_sse, sse_body
@@ -91,3 +92,56 @@ async def test_keepalive_does_not_drop_events(docs_backend, keepalive):
                                         lambda e: e.model_dump_json(), keepalive_s=keepalive)]
     ids = [int(c.split(b"\n")[0][4:]) for c in chunks if c != KEEPALIVE]
     assert ids == list(range(len(ids)))
+
+
+class _QueueStream:
+    """Shaped like Harness._events: between yields it only awaits a queue."""
+
+    def __init__(self):
+        self.queue = asyncio.Queue()
+        self.closed = False
+        self._gen = self._run()
+
+    async def _run(self):
+        try:
+            while True:
+                yield await self.queue.get()
+        finally:
+            self.closed = True
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        return await self._gen.__anext__()
+
+    async def aclose(self):
+        await self._gen.aclose()
+
+
+class _Event:
+    type, seq = "x", 0
+
+
+@pytest.mark.parametrize("event_ready_at_cancel", [False, True])
+async def test_consumer_cancel_scope_always_closes_stream(event_ready_at_cancel):
+    """Starlette cancels via an anyio scope (re-cancelling every await). The stream must
+    still be closed deterministically, not left for garbage collection."""
+    stream = _QueueStream()
+    body = sse_body(stream, lambda e: "{}", keepalive_s=10)
+    scopes = []
+
+    async def consume():
+        with anyio.CancelScope() as scope:
+            scopes.append(scope)
+            async for _ in body:
+                pass
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(consume)
+        await asyncio.sleep(0.05)            # body is waiting on the pending __anext__
+        if event_ready_at_cancel:
+            stream.queue.put_nowait(_Event())  # pending completes ...
+        scopes[0].cancel()                     # ... in the same tick as the cancel
+    await asyncio.sleep(0.05)
+    assert stream.closed
