@@ -150,6 +150,7 @@ budget?, include_content?, include_trace?}`, plus `snapshot_k?` for the stream. 
 - Images are always inline base64; the service never reads a client-supplied path or URI.
 - `agentic-search export-schema --out schema/` writes the event JSON Schema and golden SSE
   fixtures that clients test against (committed under `schema/`).
+- A TypeScript client lives in [`clients/typescript`](clients/typescript/README.md).
 
 ## Modes
 
