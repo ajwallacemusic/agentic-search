@@ -13,7 +13,25 @@ from agentic_search.core.types import Content
 from agentic_search.embedders.base import Embedder, EmbedderError, Embedding, Purpose
 
 
+def is_hooked(embedder: Any) -> bool:
+    """Check if embedder is hooked anywhere in its chain (including inside wrappers)."""
+    current = embedder
+    while current is not None:
+        if getattr(current, "hooked", False):
+            return True
+        current = getattr(current, "inner", None)
+    return False
+
+
+def unwrap_hooked(embedder: Any) -> Any:
+    """Return the innermost non-HookedEmbedder in the chain, or None if all are hooked."""
+    if not isinstance(embedder, HookedEmbedder):
+        return embedder
+    return unwrap_hooked(embedder.inner)
+
+
 class HookedEmbedder:
+    hooked = True  # mark as hooked for detection in chains
     def __init__(self, inner: Embedder, hooks: Any, *, source: str, policy: Any):
         self.inner = inner
         self.hooks = hooks

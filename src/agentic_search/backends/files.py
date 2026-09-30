@@ -242,12 +242,33 @@ class FilesBackend:
         raise UnsupportedOperation(f"files backend does not support {op.type}")
 
     def bind_hooks(self, hooks: Any, policy: Any) -> None:
-        """Route document embeddings through Hooks and SourcePolicy (called by Harness)."""
-        from agentic_search.embedders.hooked import HookedEmbedder
+        """Route document embeddings through Hooks and SourcePolicy (called by Harness).
 
-        if (self.embedder is not None and not isinstance(self.embedder, HookedEmbedder)
-                and not getattr(self.embedder, "local", False)):
-            self.embedder = HookedEmbedder(self.embedder, hooks, source=self.name, policy=policy)
+        If the embedder is already hooked, rebinds it with the new hooks/policy so the most
+        recently constructed Harness's hooks and policy apply. Skips wrapping if the embedder
+        is local (in-process).
+        """
+        from agentic_search.embedders.hooked import HookedEmbedder, is_hooked
+
+        if self.embedder is None:
+            return
+
+        # Check if local (don't wrap local embedders)
+        if getattr(self.embedder, "local", False):
+            return
+
+        # If outermost embedder is HookedEmbedder, rewrap its inner
+        if isinstance(self.embedder, HookedEmbedder):
+            self.embedder = HookedEmbedder(self.embedder.inner, hooks, source=self.name, policy=policy)
+            return
+
+        # If hooked anywhere in the chain (e.g., CachedEmbedder(HookedEmbedder(...))),
+        # leave it as-is since hooks already apply inside the chain
+        if is_hooked(self.embedder):
+            return
+
+        # Not hooked and not local: wrap it
+        self.embedder = HookedEmbedder(self.embedder, hooks, source=self.name, policy=policy)
 
     async def close(self) -> None:
         return None
