@@ -135,6 +135,7 @@ export class AgenticSearchClient {
         { Accept: "text/event-stream" });
       if (!response.body) throw new AgenticSearchError("response has no body", response.status);
       for await (const message of parseSse(response.body)) {
+        controller.signal.throwIfAborted();
         let data: unknown;
         try {
           data = JSON.parse(message.data);
@@ -149,9 +150,8 @@ export class AgenticSearchClient {
         yield event;
         if (isTerminal(event)) return;
       }
-      if (!controller.signal.aborted) {
-        throw new AgenticSearchError("stream ended before search_finished or search_failed", 0);
-      }
+      controller.signal.throwIfAborted();
+      throw new AgenticSearchError("stream ended before search_finished or search_failed", 0);
     } finally {
       unlink();
       controller.abort();

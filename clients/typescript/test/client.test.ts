@@ -151,6 +151,29 @@ describe("AgenticSearchClient", () => {
     await it.return(undefined);
   });
 
+  it("rejects with AbortError after a caller abort even if the body ignores the signal", async () => {
+    // sseResponse's body is not tied to the request signal, so it keeps delivering frames.
+    const fetch = fakeFetch(() => sseResponse([frame(0, started), frame(1, phase), frame(2, finished)]));
+    const controller = new AbortController();
+    const client = new AgenticSearchClient({ baseUrl: "http://svc", fetch });
+    const it = client.stream({ question: "q" }, { signal: controller.signal });
+    expect((await it.next()).value).toMatchObject({ type: "search_started" });
+    controller.abort();
+    await expect(it.next()).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("rejects with AbortError, not the truncated-stream error, when aborted before a clean end", async () => {
+    const fetch = fakeFetch(() => sseResponse([frame(0, started)]));
+    const controller = new AbortController();
+    const client = new AgenticSearchClient({ baseUrl: "http://svc", fetch });
+    const it = client.stream({ question: "q" }, { signal: controller.signal });
+    await it.next();
+    controller.abort();
+    const err = await it.next().catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(AgenticSearchError);
+    expect(err).toMatchObject({ name: "AbortError" });
+  });
+
   it("gets profiles, health and one-shot search", async () => {
     const fetch = fakeFetch((url) => {
       if (url.endsWith("/v1/profiles")) return Response.json({ profiles: [{ name: "demo" }] });

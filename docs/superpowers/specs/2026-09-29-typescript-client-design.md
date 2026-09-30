@@ -117,7 +117,11 @@ HTML §9.2.6:
     `AgenticSearchError(…, status 0)`.
   - The client owns an `AbortController` linked to the caller's `signal`. It aborts the
     controller in `finally`, so leaving the loop early closes the connection.
-  - When the caller aborts, the pending read rejects with the runtime's `AbortError`.
+  - When the caller aborts, the pending read rejects with the runtime's `AbortError` (the
+    signal's reason). The generator also checks the signal before handling each message and
+    after the body ends, so an abort always surfaces as that rejection: no further events are
+    yielded, even from a body that ignores the signal, and an aborted stream that then ends
+    cleanly rejects with the `AbortError`, not the status-0 error.
 
 ## 6. Contract testing
 
