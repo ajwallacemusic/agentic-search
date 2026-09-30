@@ -234,3 +234,13 @@ def test_vertex_client_from_config(tmp_path):
     assert c.id == "vertex:gemini-3.8-flash"
     assert c.model == "google/gemini-3.8-flash"
     assert isinstance(c.auth, Bearer)
+
+
+def test_sql_backend_columns_from_config(tmp_path):
+    from agentic_search.config import BuildContext, build
+
+    b = build("backend", {"name": "bq", "type": "bigquery", "project": "p-1", "dataset": "ds",
+                          "native_query": True, "columns": {"visits": ["dx"]},
+                          "native_functions": ["COUNT"]}, BuildContext(base_dir=tmp_path))
+    assert b.allowed_columns == {"visits": ["dx"]}
+    assert b.native_functions == frozenset({"COUNT"})

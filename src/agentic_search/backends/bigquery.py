@@ -81,6 +81,12 @@ class BigQueryBackend(SqlBackend):
         quote_ident(table, "bigquery")  # validate
         return f"`{self.project}.{self.dataset}.{table}`"
 
+    def _native_db(self) -> str | None:
+        return self.dataset
+
+    def _native_catalog(self) -> str | None:
+        return self.project
+
     def _as_text(self, expr: str) -> str:
         return f"CAST({expr} AS STRING)"
 

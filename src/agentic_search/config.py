@@ -90,7 +90,7 @@ def _files(cfg: dict[str, Any], ctx: BuildContext) -> Any:
 
 
 _SQL_KEYS = ("tables", "id_columns", "embedders", "vector_metric", "native_query", "description",
-             "max_rows", "sample_values")
+             "max_rows", "sample_values", "columns", "native_functions")
 
 
 def _backend_kwargs(cfg: dict[str, Any], ctx: BuildContext, keys: tuple[str, ...]) -> dict[str, Any]:

@@ -117,6 +117,9 @@ class PostgresBackend(SqlBackend):
     def _table_ref(self, table: str) -> str:
         return f"{quote_ident(self.schema, 'postgres')}.{quote_ident(table, 'postgres')}"
 
+    def _native_db(self) -> str | None:
+        return self.schema
+
     def _regex_expr(self, column_sql: str, placeholder: str) -> str:
         return f"{column_sql} ~ {placeholder}"
 
