@@ -173,8 +173,12 @@ snapshots is present only if the request set `include_content`, which is passed 
 ## 8. Contract export
 
 - `event_schema()`: `TypeAdapter(SearchEvent).json_schema(mode="serialization")` with `title` and
-  `$schema` (draft 2020-12). The schema describes the full models. On the wire, the lean
-  projection may leave out `result.trace` and `result.hits[].hit.content`.
+  `$schema` (draft 2020-12), adjusted to describe the lean wire output (final review):
+  `trace` is not in `$defs.SearchResult.required` and is described as "present only when the
+  request sets include_trace"; `$defs.Hit.content` is described as "present only when the
+  request sets include_content". A test validates every committed fixture frame's `data`
+  against the committed schema (`jsonschema.Draft202012Validator`; `jsonschema` is a dev
+  dependency).
 - `fixture_streams()`: runs `demo_app()` in-process with four stream requests and records each
   one's SSE frames as `{id, event, data}`:
   - `retrieval` (`snapshot_k` 3)
@@ -183,7 +187,8 @@ snapshots is present only if the request set `include_content`, which is passed 
   - `failed` (unknown source)
 
   Run-dependent values are normalised (`search_id` → `"fixture"`, `at_ms`/`duration_ms` → 0.0),
-  so the output is byte-stable.
+  and every float is rounded to 6 decimals, so the output is byte-stable across runs,
+  numpy/BLAS builds and architectures.
 - `agentic-search export-schema --out schema/` writes `search-events.v1.schema.json` and
   `search-events.v1.fixtures.json` (sorted keys, 2-space indent). Both are committed under the
   repo's `schema/`. A test fails if they differ from freshly rendered output.

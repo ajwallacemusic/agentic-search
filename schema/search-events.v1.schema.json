@@ -55,6 +55,7 @@
     "Hit": {
       "properties": {
         "content": {
+          "description": "present only when the request sets include_content",
           "items": {
             "discriminator": {
               "mapping": {
@@ -792,7 +793,8 @@
           "$ref": "#/$defs/StopReason"
         },
         "trace": {
-          "$ref": "#/$defs/Trace"
+          "$ref": "#/$defs/Trace",
+          "description": "present only when the request sets include_trace"
         },
         "usage": {
           "$ref": "#/$defs/Usage"
@@ -803,7 +805,6 @@
         "hits",
         "stop_reason",
         "usage",
-        "trace",
         "mode"
       ],
       "title": "SearchResult",

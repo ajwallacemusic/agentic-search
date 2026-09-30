@@ -46,6 +46,7 @@ dev = [
   "azure-identity>=1.17",
   "fastapi>=0.115",
   "uvicorn>=0.30",
+  "jsonschema>=4.26.0",
 ]
 
 [build-system]

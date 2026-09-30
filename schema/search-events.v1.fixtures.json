@@ -399,7 +399,7 @@
                     "turn": 0
                   }
                 ],
-                "raw_score": 0.9723090201164631,
+                "raw_score": 0.972309,
                 "source": "docs"
               },
               "judged": true,
@@ -724,7 +724,7 @@
                     "turn": 0
                   }
                 ],
-                "raw_score": 0.9723090201164631,
+                "raw_score": 0.972309,
                 "source": "docs"
               },
               "judged": true,

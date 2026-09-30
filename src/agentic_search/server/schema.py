@@ -32,11 +32,20 @@ def event_schema() -> dict[str, Any]:
     schema = TypeAdapter(SearchEvent).json_schema(mode="serialization")
     schema["title"] = f"SearchEvent v{SCHEMA_VERSION}"
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    # The service sends lean results (spec §6): these keys are left out unless requested.
+    defs = schema["$defs"]
+    result = defs["SearchResult"]
+    result["required"] = [f for f in result["required"] if f != "trace"]
+    result["properties"]["trace"]["description"] = (
+        "present only when the request sets include_trace")
+    defs["Hit"]["properties"]["content"]["description"] = (
+        "present only when the request sets include_content")
     return schema
 
 
 def _normalise(value: Any) -> Any:
-    """Replace run-dependent values (ids, clocks) so fixtures are byte-stable."""
+    """Replace run-dependent values (ids, clocks) and round floats to 6 decimals, so fixtures
+    are byte-stable across runs, numpy/BLAS builds and architectures."""
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
@@ -49,6 +58,8 @@ def _normalise(value: Any) -> Any:
         return out
     if isinstance(value, list):
         return [_normalise(v) for v in value]
+    if isinstance(value, float):
+        return round(value, 6)
     return value
 
 
