@@ -107,3 +107,29 @@ def test_public_exports():
                  "PhaseSummary", "ToolCallStarted", "ToolCallFinished", "ToolErrorInfo",
                  "ResultsUpdated", "HitSummary", "UsageUpdated", "SearchFinished", "SearchFailed"]:
         assert name in a.__all__ and hasattr(a, name)
+
+
+def _literal_values(annotation):
+    from typing import Literal, Union, get_args, get_origin
+    if get_origin(annotation) is Literal:
+        return set(get_args(annotation))
+    assert get_origin(annotation) in (Union, type(int | str)), annotation
+    [lit] = [a for a in get_args(annotation) if get_origin(a) is Literal]
+    return set(get_args(lit))
+
+
+def test_narrowed_literals_match_their_sources():
+    from agentic_search.core.types import ToolError
+    from agentic_search.models.base import Action
+    assert _literal_values(PhaseSummary.model_fields["action"].annotation) == {a.value for a in Action}
+    assert (_literal_values(ToolErrorInfo.model_fields["kind"].annotation)
+            == _literal_values(ToolError.model_fields["kind"].annotation))
+    assert _literal_values(SearchStarted.model_fields["mode"].annotation) == {
+        "retrieval", "harness", "model"}
+
+
+def test_narrowed_literals_reject_unknown_values():
+    with pytest.raises(ValidationError):
+        ToolErrorInfo(kind="weird", message="m")
+    with pytest.raises(ValidationError):
+        PhaseSummary(action="explode")

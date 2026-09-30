@@ -39,7 +39,7 @@ class PhaseSummary(BaseModel):
     n_errors: int | None = None
     n_judged: int | None = None
     n_relevant: int | None = None
-    action: str | None = None
+    action: Literal["continue", "refine", "broaden", "switch_source", "stop"] | None = None
     confidence: float | None = None
     n_ranked: int | None = None
     note: str | None = None
@@ -49,7 +49,7 @@ class PhaseSummary(BaseModel):
 class ToolErrorInfo(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    kind: str
+    kind: Literal["validation", "backend", "timeout", "embedder", "policy"]
     message: str
     source: str | None = None
 
@@ -72,7 +72,7 @@ class HitSummary(BaseModel):
 class SearchStarted(_Event):
     type: Literal["search_started"] = "search_started"
     question: Query
-    mode: str
+    mode: Literal["retrieval", "harness", "model"]
     sources: list[str]
     budget: Budget
     setup_errors: dict[str, str] = Field(default_factory=dict)
