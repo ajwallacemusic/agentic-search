@@ -102,8 +102,13 @@ profiles:
     limits: {max_budget: {max_turns: 2, max_cost_usd: 0.25}, allow_include_content: false}
   vertex:
     backends: [{name: notes, type: files, root: ./docs, glob: "**/*.md"}]
-    driver: {type: vertex, model: gemini-3.8-flash, project: my-project, location: global}
+    driver: {type: vertex, model: gemini-3.8-flash, project: my-project, location: global,
+             price_per_mtok: [0.30, 2.50]}
 ```
+
+Pass `price_per_mtok` (input and output USD per million tokens) for a Vertex model. The library
+ships no Vertex price table, and the prices above are placeholders. Without a price, cost reads
+0, so a `max_cost_usd` budget never binds, and `vertex_client` logs a warning saying so.
 
 ```bash
 SEARCH_API_KEYS=key1,key2 agentic-search serve --config service.yaml --port 8080
@@ -199,6 +204,8 @@ from `DEFAULT_SQL_FUNCTIONS` unless `native_functions` names others; an empty li
 `native_functions` requires `columns`. A stored Postgres tsvector column is used only when listed
 in `columns`. The guard refuses LATERAL, schema-qualified function calls, time travel (FOR SYSTEM_TIME AS OF),
 and whole-row references. Table names match exactly; column names follow the dialect's case rules.
+Approving a STRUCT or JSON column approves every field inside it, because the guard checks
+columns, not paths into them.
 
 `PostgresBackend(..., password=<async callable>)` asks for a password at each new connection,
 for a short-lived token such as a Cloud SQL IAM database token. The DSN then carries no password.
@@ -212,9 +219,9 @@ composite primary key are skipped unless `id_columns` names a column for them.
 
 **Connect with a read-only role/user.** Grant the credentials you configure only `SELECT` (or
 search/read) on the tables and indices you expose. The native-query guard and the read-only
-sessions are defence in depth, not a substitute: the guard's function check is a denylist unless
-`columns` is set, in which case it becomes an allow list; even so, it cannot anticipate every
-side-effecting function or extension.
+sessions are defence in depth, not a substitute. The guard always checks functions against a
+deny list. With `columns` set, it also checks them against an allow list. Neither list can
+anticipate every side-effecting function or extension.
 
 ```yaml
 backends:
@@ -236,7 +243,10 @@ backends:
 | `http` | per request template | custom containers, e.g. MedSigLIP on Azure ML |
 
 Remote embedders take `auth: {type: api_key|bearer|gcp_adc|azure_identity, ...}` (install the `gcp` or
-`azure` extra for the cloud credentials). Backends that embed their own documents send them to
+`azure` extra for the cloud credentials). A caller that builds a client in code may pass its own
+`Auth` instead, any object with an async `headers()`. It should call
+`agentic_search.core.secrets.register_secret` on every token it returns, so errors and traces
+mask that token. Backends that embed their own documents send them to
 non-local embedders only through `Hooks.before_model_call`, and `allowed_models` source policy applies to
 embedders too.
 
