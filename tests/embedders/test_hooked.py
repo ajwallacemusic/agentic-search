@@ -72,7 +72,7 @@ async def test_second_harness_rebinds_embedder(medical_docs):
     """Two Harnesses sharing one FilesBackend: the second Harness's hooks/policy apply."""
     backend = FilesBackend.from_documents("docs", medical_docs, embedder=RemoteLike(dim=8, id="emb"))
     hooks1 = Recording()
-    h1 = Harness([backend], ScriptedDriver([]), hooks=hooks1)
+    Harness([backend], ScriptedDriver([]), hooks=hooks1)
     assert isinstance(backend.embedder, HookedEmbedder)
 
     # Second Harness with stricter policy should rebind
@@ -113,7 +113,7 @@ async def test_embedder_with_no_local_attribute_is_wrapped(medical_docs):
             return [[0.1] * 8 for _ in items]
 
     backend = FilesBackend.from_documents("docs", medical_docs, embedder=UnmarkedEmbedder())
-    h = Harness([backend], ScriptedDriver([]))
+    Harness([backend], ScriptedDriver([]))
     # Should be wrapped since no local attribute means remote
     assert isinstance(backend.embedder, HookedEmbedder)
 
@@ -128,7 +128,7 @@ async def test_cached_hooked_embedder_hook_called_once(medical_docs):
     cached = CachedEmbedder(hooked)
 
     backend = FilesBackend.from_documents("docs", medical_docs, embedder=cached)
-    h1 = Harness([backend], ScriptedDriver([]), hooks=hooks1)
+    Harness([backend], ScriptedDriver([]), hooks=hooks1)
 
     # Verify embedder is still CachedEmbedder(HookedEmbedder(...)), not wrapped again
     assert isinstance(backend.embedder, CachedEmbedder)
