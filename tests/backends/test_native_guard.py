@@ -508,3 +508,35 @@ def test_postgres_alias_inside_an_order_by_expression_is_refused(query):
 ])
 def test_postgres_alias_as_a_whole_sort_term_is_accepted(query):
     assert guard_sql(query, "postgres", 10, PG_VISITS).endswith("LIMIT 10")
+
+
+CTE_SHADOW = [
+    "SELECT * FROM people WHERE EXISTS (WITH people AS (SELECT 1 AS n) SELECT n FROM people)",
+    "SELECT * FROM (WITH people AS (SELECT 1 AS n) SELECT n FROM people) a, people",
+    "SELECT COUNT(*) FROM people WHERE EXISTS (WITH people AS (SELECT 1 AS n) SELECT n FROM people)",
+    "WITH people AS (SELECT * FROM people) SELECT * FROM people",
+]
+CTE_ALLOW = {"mysql": SqlAllowList(tables={"docs": frozenset({"id", "title"})}),
+             "postgres": SqlAllowList(tables={"docs": frozenset({"id", "title"})}, db="public"),
+             "bigquery": SqlAllowList(tables={"docs": frozenset({"id", "title"})}, db="ds", catalog="p-1")}
+
+
+@pytest.mark.parametrize("dialect", ["mysql", "postgres", "bigquery"])
+@pytest.mark.parametrize("query", CTE_SHADOW)
+def test_a_cte_name_covers_only_the_scope_that_declares_it(query, dialect):
+    # A CTE declared inside a subquery, or a non-recursive CTE's own body, does not rename the
+    # real table of that name elsewhere. MySQL has no db to pin, so only the scope tells them apart.
+    with pytest.raises(NativeQueryRejected, match="people"):
+        guard_sql(query, dialect, 10, CTE_ALLOW[dialect])
+
+
+@pytest.mark.parametrize("dialect", ["mysql", "postgres", "bigquery"])
+@pytest.mark.parametrize("query", [
+    "WITH people AS (SELECT id FROM docs) SELECT * FROM people",
+    "WITH people AS (SELECT id FROM docs) SELECT title FROM docs WHERE EXISTS (SELECT 1 FROM people)",
+    "WITH a AS (SELECT id FROM docs), b AS (SELECT id FROM a) SELECT * FROM b",
+    "SELECT x.id FROM (WITH people AS (SELECT id FROM docs) SELECT id FROM people) x",
+    "WITH RECURSIVE r AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r",
+])
+def test_a_cte_reference_in_its_own_scope_is_accepted(query, dialect):
+    assert guard_sql(query, dialect, 10, CTE_ALLOW[dialect]).endswith("LIMIT 10")

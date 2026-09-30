@@ -116,6 +116,18 @@ def _check_columns_by_scope(stmt: Any, dialect: str, allowed: Mapping[str, froze
             raise refuse(column)
 
 
+def _cte_references(stmt: Any) -> set[int]:
+    """The ids of the bare table references that name a CTE visible in their own scope.
+
+    A CTE is visible in the query that declares it, in that query's subqueries, and in the
+    CTEs declared after it; a recursive CTE also sees itself. A table of the same name anywhere
+    else is a real table. Any table not in this set is checked as a real one."""
+    from sqlglot.optimizer.scope import traverse_scope
+
+    return {id(table) for scope in traverse_scope(stmt) for table in scope.tables
+            if not table.db and table.name in scope.cte_sources}
+
+
 def _pin_table_qualifiers(stmt: Any, dialect: str, allow: SqlAllowList) -> None:
     """Give every unqualified table the allow list's db and catalog before `qualify` runs.
 
@@ -134,9 +146,9 @@ def _pin_table_qualifiers(stmt: Any, dialect: str, allow: SqlAllowList) -> None:
             ident = exp.to_identifier(name, quoted=True)
         return ident
 
-    ctes = {cte.alias_or_name.lower() for cte in stmt.find_all(exp.CTE)}
+    ctes = _cte_references(stmt)
     for table in stmt.find_all(exp.Table):
-        if table.db or table.name.lower() in ctes:
+        if table.db or id(table) in ctes:
             continue
         table.set("db", identifier(allow.db))
         if allow.catalog is not None:
@@ -152,8 +164,8 @@ def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
     from sqlglot.errors import OptimizeError
     from sqlglot.optimizer.qualify import qualify
 
-    _pin_table_qualifiers(stmt, dialect, allow)
     try:
+        _pin_table_qualifiers(stmt, dialect, allow)
         stmt = qualify(stmt, schema=allow.schema(dialect), dialect=dialect, catalog=allow.catalog,
                        db=allow.db, validate_qualify_columns=True, quote_identifiers=False)
     except OptimizeError as exc:
@@ -185,13 +197,13 @@ def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
         raise NativeQueryRejected(f"{lateral.sql(dialect=dialect)[:40]}... is not allowed in native SQL")
     allowed = allow.resolved_tables(dialect)
     _check_columns_by_scope(stmt, dialect, allowed)
-    ctes = {cte.alias_or_name for cte in stmt.find_all(exp.CTE)}
+    ctes = _cte_references(stmt)
     for table in stmt.find_all(exp.Table):
         # Time travel reads a table as it was, including rows deleted since.
         if table.args.get("version") is not None or table.args.get("when") is not None:
             raise NativeQueryRejected(
                 f"table {table.name} read at a past point in time is not allowed in native SQL")
-        if table.name in ctes and not table.db:
+        if id(table) in ctes:
             continue
         # A query naming no column, such as COUNT(*), resolves against any table; check each one.
         if (table.name not in allowed or (table.db or None) != allow.db
