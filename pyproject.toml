@@ -20,6 +20,7 @@ mysql = ["aiomysql>=0.2", "sqlglot>=25,<31"]
 bigquery = ["google-cloud-bigquery>=3.25", "sqlglot>=25,<31"]
 opensearch = ["opensearch-py[async]>=2.6"]
 neo4j = ["neo4j>=5.20"]
+milvus = ["pymilvus>=2.5,<4"]
 gcp = ["google-auth[requests]>=2.29"]
 azure = ["azure-identity>=1.17"]
 
@@ -36,6 +37,7 @@ dev = [
   "google-cloud-bigquery>=3.25",
   "opensearch-py[async]>=2.6",
   "neo4j>=5.20",
+  "pymilvus>=2.5,<4",
   "google-auth[requests]>=2.29",
   "azure-identity>=1.17",
 ]
