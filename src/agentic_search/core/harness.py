@@ -249,6 +249,8 @@ class Harness:
             async for event in events:
                 if isinstance(event, SearchFinished):
                     return event.result
+        if not failure:
+            raise HarnessError("search ended without a result")
         raise failure[0]
 
     def _options(self, question: str | Query, sources: list[str] | None, top_k: int,
@@ -286,17 +288,24 @@ class Harness:
                 if isinstance(event, TERMINAL_EVENTS):
                     break
         finally:
-            if not task.done():
+            we_cancelled = not task.done()
+            if we_cancelled:
                 task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 if asyncio.current_task().cancelling():
                     raise
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except BaseException:
+                # Teardown noise from a search we cancelled must not mask the consumer's exit.
+                if not we_cancelled:
+                    raise
 
     async def _run_search(self, opts: _Options, emitter: EventEmitter,
                           failure: list[BaseException]) -> None:
-        turn = 0
+        state: SearchState | None = None
         try:
             await self.setup()
             manifests = self._select(opts.sources)
@@ -309,11 +318,12 @@ class Harness:
                          sources=sorted(manifests), budget=opts.budget,
                          setup_errors=dict(self.setup_errors))
             result = await self._run_state(state, opts)
-            turn = state.turn
-            emitter.emit(SearchFinished, turn=turn, result=result, stop_reason=result.stop_reason)
+            # No await may follow the terminal emit: the stream cancels this task once it sees it.
+            emitter.emit(SearchFinished, turn=state.turn, result=result,
+                         stop_reason=result.stop_reason)
         except Exception as exc:
             failure.append(exc)
-            emitter.emit(SearchFailed, turn=turn, error_type=type(exc).__name__,
+            emitter.emit(SearchFailed, turn=state.turn if state is not None else 0, error_type=type(exc).__name__,
                          message=scrub(str(exc))[:500])
 
     async def _run_state(self, state: SearchState, opts: _Options) -> SearchResult:
@@ -384,6 +394,7 @@ class Harness:
             state.usage.add_model(plan.usage)
             calls = plan.calls[: state.budget.max_tool_calls - state.usage.tool_calls]
             if not calls:
+                state.emitter.emit(UsageUpdated, turn=state.turn, usage=state.usage.model_copy())
                 return StopReason.NO_PLAN
             state.emitter.emit(PhaseStarted, turn=state.turn, phase="query")
             t0 = time.perf_counter()

@@ -318,7 +318,7 @@ async def test_cancelled_error_from_driver_plan_stream_propagates(docs_backend):
 
 
 async def test_custom_base_exception_from_driver_search_propagates(docs_backend):
-    """Test that custom BaseException subclass is not swallowed by search()."""
+    """Guards propagation of a custom BaseException from search() (not the old hang)."""
     class Fatal(BaseException):
         pass
 
@@ -332,7 +332,7 @@ async def test_custom_base_exception_from_driver_search_propagates(docs_backend)
 
 
 async def test_custom_base_exception_from_driver_stream_propagates(docs_backend):
-    """Test that custom BaseException subclass is not swallowed by stream()."""
+    """Guards propagation of a custom BaseException from stream() (not the old hang)."""
     class Fatal(BaseException):
         pass
 
@@ -350,7 +350,7 @@ async def test_consumer_timeout_not_swallowed_by_stream_cleanup(docs_backend):
 
     The timeout must expire while _events' finally block awaits the search task
     during its shielded cleanup. Without the fix, contextlib.suppress swallows
-    the consumer's timeout and the test hangs.
+    the consumer's timeout and the test fails (TimeoutError never raised) rather than hanging.
     """
     async def long_sleep_with_shielded_cleanup(op):
         try:
@@ -390,3 +390,70 @@ async def test_delegate_note_secret_is_scrubbed(docs_backend):
     done = [e for e in events if isinstance(e, PhaseFinished) and e.phase == "delegate"][0]
     assert done.summary.note is not None
     assert all("sk-note-4242" not in e.model_dump_json() for e in events[:-1])
+
+
+async def test_search_failed_turn_is_the_turn_of_the_failure(docs_backend):
+    class LateCrashDriver(ScriptedDriver):
+        async def plan(self, view, tools):
+            if self.views:
+                raise RuntimeError("second plan crashed")
+            return await super().plan(view, tools)
+
+    h = make(docs_backend, LateCrashDriver([[lex("headache")]]),
+             controller=ScriptedController([Action.CONTINUE]))
+    events = await collect(h.stream("q"))
+    assert events[-1].type == "search_failed"
+    assert events[-1].turn == 1
+
+
+async def test_no_plan_emits_final_usage_before_finishing(docs_backend):
+    events = await collect(make(docs_backend, ScriptedDriver([])).stream("q"))
+    assert_well_formed(events)
+    assert shape(events) == ["search_started", "phase_started:plan", "phase_finished:plan",
+                             "usage_updated", "search_finished"]
+    assert events[-1].stop_reason is StopReason.NO_PLAN
+
+
+async def test_cleanup_error_after_stream_cancel_does_not_escape(docs_backend):
+    class CleanupFailure(BaseException):
+        pass
+
+    async def fragile(op):
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise CleanupFailure("teardown blew up") from None
+
+    docs_backend.execute = fragile
+    h = make(docs_backend, ScriptedDriver([[lex("headache")]]),
+             settings=HarnessSettings(call_timeout=600))
+
+    async def consume():
+        async with h.stream("q") as stream:
+            async for ev in stream:
+                if isinstance(ev, ToolCallStarted):
+                    await asyncio.sleep(0.05)
+                    break
+
+    await asyncio.wait_for(consume(), 5)
+
+
+async def test_cleanup_runtime_error_after_stream_cancel_does_not_escape(docs_backend):
+    async def fragile(op):
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise RuntimeError("teardown blew up") from None
+
+    docs_backend.execute = fragile
+    h = make(docs_backend, ScriptedDriver([[lex("headache")]]),
+             settings=HarnessSettings(call_timeout=600))
+
+    async def consume():
+        async with h.stream("q") as stream:
+            async for ev in stream:
+                if isinstance(ev, ToolCallStarted):
+                    await asyncio.sleep(0.05)
+                    break
+
+    await asyncio.wait_for(consume(), 5)
