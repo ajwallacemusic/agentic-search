@@ -157,6 +157,10 @@ class Harness:
         self.hooks = hooks or Hooks()
         self.policy = SourcePolicy(source_policy)
         self.settings = settings or HarnessSettings()
+        for backend in backends:  # backends that embed their own content get hooked embedders
+            bind = getattr(backend, "bind_hooks", None)
+            if callable(bind):
+                bind(self.hooks, self.policy)
         self.manifests: dict[str, Manifest] = {}
         self.setup_errors: dict[str, str] = {}
         self._ready = False

@@ -19,6 +19,8 @@ _TOKEN = re.compile(r"\w+")
 class HashEmbedder:
     """Deterministic bag-of-words feature hashing. No downloads; for tests, demos and CI."""
 
+    local = True  # runs in-process: document content never leaves the machine
+
     def __init__(self, dim: int = 256, id: str = "hash"):
         self.id = id
         self.dim = dim
@@ -42,6 +44,8 @@ class HashEmbedder:
 
 class SentenceTransformerEmbedder:
     """sentence-transformers model; set image=True for CLIP-style models. Needs the `local` extra."""
+
+    local = True  # runs in-process: document content never leaves the machine
 
     def __init__(self, model_name: str, *, id: str | None = None, image: bool = False,
                  query_prefix: str = "", document_prefix: str = "", device: str | None = None):

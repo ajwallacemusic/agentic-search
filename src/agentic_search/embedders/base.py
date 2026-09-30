@@ -13,6 +13,10 @@ Embedding = list[float]
 Purpose = Literal["query", "document"]
 
 
+class EmbedderError(Exception):
+    """An embedder could not produce vectors (bad config, auth, transport or response shape)."""
+
+
 @runtime_checkable
 class Embedder(Protocol):
     id: str
@@ -80,6 +84,10 @@ class CachedEmbedder:
     @property
     def dim(self) -> int:
         return self.inner.dim
+
+    @property
+    def local(self) -> bool:
+        return bool(getattr(self.inner, "local", False))
 
     async def embed(self, items: list[Content], purpose: Purpose) -> list[Embedding]:
         if purpose != "query" or not all(isinstance(i, TextPart) for i in items):

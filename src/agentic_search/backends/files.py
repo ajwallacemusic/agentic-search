@@ -241,6 +241,14 @@ class FilesBackend:
             return self._aggregate(op)
         raise UnsupportedOperation(f"files backend does not support {op.type}")
 
+    def bind_hooks(self, hooks: Any, policy: Any) -> None:
+        """Route document embeddings through Hooks and SourcePolicy (called by Harness)."""
+        from agentic_search.embedders.hooked import HookedEmbedder
+
+        if (self.embedder is not None and not isinstance(self.embedder, HookedEmbedder)
+                and not getattr(self.embedder, "local", False)):
+            self.embedder = HookedEmbedder(self.embedder, hooks, source=self.name, policy=policy)
+
     async def close(self) -> None:
         return None
 
