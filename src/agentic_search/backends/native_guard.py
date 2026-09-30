@@ -167,7 +167,8 @@ def _apply_allow_list(stmt: Any, dialect: str, allow: SqlAllowList) -> Any:
     try:
         _pin_table_qualifiers(stmt, dialect, allow)
         stmt = qualify(stmt, schema=allow.schema(dialect), dialect=dialect, catalog=allow.catalog,
-                       db=allow.db, validate_qualify_columns=True, quote_identifiers=False)
+                       db=allow.db, validate_qualify_columns=True, quote_identifiers=True,
+                       identify=False)
     except OptimizeError as exc:
         raise NativeQueryRejected(
             f"native SQL may use only the allowed tables and columns: {exc}") from exc

@@ -540,3 +540,23 @@ def test_a_cte_name_covers_only_the_scope_that_declares_it(query, dialect):
 ])
 def test_a_cte_reference_in_its_own_scope_is_accepted(query, dialect):
     assert guard_sql(query, dialect, 10, CTE_ALLOW[dialect]).endswith("LIMIT 10")
+
+
+PG_ODD_NAMES = SqlAllowList(tables={"visits": frozenset({"id", "Dx", "first name"})}, db="public")
+
+
+@pytest.mark.parametrize("query", [
+    'SELECT * FROM visits a JOIN visits b USING ("Dx")',
+    "SELECT * FROM visits a NATURAL JOIN visits b",
+    "SELECT * FROM visits",
+])
+def test_resolved_sql_quotes_names_that_need_it(query):
+    # Printed bare, `Dx` folds to a hidden lowercase `dx` on Postgres and `first name` is not SQL.
+    out = guard_sql(query, "postgres", 10, PG_ODD_NAMES)
+    assert '."Dx"' in out and ".Dx" not in out
+    assert '."first name"' in out and ".first name" not in out
+
+
+def test_resolved_sql_keeps_safe_names_bare():
+    out = guard_sql('SELECT id, "Dx" FROM visits', "postgres", 10, PG_ODD_NAMES)
+    assert out == 'SELECT visits.id AS id, visits."Dx" AS "Dx" FROM public.visits AS visits LIMIT 10'
