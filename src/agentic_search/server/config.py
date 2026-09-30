@@ -54,6 +54,7 @@ class ServiceConfig(BaseModel):
     max_image_bytes: int = Field(default=10_000_000, ge=1)
     max_images: int = Field(default=4, ge=0)
     max_body_bytes: int | None = Field(default=None, ge=1)
+    setup_retry_s: float = Field(default=30.0, ge=0)
 
     def body_limit(self) -> int:
         """`max_body_bytes`, or by default room for `max_images` base64 images plus 64 KiB."""

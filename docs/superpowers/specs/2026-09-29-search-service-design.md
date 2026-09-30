@@ -71,6 +71,7 @@ service:
   max_image_bytes: 10000000                           # default 10 MB per image
   max_images: 4                                       # default 4 per request
   max_body_bytes: 53398869                            # default max_images*max_image_bytes*4//3 + 65536
+  setup_retry_s: 30                                   # default 30, ≥0: failed-setup backoff
 profiles:
   general: {<harness config as build_harness accepts>}
   strict:
@@ -148,6 +149,12 @@ for `/v1/*`:
   lifespan events, for example in tests with `httpx.ASGITransport`. They are closed at shutdown.
 - A profile whose setup raises `HarnessError` (no backend could be discovered) returns `503` on
   search. `/v1/profiles` lists it with `available: false` and a scrubbed `error`.
+- **Setup backoff** (final review): a setup failure is cached per profile for
+  `service.setup_retry_s` (default 30 s). Within that window, searches get `503` at once and
+  `/v1/profiles` reports the cached error, without re-running discovery; after it, one request
+  (serialised by a per-profile lock) retries. The lifespan logs a scrubbed warning on the
+  `agentic_search.server` logger for each profile that failed setup, and for each exception from
+  `Harness.close()` at shutdown.
 - In `/v1/search`, a `HarnessError`, for example unknown sources, returns `400` with the scrubbed
   message. Any other exception returns a generic `500`, with no detail leaked.
 - **`/v1/search` disconnect** (final review): the search runs as a task raced against
@@ -240,6 +247,8 @@ free port:
   keys variable. A request without a key gets `401` before `receive()` is ever called, even with a
   malformed or huge body; `Content-Length` over the cap and a chunked body over the cap get `413`.
 - `/v1/profiles` contents; an unavailable profile gives `503`, and health reports `degraded`.
+  Failed setup is not re-run within `setup_retry_s` (and is with `setup_retry_s: 0`); the
+  lifespan logs setup and close failures, scrubbed.
 - Budget clamping end to end.
 - Images: decoded inline, invalid base64 `400`, `uri` `422`, too many `400`.
 - `HarnessError` gives `400`, and capacity gives `429` for both routes.

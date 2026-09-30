@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable
 
@@ -27,6 +29,8 @@ from agentic_search.server.models import (
     resolve_budget,
 )
 from agentic_search.server.sse import sse_body, wait_for_disconnect
+
+logger = logging.getLogger("agentic_search.server")
 
 
 class _Gate:
@@ -63,6 +67,13 @@ class _GatedStreamingResponse(StreamingResponse):
                 self._release()
 
 
+def _describe(outcome: object) -> str:
+    """A scrubbed one-line description of a setup error string or an exception."""
+    if isinstance(outcome, BaseException):
+        return scrub(f"{type(outcome).__name__}: {outcome}")
+    return scrub(str(outcome))
+
+
 def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) -> FastAPI:
     """Build the service. Profiles are set up at startup (and lazily on first use, so the app
     also works without lifespan events) and closed at shutdown."""
@@ -71,11 +82,37 @@ def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) ->
     keys = [k.encode() for k in config.auth.keys()]
     gate = _Gate(config.max_concurrent_searches)
 
+    # A failed setup is remembered per profile for `setup_retry_s`, so requests in that window
+    # get 503 at once instead of each re-running discovery; afterwards one request retries.
+    failures: dict[str, tuple[float, str]] = {}
+    setup_locks = {name: asyncio.Lock() for name in profs}
+
+    async def _setup(name: str) -> str | None:
+        """Set a profile up if needed; return its scrubbed error if it is unavailable."""
+        async with setup_locks[name]:
+            failed = failures.get(name)
+            if failed is not None and time.monotonic() - failed[0] < config.setup_retry_s:
+                return failed[1]
+            try:
+                await profs[name].harness.setup()
+            except HarnessError as exc:
+                failures[name] = (time.monotonic(), scrub(str(exc)))
+                return failures[name][1]
+            failures.pop(name, None)
+            return None
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        await asyncio.gather(*(_setup(p) for p in profs.values()), return_exceptions=True)
+        outcomes = await asyncio.gather(*(_setup(n) for n in profs), return_exceptions=True)
+        for name, outcome in zip(profs, outcomes):
+            if outcome is not None:
+                logger.warning("profile %r is unavailable: %s", name, _describe(outcome))
         yield
-        await asyncio.gather(*(p.harness.close() for p in profs.values()), return_exceptions=True)
+        outcomes = await asyncio.gather(*(p.harness.close() for p in profs.values()),
+                                        return_exceptions=True)
+        for name, outcome in zip(profs, outcomes):
+            if isinstance(outcome, BaseException):
+                logger.warning("closing profile %r failed: %s", name, _describe(outcome))
 
     app = FastAPI(title="agentic-search", version=__version__, lifespan=lifespan)
     # Added before CORS, so CORS is the outer layer and its headers reach 401/413 answers too.
@@ -108,14 +145,10 @@ def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) ->
             raise HTTPException(404, f"unknown profile {name!r}")
         return name, profs[name]
 
-    async def _setup(profile: Profile) -> None:
-        await profile.harness.setup()
-
-    async def ready(name: str, profile: Profile) -> None:
-        try:
-            await _setup(profile)
-        except HarnessError as exc:
-            raise HTTPException(503, f"profile {name!r} is unavailable: {scrub(str(exc))}") from exc
+    async def ready(name: str) -> None:
+        error = await _setup(name)
+        if error is not None:
+            raise HTTPException(503, f"profile {name!r} is unavailable: {error}")
 
     def options(req: SearchRequest, profile: Profile) -> dict[str, Any]:
         if req.include_content and not profile.limits.allow_include_content:
@@ -139,11 +172,7 @@ def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) ->
     async def list_profiles() -> dict[str, Any]:
         out = []
         for name, p in profs.items():
-            error = None
-            try:
-                await _setup(p)
-            except HarnessError as exc:
-                error = scrub(str(exc))
+            error = await _setup(name)
             h = p.harness
             out.append({
                 "name": name,
@@ -166,7 +195,7 @@ def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) ->
     async def search(req: SearchRequest, request: Request) -> dict[str, Any] | Response:
         name, profile = resolve(req.profile)
         opts = options(req, profile)
-        await ready(name, profile)
+        await ready(name)
         if not gate.try_acquire():
             raise HTTPException(429, "too many concurrent searches")
         task = asyncio.ensure_future(profile.harness.search(opts.pop("question"), **opts))
@@ -201,7 +230,7 @@ def create_app(config: ServiceConfig, profiles: dict[str, Profile | Harness]) ->
     async def search_stream(req: StreamRequest, request: Request) -> StreamingResponse:
         name, profile = resolve(req.profile)
         opts = options(req, profile)
-        await ready(name, profile)
+        await ready(name)
         try:
             stream = profile.harness.stream(opts.pop("question"), snapshot_k=req.snapshot_k,
                                             include_content=req.include_content, **opts)

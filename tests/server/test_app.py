@@ -410,3 +410,58 @@ async def test_search_disconnect_cancels_search_and_frees_slot(docs_backend):
     async with client(app) as c:
         again = await c.post("/v1/search", json={"question": "q"})
     assert again.status_code == 200
+
+
+def _failing_discover(docs_backend):
+    calls = []
+
+    async def discover(*a, **kw):
+        calls.append(1)
+        raise RuntimeError("index offline")
+
+    docs_backend.discover = discover
+    return calls
+
+
+async def test_failed_setup_is_cached_for_setup_retry_s(docs_backend):
+    calls = _failing_discover(docs_backend)
+    app = create_app(service(), {"down": make_harness(docs_backend)})
+    async with client(app) as c:
+        first = await c.post("/v1/search", json={"question": "q"})
+        second = await c.post("/v1/search/stream", json={"question": "q"})
+        [p] = (await c.get("/v1/profiles")).json()["profiles"]
+    assert first.status_code == 503 and second.status_code == 503
+    assert "index offline" in second.json()["detail"]
+    assert not p["available"] and "index offline" in p["error"]
+    assert len(calls) == 1
+
+
+async def test_failed_setup_retries_after_the_window(docs_backend):
+    calls = _failing_discover(docs_backend)
+    app = create_app(service(setup_retry_s=0), {"down": make_harness(docs_backend)})
+    async with client(app) as c:
+        for _ in range(2):
+            assert (await c.post("/v1/search", json={"question": "q"})).status_code == 503
+    assert len(calls) == 2
+
+
+async def test_lifespan_logs_failed_setup_and_close_errors(docs_backend, caplog, monkeypatch):
+    import logging
+
+    monkeypatch.setenv("SEARCH_KEYS", "sekrit-key")
+    _failing_discover(docs_backend)
+    h = make_harness(docs_backend)
+
+    async def bad_close():
+        raise RuntimeError("close failed for sekrit-key")
+
+    h.close = bad_close
+    app = create_app(service(auth=AuthConfig(type="api_key", keys_env="SEARCH_KEYS")),
+                     {"down": h})
+    with caplog.at_level(logging.WARNING, logger="agentic_search.server"):
+        async with app.router.lifespan_context(app):
+            pass
+    messages = [r.getMessage() for r in caplog.records if r.name == "agentic_search.server"]
+    assert any("'down'" in m and "index offline" in m for m in messages), messages
+    assert any("'down'" in m and "close failed" in m for m in messages), messages
+    assert not any("sekrit-key" in m for m in messages)
