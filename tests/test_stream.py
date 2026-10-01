@@ -457,3 +457,34 @@ async def test_cleanup_runtime_error_after_stream_cancel_does_not_escape(docs_ba
                     break
 
     await asyncio.wait_for(consume(), 5)
+
+
+async def test_snapshot_hits_carry_the_judge_rationale_once_judged(docs_backend):
+    driver = ScriptedDriver(delegate_calls=[[lex("headache")]], delegate_keys=["docs:d4"])
+    h = make(docs_backend, driver, analyzer=KeywordJudge(["headache"]))
+    events = await collect(h.stream("q", mode="model"))
+    snaps = [e for e in events if isinstance(e, ResultsUpdated)]
+    assert len(snaps) >= 2
+    first, last = snaps[0], snaps[-1]
+    assert first.hits and all(not s.judged and s.rationale is None for s in first.hits)
+    judged = [s for s in last.hits if s.judged]
+    assert judged and all(s.rationale in {"keyword match", "no keyword"} for s in judged)
+    final = {r.hit.key: r.rationale for r in events[-1].result.hits}
+    assert final and all(s.rationale == final[s.key] for s in last.hits if s.key in final)
+
+
+async def test_snapshot_rationale_is_scrubbed(docs_backend):
+    register_secret("sk-why-5151")
+
+    class LeakyJudge(KeywordJudge):
+        async def judge(self, question, hits):
+            result = await super().judge(question, hits)
+            return result.model_copy(update={"judgments": [
+                j.model_copy(update={"rationale": f"matched via sk-why-5151 ({j.rationale})"})
+                for j in result.judgments]})
+
+    h = make(docs_backend, ScriptedDriver([[lex("headache")]]), analyzer=LeakyJudge(["headache"]))
+    events = await collect(h.stream("q", mode="retrieval"))
+    [snap] = [e for e in events if isinstance(e, ResultsUpdated)]
+    assert snap.hits and all(s.judged and s.rationale for s in snap.hits)
+    assert all("sk-why-5151" not in s.rationale for s in snap.hits)

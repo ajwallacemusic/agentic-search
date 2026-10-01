@@ -70,7 +70,8 @@ async with load_harness("search.yaml") as h:
 - Leaving the `async with` block or cancelling the consuming task cancels the search, including
   in-flight backend and model calls.
 - Snapshots carry a scrubbed 300-character snippet per hit; pass `include_content=True` for full
-  content, or `snapshot_k=0` to turn them off.
+  content, or `snapshot_k=0` to turn them off. Once a hit has been judged, its snapshot entry also
+  carries the judge's scrubbed `rationale`; before that it is `null`.
 - `search()` is `stream()` drained to its final result. Consumers must ignore unknown event types.
 
 ## Service

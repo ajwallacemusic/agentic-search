@@ -369,6 +369,7 @@ class Harness:
                           title=scrub(title) if isinstance(title, str) else None,
                           snippet=scrub(h.snippet(300)), score=round(score, 6),
                           p_relevant=cand.p_relevant, judged=cand.judged,
+                          rationale=scrub(cand.rationale) if cand.rationale else None,
                           first_turn=cand.first_turn,
                           content=list(h.content) if include_content else None)
 

@@ -65,6 +65,7 @@ class HitSummary(BaseModel):
     score: float
     p_relevant: float | None = None
     judged: bool = False
+    rationale: str | None = None
     first_turn: int
     content: list[Content] | None = None
 
