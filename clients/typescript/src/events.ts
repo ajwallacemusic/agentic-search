@@ -95,6 +95,7 @@ export interface HitSummary {
   score: number;
   p_relevant: number | null;
   judged: boolean;
+  rationale: string | null;
   first_turn: number;
   content: ContentPart[] | null;
 }

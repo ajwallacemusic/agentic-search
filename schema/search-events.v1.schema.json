@@ -184,6 +184,18 @@
           "default": null,
           "title": "P Relevant"
         },
+        "rationale": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rationale"
+        },
         "score": {
           "title": "Score",
           "type": "number"

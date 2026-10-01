@@ -369,6 +369,7 @@ class Harness:
                           title=scrub(title) if isinstance(title, str) else None,
                           snippet=scrub(h.snippet(300)), score=round(score, 6),
                           p_relevant=cand.p_relevant, judged=cand.judged,
+                          rationale=scrub(cand.rationale) if cand.rationale else None,
                           first_turn=cand.first_turn,
                           content=list(h.content) if include_content else None)
 
@@ -477,7 +478,8 @@ class Harness:
         else:
             ranked = state.pool.ranked(w)
         hits = [RankedHit(hit=c.hit, score=round(s, 6), p_relevant=c.p_relevant,
-                          rationale=c.rationale, judged=c.judged) for c, s in ranked[:top_k]]
+                          rationale=scrub(c.rationale) if c.rationale else None,
+                          judged=c.judged) for c, s in ranked[:top_k]]
         state.trace.add("finalize", state.turn, stop_reason=reason.value, n_hits=len(hits),
                         pool_size=len(state.pool))
         return SearchResult(question=state.question, hits=hits, stop_reason=reason,
