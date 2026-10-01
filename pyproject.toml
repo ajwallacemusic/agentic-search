@@ -1,6 +1,6 @@
 [project]
 name = "agentic-search"
-version = "0.2.0"
+version = "0.2.1"
 description = "Agentic search harness: plan, execute, analyze, decide over any datastore with swappable models."
 requires-python = ">=3.11"
 dependencies = [
