@@ -488,3 +488,27 @@ async def test_snapshot_rationale_is_scrubbed(docs_backend):
     [snap] = [e for e in events if isinstance(e, ResultsUpdated)]
     assert snap.hits and all(s.judged and s.rationale for s in snap.hits)
     assert all("sk-why-5151" not in s.rationale for s in snap.hits)
+
+
+async def test_final_result_rationale_is_scrubbed_in_search_and_stream(docs_backend):
+    register_secret("sk-final-6262")
+
+    class LeakyJudge(KeywordJudge):
+        async def judge(self, question, hits):
+            result = await super().judge(question, hits)
+            return result.model_copy(update={"judgments": [
+                j.model_copy(update={"rationale": f"matched via sk-final-6262 ({j.rationale})"})
+                for j in result.judgments]})
+
+    def build():
+        return make(docs_backend, ScriptedDriver([[lex("headache")]]),
+                    analyzer=LeakyJudge(["headache"]))
+
+    result = await build().search("q", mode="retrieval")
+    assert result.hits and all(r.rationale for r in result.hits)
+    assert all("sk-final-6262" not in r.rationale for r in result.hits)
+
+    events = await collect(build().stream("q", mode="retrieval"))
+    finished = events[-1].result
+    assert finished.hits and all(r.rationale for r in finished.hits)
+    assert all("sk-final-6262" not in r.rationale for r in finished.hits)

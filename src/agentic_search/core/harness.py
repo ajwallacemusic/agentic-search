@@ -478,7 +478,8 @@ class Harness:
         else:
             ranked = state.pool.ranked(w)
         hits = [RankedHit(hit=c.hit, score=round(s, 6), p_relevant=c.p_relevant,
-                          rationale=c.rationale, judged=c.judged) for c, s in ranked[:top_k]]
+                          rationale=scrub(c.rationale) if c.rationale else None,
+                          judged=c.judged) for c, s in ranked[:top_k]]
         state.trace.add("finalize", state.turn, stop_reason=reason.value, n_hits=len(hits),
                         pool_size=len(state.pool))
         return SearchResult(question=state.question, hits=hits, stop_reason=reason,
