@@ -1,0 +1,11 @@
+{"_id": "hero", "text": "Did last month's latency spike come from the new reranker, and is it fixed?"}
+{"_id": "reranker-author", "text": "Who authored the reranker v2 rollout PR?"}
+{"_id": "eu-slowdown", "text": "What caused the slow search pages for EU shoppers in August?"}
+{"_id": "apple-pay", "text": "When was the Apple Pay button turned on in web checkout?"}
+{"_id": "key-rotation", "text": "What are the steps for rotating the auth-gateway signing key?"}
+{"_id": "checkout-errors", "text": "Which deploy caused the checkout order errors in early October, and what fixed it?"}
+{"_id": "catalog-lag", "text": "Was the catalog indexing lag in July caused by a deploy, and when did it recover?"}
+{"_id": "carousel-reviewers", "text": "Who reviewed the change that broke the homepage recommendation carousel?"}
+{"_id": "login-outage", "text": "What triggered the August login outage, and which change stops it happening again?"}
+{"_id": "latency-fix-release", "text": "Which search-api release shipped the fix for the September latency incident?"}
+{"_id": "checkout-recovery", "text": "Did checkout-api meet its error-rate SLO in the week the tax client fix merged?"}

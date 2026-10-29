@@ -1,0 +1,139 @@
+{"_id": "INC-4821", "title": "search-api p95 elevated across all regions", "text": "Opened by on-call (Priya Raman) at 09:12 UTC after the SLO burn alert fired. search-api p95 latency climbed from ~180 ms to ~640 ms starting early Sept 14 and is holding there. p50 is only slightly up. Error rate is flat, so requests succeed but slowly. CPU on the search-api pods is up ~35%. Checked the CDN and the edge cache: both look normal. No config pushes in the last 12 hours. Mitigation so far: scaled search-api from 24 to 36 pods, which took p95 down to ~520 ms but did not clear it. Root cause: not yet identified. Leaving open for the search team to investigate on Monday. Customer impact: slower search results pages, some timeouts on the mobile app's type-ahead."}
+{"_id": "INC-4710", "title": "Search results slow for EU shoppers", "text": "Customers in the EU reported slow search pages from 14:00 UTC. search-api p95 latency rose to ~900 ms for EU traffic only. Traced to a CDN configuration change that removed the regional cache rule for /search, so every request went to origin. Rolled back the CDN change at 15:40 UTC and p95 returned to normal within 10 minutes. Root cause: CDN config change (change ticket CHG-2231). Follow-up: add the cache rule to the CDN config tests."}
+{"_id": "INC-4902", "title": "checkout-api 5xx errors on order submit", "text": "From 10:20 UTC about 4% of order submits return HTTP 502 from checkout-api. Retries usually succeed. The errors come from the tax calculation step, which times out after 2 s. The tax provider's status page shows no problems. Mitigated by raising the tax timeout to 5 s at 11:05; errors dropped to 1%. Root cause not found yet, handing to the payments team."}
+{"_id": "INC-4598", "title": "catalog-svc indexing lag", "text": "New and updated products take up to 3 hours to appear in search, normally under 10 minutes. The catalog-svc indexing queue has 1.2M messages backed up. Workers are healthy but each batch is slow. Added 8 more workers as a stopgap. Cause under investigation."}
+{"_id": "INC-4877", "title": "Homepage recommendation carousel empty", "text": "The 'Picked for you' carousel on the homepage renders empty for logged-in users since about 08:00 UTC. recs-api returns 200 with an empty list. Logged-out users still see the popular-items fallback. Revenue from the carousel is down ~60% today."}
+{"_id": "INC-4655", "title": "Login failures on web and app", "text": "All logins failed between 13:02 and 13:48 UTC with 'invalid token signature'. auth-gateway rejected tokens signed with the new key because the new public key had not reached the verifier pods. Recovered by following the certificate rotation runbook (re-publish the JWKS, restart verifiers). Root cause: the key rotation was deployed before the JWKS publish step."}
+{"_id": "INC-4836", "title": "Type-ahead suggestions out of date", "text": "Search type-ahead still suggests products that were removed from the catalog last week. The suggestion index rebuild job on search-api has been failing quietly since Sept 19 because its service account lost read access to the catalog bucket. Access restored and rebuild re-run."}
+{"_id": "INC-4561", "title": "Image thumbnails missing on PDP", "text": "Product detail pages showed grey boxes instead of thumbnails for about 20 minutes. The image resizer ran out of disk. Cleared the temp folder and added a disk alert."}
+{"_id": "INC-4572", "title": "Promo codes rejected at checkout", "text": "Codes from the summer email campaign were rejected as expired. The campaign was created with the wrong end date. Marketing fixed the date; no code change."}
+{"_id": "INC-4584", "title": "Order confirmation emails delayed", "text": "Confirmation emails arrived up to 2 hours late. The email vendor throttled us after a bounce spike. Vendor lifted the limit."}
+{"_id": "INC-4607", "title": "Store locator map blank in Safari", "text": "The store locator showed a blank map in Safari 18 after a maps SDK update. Pinned the SDK to the previous version."}
+{"_id": "INC-4623", "title": "Inventory counts wrong for two warehouses", "text": "Stock levels for the Reno and Dayton warehouses were doubled for 3 hours after a sync job ran twice. De-duplicated the sync records."}
+{"_id": "INC-4639", "title": "recs-api slow responses during sale", "text": "recs-api p95 latency reached 1.4 s during the flash sale start. Feature store reads were the bottleneck. Added a read replica."}
+{"_id": "INC-4668", "title": "Gift card balance check failing", "text": "Balance checks returned errors for 15 minutes due to an expired TLS certificate on the gift card provider connection. Renewed the certificate."}
+{"_id": "INC-4681", "title": "Duplicate push notifications", "text": "Some app users got the same push notification three times. A retry loop in notify-svc did not check for success. Fixed the retry check."}
+{"_id": "INC-4694", "title": "Search filters missing for Home category", "text": "Filters for the Home category disappeared after a taxonomy import dropped the facet config. Re-imported the facet config."}
+{"_id": "INC-4733", "title": "Cart totals off by tax rounding", "text": "Some carts showed totals one cent higher than the receipt. Rounding was applied per line instead of per order. Fixed the rounding order."}
+{"_id": "INC-4749", "title": "Admin portal login loop", "text": "Store managers could not log in to the admin portal; the page reloaded in a loop. A cookie SameSite setting changed in auth-gateway. Reverted the setting."}
+{"_id": "INC-4762", "title": "Payment provider outage", "text": "The card payment provider had an outage for 50 minutes. checkout-api p95 latency spiked and many orders failed. Switched to the backup provider after 20 minutes."}
+{"_id": "INC-4790", "title": "Wishlist sync failing on Android", "text": "Android app users could not sync wishlists. A required API field was renamed. Added the old field name back."}
+{"_id": "INC-4805", "title": "Catalog bucket permission audit", "text": "Security audit found two service accounts with write access to the catalog bucket that only need read access. Removed the extra access."}
+{"_id": "INC-4851", "title": "Recommendations email links broken", "text": "Links in the weekly recommendations email pointed to a staging host. Template variable fixed and email re-sent."}
+{"_id": "INC-4889", "title": "Store pickup slots not showing", "text": "Customers could not pick a pickup slot for stores in Texas. A timezone bug in the slot service. Fixed and backfilled."}
+{"_id": "INC-4915", "title": "auth-gateway elevated latency", "text": "auth-gateway p95 latency doubled to 220 ms for an hour because of a noisy neighbour on the shared Redis. Moved session reads to the dedicated cluster."}
+{"_id": "INC-4927", "title": "Size guide pages 404", "text": "Size guide links returned 404 after the CMS migration. Redirects added."}
+{"_id": "INC-4940", "title": "Returns label generation failing", "text": "Return labels failed to generate for Canadian addresses. The carrier changed its postal code format check. Updated the formatter."}
+{"_id": "DEP-0913-07", "title": "search-api v4.12", "text": "Rolled out search-api v4.12 to production (canary 10% at 16:05, full at 17:30 UTC). Changes: cross-encoder ranking now serves all search traffic, reranker v2 flag default on (PR 1187); bumps the protobuf library; drops the unused legacy facets endpoint. Canary checks passed on error rate. Rollback plan: previous image v4.11.3."}
+{"_id": "DEP-0913-03", "title": "search-api v4.11.3", "text": "Patch release of search-api. Fixes the facet count for out-of-stock filters (PR 1192). No config changes."}
+{"_id": "DEP-0913-09", "title": "search-api feature flag: holiday_banner", "text": "Flag-only change on search-api: turned on the holiday_banner flag for 5% of users. No code deploy. Owner: merchandising team."}
+{"_id": "DEP-0914-02", "title": "search-api pod autoscaling limits", "text": "Raised the search-api horizontal pod autoscaler max from 24 to 40 pods. Infra-only change, no new image."}
+{"_id": "DEP-1005-02", "title": "checkout-api v7.3", "text": "Rolled out checkout-api v7.3. Switches tax calculation to the new tax service client with connection pooling (PR 1221)."}
+{"_id": "DEP-1008-04", "title": "checkout-api v7.3.1", "text": "Patch release of checkout-api with PR 1226."}
+{"_id": "DEP-0715-02", "title": "catalog-svc v2.8", "text": "Rolled out catalog-svc v2.8. New bulk indexer that writes to search in batches of 5000 instead of 500 (PR 1101)."}
+{"_id": "DEP-0928-03", "title": "recs-api v3.4", "text": "Rolled out recs-api v3.4. Moves the personalised model to the new feature store schema (PR 1209)."}
+{"_id": "DEP-0807-01", "title": "auth-gateway signing key rotation", "text": "Rotated the auth-gateway JWT signing key as part of the quarterly rotation. Config-only deploy."}
+{"_id": "DEP-0918-05", "title": "search-api v4.12.2", "text": "Rolled out search-api v4.12.2 (PR 1203). Canary at 13:10 UTC, full at 14:25 UTC."}
+{"_id": "DEP-0902-04", "title": "checkout-api v7.1", "text": "Rolled out checkout-api v7.1. Enables the Apple Pay button on web checkout for all users (PR 1150)."}
+{"_id": "DEP-0716-01", "title": "search-api reranker v1 freshness feature", "text": "Reranker v1 gets a freshness feature so new arrivals rank higher. Reranker v1 still on 10% of traffic."}
+{"_id": "DEP-0805-02", "title": "search-api reranker v2 shadow mode", "text": "Starts reranker v2 in shadow mode: reranker v2 scores are logged, reranker v1 still ranks results."}
+{"_id": "DEP-0826-01", "title": "reranker v2 experiment at 1%", "text": "Flag change: reranker v2 serves 1% of search traffic. Reranker v1 serves the rest."}
+{"_id": "DEP-0901-02", "title": "reranker v2 experiment at 5%", "text": "Flag change: reranker v2 experiment raised to 5% of search traffic."}
+{"_id": "DEP-0905-03", "title": "reranker v2 batching config", "text": "search-api v4.11.1: reranker v2 batch size is now configurable (PR 1171). Reranker v2 still at 5%."}
+{"_id": "DEP-0908-01", "title": "GPU node pool for reranker v2", "text": "Infra: dedicated GPU node pool for reranker v2 inference, 6 nodes."}
+{"_id": "DEP-1002-03", "title": "reranker v2 Spanish model at 50%", "text": "Flag change: the reranker v2 Spanish model serves 50% of Mexico site traffic."}
+{"_id": "DEP-1010-01", "title": "reranker v2 October model refresh", "text": "search-api v4.13.1: retrained reranker v2 weights on September click data (PR 1228)."}
+{"_id": "DEP-0701-01", "title": "web-frontend 2026.27", "text": "Weekly web release. Header redesign, footer links."}
+{"_id": "DEP-0702-03", "title": "search-api v4.9", "text": "Adds synonyms for seasonal terms. Upgrades the BM25 index library."}
+{"_id": "DEP-0708-02", "title": "notify-svc v1.14", "text": "Switches email templates to the new brand fonts."}
+{"_id": "DEP-0709-01", "title": "checkout-api v6.8", "text": "Adds address autocomplete on checkout."}
+{"_id": "DEP-0714-03", "title": "inventory-svc v3.2", "text": "Faster warehouse sync with change streams."}
+{"_id": "DEP-0721-02", "title": "media-svc v2.0", "text": "New image resizer with WebP output."}
+{"_id": "DEP-0723-01", "title": "search-api v4.10", "text": "Adds the 'new arrivals' sort option."}
+{"_id": "DEP-0728-04", "title": "catalog-svc v2.8.1", "text": "Bulk indexer batch size made configurable; set to 1000."}
+{"_id": "DEP-0730-02", "title": "mobile-api v5.6", "text": "Adds wishlist sharing endpoints."}
+{"_id": "DEP-0804-01", "title": "recs-api v3.1", "text": "Adds a read replica for feature store reads."}
+{"_id": "DEP-0805-03", "title": "web-frontend 2026.32", "text": "Weekly web release. New product badges."}
+{"_id": "DEP-0811-02", "title": "auth-gateway v5.10", "text": "Publishes the JWKS before activating a new signing key."}
+{"_id": "DEP-0813-01", "title": "search-api v4.11", "text": "Spelling correction for queries with one typo."}
+{"_id": "DEP-0817-04", "title": "notify-svc v1.15", "text": "Retry loop checks delivery status before resending."}
+{"_id": "DEP-0819-02", "title": "catalog-svc v2.9", "text": "Taxonomy import keeps facet config."}
+{"_id": "DEP-0820-05", "title": "cdn config: search cache rules", "text": "Consolidated CDN cache rules for /search and /browse."}
+{"_id": "DEP-0821-07", "title": "cdn config rollback", "text": "Rolled back the consolidated CDN cache rules (CHG-2231)."}
+{"_id": "DEP-0825-01", "title": "checkout-api v6.9", "text": "Per-order tax rounding."}
+{"_id": "DEP-0827-02", "title": "mobile-api v5.7", "text": "Renames wishlist field 'items' to 'entries'."}
+{"_id": "DEP-0829-03", "title": "auth-gateway v5.11", "text": "Cookie SameSite set to Strict for admin portal."}
+{"_id": "DEP-0831-01", "title": "auth-gateway v5.11.1", "text": "Reverts the admin cookie SameSite change."}
+{"_id": "DEP-0903-02", "title": "checkout-api backup payment provider", "text": "Config change: backup card provider is now automatic failover."}
+{"_id": "DEP-0904-01", "title": "web-frontend 2026.36", "text": "Weekly web release. Store locator fixes."}
+{"_id": "DEP-0909-03", "title": "mobile-api v5.7.1", "text": "Accepts both 'items' and 'entries' for wishlists."}
+{"_id": "DEP-0910-02", "title": "search-api v4.11.2", "text": "Logging changes: structured query logs."}
+{"_id": "DEP-0911-01", "title": "inventory-svc v3.3", "text": "Idempotent warehouse sync."}
+{"_id": "DEP-0915-04", "title": "recs-api v3.3", "text": "Homepage carousel A/B test framework."}
+{"_id": "DEP-0916-02", "title": "web-frontend 2026.38", "text": "Weekly web release. Search page skeleton loaders."}
+{"_id": "DEP-0917-01", "title": "notify-svc v1.16", "text": "Weekly recommendations email template v2."}
+{"_id": "DEP-0922-03", "title": "search-api suggestion job permissions", "text": "Restored catalog bucket read access for the suggestion index job."}
+{"_id": "DEP-0923-02", "title": "catalog-svc v2.10", "text": "Product variant grouping."}
+{"_id": "DEP-0925-01", "title": "notify-svc v1.16.1", "text": "Fixes email link host variable."}
+{"_id": "DEP-0929-06", "title": "recs-api v3.4.1", "text": "Patch release of recs-api with PR 1212."}
+{"_id": "DEP-0930-02", "title": "search-api v4.13", "text": "Reranker v2 Spanish model for the Mexico site."}
+{"_id": "DEP-1001-01", "title": "fulfillment-svc v4.4", "text": "Pickup slots for new Texas stores."}
+{"_id": "DEP-1003-02", "title": "fulfillment-svc v4.4.1", "text": "Pickup slot timezone fix."}
+{"_id": "DEP-1007-01", "title": "web-frontend 2026.41", "text": "Weekly web release. Checkout progress bar."}
+{"_id": "DEP-1009-03", "title": "auth-gateway session store move", "text": "Session reads moved to the dedicated Redis cluster."}
+{"_id": "DEP-1012-02", "title": "web-frontend CMS redirects", "text": "Redirects for size guide pages."}
+{"_id": "DEP-1014-01", "title": "search-api v4.14", "text": "Query understanding for colour terms."}
+{"_id": "DEP-1015-04", "title": "inventory-svc v3.4", "text": "Low stock alerts for store managers."}
+{"_id": "DEP-1016-02", "title": "mobile-api v5.8", "text": "Order tracking push notifications."}
+{"_id": "DEP-1019-01", "title": "fulfillment-svc v4.5", "text": "Canadian postal code formatter."}
+{"_id": "DEP-1020-03", "title": "checkout-api v7.4", "text": "Saved cards for guest checkout."}
+{"_id": "DEP-1021-02", "title": "recs-api v3.5", "text": "'Complete the look' recommendations on PDP."}
+{"_id": "DEP-1022-01", "title": "media-svc v2.1", "text": "AVIF image output for supported browsers."}
+{"_id": "PR-1187", "title": "Roll out reranker v2 to all search traffic", "text": "This turns on reranker v2 (the cross-encoder model) for 100% of search requests, up from the 5% experiment. Offline NDCG@10 is +4.1% over v1. Batch size is set to 64 to keep GPU utilisation high. Rollout is behind the reranker_v2 flag so we can turn it off. Reviewers: @lortiz @pramam."}
+{"_id": "PR-1203", "title": "Smaller inference batches and a candidate embedding cache for ranking", "text": "Fixes INC-4821, a regression from PR 1187. Reranker v2 with batch size 64 queued requests behind each other under peak load, which pushed tail latency up. This PR rolls the batch size back to 16 and adds an LRU cache for candidate embeddings so repeat queries skip the encoder. Load test: p95 back to 175 ms at 2x peak traffic. Deployed with search-api v4.12.2."}
+{"_id": "PR-1042", "title": "Add reranker v1 behind experiment flag", "text": "First reranker for search results: a small gradient-boosted model over BM25 features. Runs on CPU. Shipped to 10% of traffic as an experiment. p95 latency impact in the experiment was +6 ms."}
+{"_id": "PR-1221", "title": "Use the new tax service client in checkout", "text": "Replaces the old HTTP tax client with the new pooled client. Pool size 8 per pod. Timeout stays at 2 s."}
+{"_id": "PR-1226", "title": "Raise tax client pool size and add retry", "text": "Fixes INC-4902. The new tax client's pool of 8 connections was exhausted at peak, so requests waited and hit the 2 s timeout. Pool size is now 32 and one retry is added for connection timeouts."}
+{"_id": "PR-1101", "title": "Bulk indexer for catalog updates", "text": "Writes catalog changes to the search index in batches of 5000 to cut indexing cost."}
+{"_id": "PR-1209", "title": "Move personalised recs to feature store v2 schema", "text": "Reads user features from the v2 schema. Reviewed by Ama Mensah and Jin Park. Old schema readers removed."}
+{"_id": "PR-1212", "title": "Fix empty personalised carousel", "text": "Fixes INC-4877. Feature store v2 uses user_key instead of user_id, so every lookup missed and the model returned nothing. Map the key correctly and fall back to popular items when features are missing."}
+{"_id": "PR-1150", "title": "Apple Pay on web checkout", "text": "Adds the Apple Pay button to web checkout for Safari users."}
+{"_id": "PR-1192", "title": "Fix facet counts for out-of-stock filter", "text": "Facet counts included out-of-stock items when the in-stock filter was on."}
+{"_id": "PR-1178", "title": "Reranker v2 shadow-mode metrics", "text": "Logs reranker v2 scores next to v1 in shadow mode so we can compare offline. No user impact."}
+{"_id": "PR-1215", "title": "Reranker v2 Spanish model", "text": "Adds a Spanish cross-encoder for reranker v2 on the Mexico site. Batch size 16."}
+{"_id": "PR-1099", "title": "Reranker v1: freshness feature", "text": "Adds days-since-launch as a reranker v1 feature."}
+{"_id": "PR-1165", "title": "Reranker v2 experiment at 5%", "text": "Raises the reranker v2 experiment from 1% to 5%. Experiment p95 latency +9 ms at 5%."}
+{"_id": "PR-1171", "title": "Configurable reranker v2 batch size", "text": "Reranker v2 batch size becomes a config value, default 32. Larger batches use the GPU better."}
+{"_id": "PR-1228", "title": "Reranker v2 October model refresh", "text": "Retrains reranker v2 on September click data. Offline NDCG@10 +0.8%."}
+{"_id": "PR-1090", "title": "Seasonal synonyms for search", "text": "Adds a synonyms file for seasonal terms."}
+{"_id": "PR-1110", "title": "Configurable bulk indexer batch size", "text": "Batch size for the catalog bulk indexer is now a config value, default 1000. Large batches made each write slow."}
+{"_id": "PR-1120", "title": "Publish JWKS before key activation", "text": "Fixes INC-4655. The rotation job now publishes the new public key and waits for all verifiers before signing with it."}
+{"_id": "PR-1124", "title": "One-typo spelling correction", "text": "Corrects queries with one typo using the product title dictionary."}
+{"_id": "PR-1133", "title": "Per-order tax rounding", "text": "Fixes INC-4733."}
+{"_id": "PR-1135", "title": "Rename wishlist items field", "text": "Renames 'items' to 'entries'."}
+{"_id": "PR-1161", "title": "Structured query logs", "text": "Logs search queries as JSON for analytics."}
+{"_id": "PR-1182", "title": "Carousel A/B test framework", "text": "Lets the homepage carousel run experiments."}
+{"_id": "PR-1230", "title": "Colour terms in query understanding", "text": "Maps colour words to the colour facet."}
+{"_id": "PR-1236", "title": "Canadian postal code formatter", "text": "Fixes INC-4940."}
+{"_id": "PR-1238", "title": "Saved cards for guest checkout", "text": "Guests can save a card with a one-time code."}
+{"_id": "DASH-W37-search", "title": "search-api weekly SLO report, week 37", "text": "Week of Sept 7\u201313. p50 92 ms, p95 181 ms, p99 410 ms. Availability 99.97%. Request volume up 3% week over week. All SLOs met."}
+{"_id": "DASH-W38-search", "title": "search-api weekly SLO report, week 38", "text": "Week of Sept 14\u201320. p95 was 610 ms Monday to Thursday morning, above the 300 ms SLO; from Sept 18 afternoon p95 dropped to 176 ms and stayed at baseline through Sunday. p50 98 ms for the week. Availability 99.95%. Error budget: 38% used this week."}
+{"_id": "DASH-W36-checkout", "title": "checkout-api weekly SLO report, week 36", "text": "Week of Aug 31\u2013Sept 6. p95 latency spiked to 1.2 s on Sept 2 during the payment provider outage, then returned to 240 ms. Availability 99.71%, below the 99.9% SLO."}
+{"_id": "DASH-W35-search", "title": "search-api weekly SLO report, week 35", "text": "Week of Aug 24\u201330. p50 90 ms, p95 178 ms, p99 405 ms. Availability 99.98%. All SLOs met."}
+{"_id": "DASH-W34-search", "title": "search-api weekly SLO report, week 34", "text": "Week of Aug 17\u201323. p95 spiked to 880 ms on Aug 21 for EU traffic, otherwise 180 ms. Availability 99.93%. Error budget: 22% used."}
+{"_id": "DASH-W39-search", "title": "search-api weekly SLO report, week 39", "text": "Week of Sept 21\u201327. p50 95 ms, p95 179 ms, p99 400 ms. Availability 99.97%. All SLOs met. Type-ahead suggestion freshness alert fired on Sept 22."}
+{"_id": "DASH-W40-search", "title": "search-api weekly SLO report, week 40", "text": "Week of Sept 28\u2013Oct 4. p50 94 ms, p95 183 ms, p99 415 ms. Availability 99.98%."}
+{"_id": "DASH-W41-checkout", "title": "checkout-api weekly SLO report, week 41", "text": "Week of Oct 5\u201311. Error rate 2.9% on Oct 6\u20137, above the 0.5% SLO; from Oct 8 the error rate was 0.1%. p95 260 ms. Availability 99.62%."}
+{"_id": "DASH-W29-catalog", "title": "catalog-svc weekly report, week 29", "text": "Week of Jul 13\u201319. Indexing freshness p95 2.8 hours from Jul 15, SLO is 15 minutes. Queue depth peaked at 1.2M."}
+{"_id": "DASH-W31-catalog", "title": "catalog-svc weekly report, week 31", "text": "Week of Jul 27\u2013Aug 2. Indexing freshness p95 6 minutes from Jul 28. Queue depth under 5k. SLO met."}
+{"_id": "DASH-W40-recs", "title": "recs-api weekly report, week 40", "text": "Week of Sept 28\u2013Oct 4. Personalised carousel fill rate 31% on Sept 29, 99% from Sept 30. p95 latency 140 ms."}
+{"_id": "RB-search-latency", "title": "Runbook: search-api high latency", "text": "Use when the search-api p95 latency alert fires. 1. Check the CDN cache hit rate dashboard. 2. Check pod CPU and scale out if above 70%. 3. Check recent deploys and roll back the last one if the timing matches. 4. If latency is still high, page the search team."}
+{"_id": "RB-rollback", "title": "Runbook: rolling back a service deploy", "text": "Find the previous good version in the deploy log. Run `deployctl rollback <service> <version>`. Watch error rate and latency for 15 minutes. Record the rollback in the incident ticket."}
+{"_id": "RB-auth-certs", "title": "Runbook: auth-gateway signing key and certificate rotation", "text": "Quarterly. 1. Generate the new key pair. 2. Publish the new public key to the JWKS endpoint. 3. Wait until every verifier pod reports the new key id. 4. Switch signing to the new key. If logins fail with 'invalid token signature', re-publish the JWKS and restart the verifier pods."}
+{"_id": "RB-checkout-errors", "title": "Runbook: checkout-api error spike", "text": "Check the payment and tax provider status pages. Check recent checkout-api deploys. Raise downstream timeouts only as a stopgap. Roll back if a deploy matches the start time."}
+{"_id": "RB-indexing-lag", "title": "Runbook: catalog indexing lag", "text": "Check the indexing queue depth. Add workers if the queue grows. Check batch size and write latency to the search index. Large batches can slow each write."}
+{"_id": "RB-gpu-capacity", "title": "Runbook: GPU node capacity for model serving", "text": "Model-serving pods (rerankers, recommenders) run on the GPU node pool. If queue time rises, check GPU utilisation and batch sizes. Add nodes through the capacity request form; it takes about a day."}
+{"_id": "RB-cdn-cache", "title": "Runbook: CDN cache misses", "text": "If origin traffic jumps, check the CDN cache hit rate by path. Compare cache rules with the last known good config and roll back the CDN config change."}
+{"_id": "RB-slo-reports", "title": "How to read weekly SLO reports", "text": "Each service gets a weekly report with p50, p95 and p99 latency, availability and error budget. A week that breaches the latency SLO needs an incident link in the review."}
+{"_id": "RB-feature-flags", "title": "Runbook: turning off a feature flag", "text": "Use flagctl to turn a flag off for all users. Flags take effect within a minute. Record the change in the deploy log."}
+{"_id": "RB-oncall", "title": "On-call handbook: first 15 minutes", "text": "Acknowledge the page. Open an incident ticket. Check dashboards, recent deploys and provider status. Mitigate first, find the root cause later."}
