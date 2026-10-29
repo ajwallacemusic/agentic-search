@@ -92,8 +92,13 @@ is set (the viewer itself runs the `ignite` profile).
 | multi-hop (7) | 0.690 | 0.905 | ~2.3× |
 | single-hop (4) | 1.000 | 1.000 | ~2.3× |
 
-Hero question, round 7 of `tuning-log.md`: harness found all four hops in 4 of 5 runs in
-15–22 s for about $0.027; retrieval missed at least one hop in 5 of 5 for about $0.009.
+Hero question, round 8 of `tuning-log.md`: harness found all four hops in 4 of 5 runs in
+13–16 s for about $0.026; retrieval missed at least one hop in 5 of 5 for about $0.009.
+
+Say on the slide: both modes run with `max_limit: 8` and `max_calls_per_turn: 6`
+(`config.yaml`). Small result pages make a single pass miss more than the loop does. On
+single-hop questions recall is equal, but the harness ranked one answer second (nDCG 0.908 vs
+1.000) at about 2.3× the cost.
 
 ## Rehearsal checklist
 
@@ -109,11 +114,12 @@ If a live run stalls past 60 seconds or shows **✗ Search failed**: press **Swi
 (or go to the replay tab) and say so plainly: "the live API is slow, here is the same run from
 this morning."
 
-Backup runs in `runs/` (round 7 settings):
+Backup runs in `runs/` (round 8 settings):
 
-- `20261029-114713-hero-*`: harness 4/4 in 14.8 s, retrieval 1/4.
-- `20261029-114741-hero-*`: harness 4/4 in 17.4 s, retrieval 2/4.
+- `20261029-115838-hero-*`: harness 4/4 in 13.5 s, retrieval 1/4.
+- `20261029-120008-hero-*`: harness 4/4 in 15.5 s, retrieval 2/4.
 
 Known risk: Vertex latency spikes. A planner call that times out three times in a row ends the
 harness run with `APITimeoutError`. It happened in 1 of 5 runs on Gemini 3.8 Flash and 0 of 5 on
-3.5 Flash.
+3.5 Flash. Since the review fix, one model call waits at most about 30 s (15 s, one retry),
+and the viewer shows "⚠ Past 60 s. Switch to replay?" in a live column that runs long.

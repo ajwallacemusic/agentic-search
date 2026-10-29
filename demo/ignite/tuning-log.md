@@ -12,6 +12,7 @@ misses at least one gold doc in most runs.
 | 5 | planner 3.8-flash, judge 3.5-flash-lite | 3/4, 2/4, 2/4, 2/4, 2/4 | 4/4, 3/4, failed, 4/4, 3/4 | 20–67 s | The 3/4 runs found the *fix* deploy (DEP-0918-05), not the *cause*: PR-1203 did not name the PR that caused the regression. One planner call timed out 4× (fatal). |
 | 6 | PR-1203 says "a regression from PR 1187" (new check rule); request timeout 15 s, 2 retries | 2/4, 2/4, 1/4, 2/4, 2/4 | 4/4, 4/4, 4/4, failed, 4/4 | 39.4, 42.9, 40.6, —, 22.3 s | **Passes.** The failure was three 15 s Vertex stalls in a row on one planner call: `APITimeoutError`. That is what replay is for. |
 | 7 | planner gemini-3.5-flash (judge unchanged). A latency probe of 8 parallel planning calls: 3.8-flash 4–60 s, 3.7-flash 3 s–timeout, 3.5-flash 2.7–3.9 s | 3/4, 2/4, 1/4, 2/4, 2/4 | 3/4, 4/4, 4/4, 4/4, 4/4 | 16.1, 22.3, 14.8, 17.4, 14.8 s | **Passes, and no stalls.** Costs more per run (~$0.027 vs ~$0.015) because 3.5-flash is priced higher than the 3.8 introductory rate. |
+| 8 | after review: source descriptions give the year (2026); 1 retry per call; `call_timeout` and `decider_timeout` 15 s | 1/4, 2/4, 2/4, 2/4, 2/4 | 4/4, 2/4, 4/4, 4/4, 4/4 | 13.5, 34.0, 15.5, 16.0, 16.2 s | **Passes.** Round 7's backup had filtered incidents by 2020 dates; round 8's date filters all use 2026. |
 
 Round 6's live viewer check also failed twice on 3.8-flash planner timeouts with both modes running at once; that is why round 7 changed the planner.
 
@@ -26,7 +27,7 @@ Round 6's live viewer check also failed twice on 3.8-flash planner timeouts with
 
 Same answers; the harness costs about twice as much and takes a second turn to decide it is done.
 
-## Backup runs kept in `runs/` (round 7 settings)
+## Backup runs kept in `runs/` (round 8 settings)
 
-- `20261029-114713-hero-*`: harness 4/4 in 14.8 s, retrieval 1/4.
-- `20261029-114741-hero-*`: harness 4/4 in 17.4 s, retrieval 2/4.
+- `20261029-115838-hero-*`: harness 4/4 in 13.5 s, retrieval 1/4.
+- `20261029-120008-hero-*`: harness 4/4 in 15.5 s, retrieval 2/4.
