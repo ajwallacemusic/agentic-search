@@ -89,7 +89,7 @@ is set (the viewer itself runs the `ignite` profile).
 
 | | retrieval recall@10 | harness recall@10 | harness cost vs retrieval |
 |---|---|---|---|
-| multi-hop (7) | 0.690 | 0.905 | ~2.3× |
+| multi-hop (7) | 0.738 | 0.952 | ~2.3× |
 | single-hop (4) | 1.000 | 1.000 | ~2.3× |
 
 Hero question, round 8 of `tuning-log.md`: harness found all four hops in 4 of 5 runs in
@@ -97,8 +97,8 @@ Hero question, round 8 of `tuning-log.md`: harness found all four hops in 4 of 5
 
 Say on the slide: both modes run with `max_limit: 8` and `max_calls_per_turn: 6`
 (`config.yaml`). Small result pages make a single pass miss more than the loop does. On
-single-hop questions recall is equal, but the harness ranked one answer second (nDCG 0.908 vs
-1.000) at about 2.3× the cost.
+single-hop questions both modes score the same (nDCG@10 1.000) and the harness costs about 2.3×
+as much.
 
 ## Rehearsal checklist
 
