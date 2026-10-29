@@ -1,0 +1,11 @@
+# Ignite demo harness config. `*_env` keys read environment variables (library convention).
+# Price: Vertex (Agent Platform) pricing page, looked up 2026-10-29. Introductory global rate,
+# valid to 2026-12-31; from 2027-01-01 it is [1.5, 7.5].
+driver: {type: vertex, model: gemini-3.8-flash, project_env: IGNITE_GCP_PROJECT, location: global,
+         price_per_mtok: [0.75, 3.75]}
+# driver: {type: anthropic, model: claude-sonnet-5-5, price_per_mtok: [3.0, 15.0]}
+embedder: {type: sentence_transformers, model: BAAI/bge-small-en-v1.5}
+fallback_embedder: {type: hash}
+budget: {max_turns: 4, max_tool_calls: 24, max_seconds: 60, max_cost_usd: 0.50}
+typesafe: {type: typesafe, api_key_env: TYPESAFE_API_KEY}
+max_calls_per_turn: 8
