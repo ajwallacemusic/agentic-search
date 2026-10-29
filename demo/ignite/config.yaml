@@ -1,15 +1,14 @@
 # Ignite demo harness config. `*_env` keys read environment variables (library convention).
-# Price: Vertex (Agent Platform) pricing page, looked up 2026-10-29. Introductory global rate,
-# valid to 2026-12-31; from 2027-01-01 it is [1.5, 7.5].
-# gemini-3.8-flash is served on `global` only. reasoning_effort low: judge calls drop from ~10 s
-# to ~6 s with the same judgments ("minimal" is rejected). Calls normally take 2-10 s but
-# sometimes stall for 20-60 s, so a request is cut at 15 s and retried up to twice.
-driver: {type: vertex, model: gemini-3.8-flash, project_env: IGNITE_GCP_PROJECT, location: global,
-         price_per_mtok: [0.75, 3.75], reasoning_effort: low, request_timeout_s: 15,
+# Models and prices: Vertex (Agent Platform) pricing page, global standard rates, looked up
+# 2026-10-29. Planner gemini-3.5-flash ($1.50 / $9.00 per 1M tokens): ~3 s per planning call even
+# with 8 in flight. gemini-3.7/3.8-flash plan as well but stalled 35-60 s on 1 call in 8, which
+# kills a live run. reasoning_effort low ("minimal" is rejected). A stalled request is cut at 15 s
+# and retried up to twice.
+driver: {type: vertex, model: gemini-3.5-flash, project_env: IGNITE_GCP_PROJECT, location: global,
+         price_per_mtok: [1.50, 9.00], reasoning_effort: low, request_timeout_s: 15,
          max_retries: 2}
-# The judge uses a smaller model: gemini-3.8-flash took 6-55 s per judge batch (its latency
-# swings a lot), gemini-3.5-flash-lite ~2.5 s with the same judgments on the hero set. Planning
-# stays on 3.8-flash, which chains hops; flash-lite did not. Both modes use the same pair.
+# Judge gemini-3.5-flash-lite ($0.30 / $2.50): ~2.5 s per 30-hit batch with the same hero
+# judgments as the larger models. Both modes use the same planner and judge.
 judge: {type: vertex, model: gemini-3.5-flash-lite, project_env: IGNITE_GCP_PROJECT,
         location: global, price_per_mtok: [0.30, 2.50], reasoning_effort: low,
         request_timeout_s: 15, max_retries: 2}
