@@ -80,3 +80,55 @@ def test_musique_sample_converts_to_beir(tmp_path):
     path, _ = _musique(tmp_path)
     ds = sample_musique(path, per_hop=1, corpus_size=20).to_beir()
     assert len(ds.corpus) == 20 and len(ds.queries) == 3 and len(ds.qrels) == 3
+
+
+# ---- WANDS ------------------------------------------------------------------------------
+
+from demo.ignite.public.datasets import sample_wands  # noqa: E402
+
+PRODUCT_HEADER = ("product_id\tproduct_name\tproduct_class\tcategory hierarchy\tproduct_description"
+                  "\tproduct_features\trating_count\taverage_rating\treview_count\n")
+
+
+def _wands(tmp_path):
+    d = tmp_path / "wands"
+    d.mkdir()
+    products = [
+        "0\tsolid wood bed\tBeds\tFurniture / Beds\ta sturdy bed\tcolor:brown\t10\t4.5\t8",
+        "1\tvelvet sofa\tSofas\tFurniture / Sofas\t\t\t\t\t",                       # empty fields
+        '2\tglass lamp\tLamps\tLighting / Lamps\t"a lamp\twith a tab"\tsize:small\t3\t4.0\t2',
+        "3\toak table\tTables\tFurniture / Tables\tsolid oak\t\t5\t3.9\t5",
+    ]
+    (d / "product.csv").write_text(PRODUCT_HEADER + "\n".join(products) + "\n")
+    (d / "query.csv").write_text("query_id\tquery\tquery_class\n0\twood bed\tBeds\n"
+                                 "1\tsofa\tSofas\n2\tlamp\tLamps\n3\tnothing exact\tMisc\n")
+    (d / "label.csv").write_text("id\tquery_id\tproduct_id\tlabel\n"
+                                 "0\t0\t0\tExact\n1\t0\t3\tPartial\n2\t0\t1\tIrrelevant\n"
+                                 "3\t1\t1\tExact\n4\t2\t2\tExact\n5\t3\t0\tPartial\n")
+    return d
+
+
+def test_only_queries_with_an_exact_label(tmp_path):
+    s = sample_wands(_wands(tmp_path), n=10)
+    assert set(s.queries) == {"0", "1", "2"}
+    assert s.groups == {"all": sorted(s.queries)}
+
+
+def test_labels_are_graded(tmp_path):
+    s = sample_wands(_wands(tmp_path), n=10)
+    assert s.qrels["0"] == {"wands-0": 2, "wands-3": 1}
+
+
+def test_products_with_empty_fields_load(tmp_path):
+    s = sample_wands(_wands(tmp_path), n=10)
+    docs = {d.doc_id: d for d in s.documents}
+    assert set(docs) == {"wands-0", "wands-1", "wands-2", "wands-3"}
+    assert docs["wands-1"].metadata["product_class"] == "Sofas"
+    assert "rating_count" not in docs["wands-1"].metadata
+    assert docs["wands-0"].metadata["average_rating"] == 4.5
+
+
+def test_wands_sample_is_deterministic(tmp_path):
+    folder = _wands(tmp_path)
+    assert sample_wands(folder, n=2, seed=5).queries == sample_wands(folder, n=2, seed=5).queries
+    assert len(sample_wands(folder, n=2).queries) == 2

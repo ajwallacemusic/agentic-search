@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import random
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -92,3 +94,64 @@ def sample_musique(path: Path, *, per_hop: int = 20, corpus_size: int = 5000,
         name="musique", source="wiki",
         description="Wikipedia paragraphs, one per item: title and text. Field: title.",
         documents=list(docs.values()), queries=queries, qrels=qrels, groups=groups)
+
+
+# ---- WANDS --------------------------------------------------------------------------------
+
+WANDS_GAIN = {"Exact": 2, "Partial": 1}
+
+
+def _tsv(path: Path) -> list[dict[str, str]]:
+    csv.field_size_limit(sys.maxsize)
+    with Path(path).open(encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f, delimiter="\t"))
+
+
+def _number(value: str | None) -> float | int | None:
+    if value is None or not value.strip():
+        return None
+    try:
+        n = float(value)
+    except ValueError:
+        return None
+    return int(n) if n.is_integer() and "." not in value else n
+
+
+def _product_doc(row: dict[str, str]) -> Document:
+    name = (row.get("product_name") or "").strip()
+    klass = (row.get("product_class") or "").strip()
+    category = (row.get("category hierarchy") or "").strip()
+    parts = [name, " · ".join(x for x in (klass, category) if x),
+             (row.get("product_description") or "").strip(),
+             (row.get("product_features") or "").strip()]
+    metadata: dict[str, object] = {"title": name, "product_class": klass, "category": category}
+    for key in ("rating_count", "average_rating"):
+        n = _number(row.get(key))
+        if n is not None:
+            metadata[key] = n
+    return Document(doc_id=f"wands-{row['product_id']}",
+                    content=[TextPart(text="\n\n".join(p for p in parts if p))],
+                    metadata=metadata)
+
+
+def sample_wands(folder: Path, *, n: int = 60, seed: int = 7) -> PublicSample:
+    """`n` queries that have at least one Exact product; the whole catalogue as the corpus;
+    Exact = 2 and Partial = 1 (graded, as WANDS is usually scored)."""
+    folder = Path(folder)
+    labels = _tsv(folder / "label.csv")
+    graded: dict[str, dict[str, int]] = {}
+    for row in labels:
+        gain = WANDS_GAIN.get(row["label"])
+        if gain:
+            graded.setdefault(row["query_id"], {})[f"wands-{row['product_id']}"] = gain
+    with_exact = sorted((q for q, g in graded.items() if 2 in g.values()), key=int)
+    chosen = sorted(random.Random(seed).sample(with_exact, min(n, len(with_exact))), key=int)
+    texts = {r["query_id"]: r["query"] for r in _tsv(folder / "query.csv")}
+    docs = [_product_doc(r) for r in _tsv(folder / "product.csv")]
+    return PublicSample(
+        name="wands", source="products",
+        description=("Wayfair product catalogue, one product per item: name, class, category "
+                     "path, description, features. Fields: title, product_class, category, "
+                     "rating_count, average_rating."),
+        documents=docs, queries={q: texts[q] for q in chosen},
+        qrels={q: graded[q] for q in chosen}, groups={"all": chosen})
