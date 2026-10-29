@@ -3,7 +3,7 @@ import shutil
 from pathlib import Path
 
 from demo.ignite.check_data import check
-from demo.ignite.corpus import DATA_DIR, load_documents
+from demo.ignite.corpus import DATA_DIR, load_documents, load_questions, load_records
 
 
 def _copy_data(tmp_path: Path) -> Path:
@@ -109,3 +109,28 @@ def test_missing_required_metadata_fails(tmp_path):
     data = _copy_data(tmp_path)
     _edit(data, "DEP-0913-07", drop=["service"])
     assert any("service" in p for p in check(data))
+
+
+def test_source_sizes_match_spec():
+    sizes = {s: len(rows) for s, rows in load_records().items()}
+    assert 25 <= sizes["incidents"] <= 35
+    assert 50 <= sizes["deploys"] <= 70
+    assert 20 <= sizes["pull_requests"] <= 30
+    assert 10 <= sizes["dashboards"] <= 14
+    assert 8 <= sizes["runbooks"] <= 12
+
+
+def test_question_mix_matches_spec():
+    qs = [q for q in load_questions().values() if q.id != "hero"]
+    assert 8 <= len(qs) <= 12
+    assert 3 <= sum(q.kind == "single_hop" for q in qs) <= 4
+    assert 5 <= sum(q.kind == "multi_hop" for q in qs) <= 8
+    assert all(len(q.gold) == 1 for q in qs if q.kind == "single_hop")
+    assert all(2 <= len(q.gold) <= 4 for q in qs if q.kind == "multi_hop")
+
+
+def test_check_reports_size_and_mix(tmp_path):
+    data = _copy_data(tmp_path)
+    (data / "runbooks.jsonl").write_text("")
+    problems = check(data)
+    assert any("runbooks" in p and "size" in p for p in problems)

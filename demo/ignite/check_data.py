@@ -23,6 +23,11 @@ REQUIRED = {
 
 HERO_CHAIN = ("INC-4821", "DEP-0913-07", "PR-1203", "DASH-W38-search")
 FIX_DATE = "2026-09-18"
+SIZES = {"incidents": (25, 35), "deploys": (50, 70), "pull_requests": (20, 30),
+         "dashboards": (10, 14), "runbooks": (8, 12)}
+SUPPORTING = (8, 12)
+MIX = {"single_hop": (3, 4), "multi_hop": (5, 8)}
+GOLD_SIZE = {"single_hop": (1, 1), "multi_hop": (2, 4)}
 
 
 def _hero_rules(docs: dict[str, dict], incidents: list[dict]) -> list[str]:
@@ -79,6 +84,31 @@ def _hero_rules(docs: dict[str, dict], incidents: list[dict]) -> list[str]:
     return problems
 
 
+def _valid(q: dict) -> bool:
+    try:
+        Question(**q)
+        return True
+    except ValueError:
+        return False
+
+
+def _mix_rules(questions: list[Question]) -> list[str]:
+    problems: list[str] = []
+    supporting = [q for q in questions if q.id != "hero"]
+    lo, hi = SUPPORTING
+    if not lo <= len(supporting) <= hi:
+        problems.append(f"questions: {len(supporting)} supporting questions, want {lo}-{hi}")
+    for kind, (lo, hi) in MIX.items():
+        n = sum(q.kind == kind for q in supporting)
+        if not lo <= n <= hi:
+            problems.append(f"questions: {n} {kind} questions, want {lo}-{hi}")
+    for q in supporting:
+        lo, hi = GOLD_SIZE[q.kind]
+        if not lo <= len(q.gold) <= hi:
+            problems.append(f"question {q.id!r}: {len(q.gold)} gold ids, want {lo}-{hi}")
+    return problems
+
+
 def check(data_dir: Path = DATA_DIR) -> list[str]:
     """Problems with the corpus; an empty list means it passes."""
     problems: list[str] = []
@@ -111,6 +141,10 @@ def check(data_dir: Path = DATA_DIR) -> list[str]:
             if gold not in docs:
                 problems.append(f"question {question.id!r}: gold id {gold!r} does not exist")
 
+    for source, (lo, hi) in SIZES.items():
+        if not lo <= len(records[source]) <= hi:
+            problems.append(f"{source}: size {len(records[source])} is outside {lo}-{hi}")
+    problems += _mix_rules([Question(**q) for q in raw if _valid(q)])
     problems += _hero_rules(docs, records["incidents"])
     return problems
 
