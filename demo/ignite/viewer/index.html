@@ -189,6 +189,40 @@ function reduce(state, ev) {
       return state;
   }
 }
+const KNOWN_TYPES = new Set(["search_started", "phase_started", "phase_finished", "tool_call_started",
+  "tool_call_finished", "results_updated", "usage_updated", "search_finished", "search_failed"]);
+
+/** Events from a saved run: one JSON event per line. Skips blank, broken and unknown lines. */
+function parseJsonl(text) {
+  const out = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const ev = JSON.parse(line);
+      if (ev && KNOWN_TYPES.has(ev.type)) out.push(ev);
+    } catch (e) { /* a run cut short can end in half a line */ }
+  }
+  return out;
+}
+
+/** Playback offsets: each event's delay from the first, divided by `speed`. */
+function schedule(events, speed) {
+  const t0 = events.length ? events[0].at_ms : 0;
+  return events.map((ev) => ({ delayMs: (ev.at_ms - t0) / speed, ev }));
+}
+
+/** Sort picked files by name: *-retrieval.jsonl, *-harness.jsonl and an optional *.meta.json. */
+function assignFiles(files) {
+  const out = { retrieval: null, harness: null, meta: null };
+  for (const f of files) {
+    if (f.name.endsWith("-retrieval.jsonl")) out.retrieval = f.text;
+    else if (f.name.endsWith("-harness.jsonl")) out.harness = f.text;
+    else if (f.name.endsWith(".meta.json")) {
+      try { out.meta = JSON.parse(f.text); } catch (e) { out.meta = null; }
+    }
+  }
+  return out;
+}
 /* </core> */
 
 const MODES = ["retrieval", "harness"];
@@ -233,7 +267,9 @@ function render(mode) {
     return `<li>${esc(h.doc_id)} <span class="hit-src">${esc(h.source)}${h.title ? " · " + esc(h.title) : ""}</span>${rel}${gold}</li>`;
   }).join("");
   const m = s.metrics;
-  const secs = s.done ? m.seconds : view.started[mode] ? (performance.now() - view.started[mode]) / 1000 : m.seconds;
+  const secs = s.done ? m.seconds
+    : view.replay && player.playing ? player.vt / 1000
+    : view.started[mode] ? (performance.now() - view.started[mode]) / 1000 : m.seconds;
   el.innerHTML = `
     <h2><span>${TITLES[mode]}</span><span class="clock">${secs.toFixed(1)} s</span></h2>
     <div class="phases">${phases}</div>
@@ -329,7 +365,11 @@ function stopLive() {
   live.aborts = [];
 }
 
-// ---- replay mode (filled in by the replay task) -----------------------------
+// ---- replay mode --------------------------------------------------------------
+// A virtual clock (vt, in the runs' own milliseconds) advances at `speed` times real time; each
+// tick applies every event whose offset has passed. Both columns share the clock.
+const player = { runs: null, idx: {}, offsets: {}, vt: 0, playing: false, last: 0, timer: null };
+
 function enterReplay() {
   stopLive();
   clearInterval(view.timer);
@@ -342,6 +382,76 @@ function enterReplay() {
   reset();
 }
 
+async function loadFiles(fileList) {
+  const files = await Promise.all([...fileList].map(async (f) => ({ name: f.name, text: await f.text() })));
+  const got = assignFiles(files);
+  if (!got.retrieval || !got.harness) {
+    banner("Replay needs both files of one run: *-retrieval.jsonl and *-harness.jsonl.");
+    return;
+  }
+  player.runs = { retrieval: parseJsonl(got.retrieval), harness: parseJsonl(got.harness) };
+  view.gold = new Set((got.meta && got.meta.gold) || []);
+  const started = player.runs.harness.find((e) => e.type === "search_started");
+  const qText = (got.meta && got.meta.text) || (started && started.question.content.map((c) => c.text || "").join(" "));
+  $("question").textContent = qText || "";
+  banner(`Replay: a saved run, played back with its original timing.${view.gold.size ? " ★ marks the gold documents." : ""}`);
+  rewind();
+  $("play").disabled = false;
+}
+
+function rewind() {
+  pause();
+  reset();
+  player.vt = 0;
+  for (const mode of MODES) {
+    const evs = player.runs[mode];
+    player.offsets[mode] = schedule(evs, 1);
+    player.idx[mode] = 0;
+    const fin = evs.find((e) => e.type === "search_finished");
+    view.states[mode].notes = fin ? notesFromTrace(fin.result) : {};
+  }
+}
+
+function tick() {
+  const now = performance.now();
+  player.vt += (now - player.last) * Number($("speed").value);
+  player.last = now;
+  let pending = false;
+  for (const mode of MODES) {
+    const offs = player.offsets[mode];
+    while (player.idx[mode] < offs.length && offs[player.idx[mode]].delayMs <= player.vt) {
+      view.states[mode] = reduce(view.states[mode], offs[player.idx[mode]].ev);
+      player.idx[mode] += 1;
+    }
+    if (player.idx[mode] < offs.length) pending = true;
+    render(mode);
+  }
+  if (!pending) { pause(); $("play").textContent = "Replay again"; }
+}
+
+function play() {
+  if (!player.runs) return;
+  const finished = MODES.every((m) => player.idx[m] >= player.offsets[m].length);
+  if (finished) rewind();
+  player.playing = true;
+  player.last = performance.now();
+  clearInterval(player.timer);
+  player.timer = setInterval(tick, 50);
+  $("play").textContent = "Play";
+  $("play").disabled = true;
+  $("pause").disabled = false;
+}
+
+function pause() {
+  player.playing = false;
+  clearInterval(player.timer);
+  $("play").disabled = !player.runs;
+  $("pause").disabled = true;
+}
+
+$("files").addEventListener("change", (e) => loadFiles(e.target.files));
+$("play").addEventListener("click", play);
+$("pause").addEventListener("click", () => { pause(); $("play").textContent = "Resume"; });
 $("run").addEventListener("click", runLive);
 $("switch").addEventListener("click", enterReplay);
 reset();

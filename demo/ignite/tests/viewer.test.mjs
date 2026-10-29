@@ -9,8 +9,8 @@ const html = readFileSync(new URL("../viewer/index.html", import.meta.url), "utf
 const core = html.split("/* <core> */")[1].split("/* </core> */")[0];
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(core + "\n;globalThis.core = { SOURCES, parseSse, initialState, reduce, notesFromTrace };", ctx);
-const { SOURCES, parseSse, initialState, reduce, notesFromTrace } = ctx.core;
+vm.runInContext(core + "\n;globalThis.core = { SOURCES, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles };", ctx);
+const { SOURCES, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles } = ctx.core;
 
 const ev = (type, extra = {}) => ({ type, search_id: "s", seq: 0, turn: 0, at_ms: 0, ...extra });
 const frame = (e) => `id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
@@ -119,4 +119,35 @@ test("known notes are shown as soon as the decision arrives", () => {
   const s = reduce(start, ev("phase_finished", {
     phase: "decide", turn: 0, duration_ms: 1, summary: { action: "continue", note: null } }));
   assert.equal(s.decisions[0].note, "keep exploring");
+});
+
+test("parseJsonl skips bad and unknown lines", () => {
+  const a = ev("phase_started", { phase: "plan" });
+  const b = ev("search_finished", { seq: 1, stop_reason: "single_pass", result: {} });
+  const text = [JSON.stringify(a), "{bad", "", JSON.stringify({ type: "future_thing" }), JSON.stringify(b)].join("\n");
+  assert.deepEqual([...parseJsonl(text).map((e) => e.type)], ["phase_started", "search_finished"]);
+});
+
+test("schedule keeps relative timing and scales by speed", () => {
+  const evs = [0, 100, 300].map((at_ms) => ev("phase_started", { at_ms }));
+  assert.deepEqual([...schedule(evs, 2).map((x) => x.delayMs)], [0, 50, 150]);
+  assert.deepEqual([...schedule(evs, 1).map((x) => x.delayMs)], [0, 100, 300]);
+});
+
+test("assignFiles matches files by suffix", () => {
+  const files = [
+    { name: "20261029-1200-hero-harness.jsonl", text: "h" },
+    { name: "20261029-1200-hero.meta.json", text: '{"gold": ["INC-4821"], "text": "Q?"}' },
+    { name: "20261029-1200-hero-retrieval.jsonl", text: "r" },
+  ];
+  const got = assignFiles(files);
+  assert.equal(got.retrieval, "r");
+  assert.equal(got.harness, "h");
+  assert.deepEqual([...got.meta.gold], ["INC-4821"]);
+});
+
+test("assignFiles works without meta", () => {
+  const got = assignFiles([{ name: "x-retrieval.jsonl", text: "r" }, { name: "x-harness.jsonl", text: "h" }]);
+  assert.equal(got.meta, null);
+  assert.equal(got.harness, "h");
 });
