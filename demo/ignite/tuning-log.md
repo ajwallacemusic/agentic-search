@@ -1,4 +1,9 @@
-# Corpus and harness tuning log (hero question)
+# Harness tuning log (hero question)
+
+Rounds 1–8 ran on an earlier hand-written corpus (a made-up company, "Lumen Retail"). That corpus
+was removed on 2026-10-29 in favour of the MuSiQue sample; it stays in git history. The model
+and settings findings still hold: they are why `config.yaml` uses gemini-3.5-flash, a flash-lite
+judge, `reasoning_effort: low` and 15 s timeouts.
 
 Acceptance (spec §9): harness 4/4 gold in the top 10 in ≥4 of 5 runs, each under 45 s; retrieval
 misses at least one gold doc in most runs.
@@ -31,3 +36,16 @@ Same answers; the harness costs about twice as much and takes a second turn to d
 
 - `20261029-115838-hero-*`: harness 4/4 in 13.5 s, retrieval 1/4.
 - `20261029-120008-hero-*`: harness 4/4 in 15.5 s, retrieval 2/4.
+
+## Round 9: MuSiQue hero (2026-10-29)
+
+Same models and settings as round 8. Scan: each of the 20 sampled 4-hop questions once per mode.
+Picked `4hop1__777217_32392_823060_610794` (Andrew Deveaux → South Carolina → Columbia → Forest
+Acres → Richland County): retrieval 1/4, harness 4/4 in the scan.
+
+| Question | Retrieval gold@10 | Harness gold@10 | Harness time | Cost per run (retrieval / harness) |
+|---|---|---|---|---|
+| hero | 1/4 ×5 | 3/4, 4/4, 4/4, 4/4, 4/4 | 13.6–18.5 s | ~$0.005 / ~$0.019 |
+| wluj (spare 4-hop) | 2/4 ×4, 3/4 | 4/4, 3/4, 4/4, 4/4, 3/4 | 11.1–12.9 s | ~$0.006 / ~$0.014 |
+
+**Passes** spec §9: harness 4/4 in 4 of 5 runs, all under 45 s; retrieval misses in 5 of 5.

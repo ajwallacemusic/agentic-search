@@ -27,7 +27,7 @@ from agentic_search.events import (
     UsageUpdated,
 )
 from demo.ignite.build import build_demo_harness, load_config
-from demo.ignite.corpus import Question, load_questions
+from demo.ignite.corpus import Question, load_demo
 
 RUNS_DIR = Path(__file__).parent / "runs"
 GOLD_K = 10
@@ -116,8 +116,8 @@ def save_path(question_id: str, mode: str, stamp: str) -> Path:
 
 def write_meta(question: Question, stamp: str) -> Path:
     path = RUNS_DIR / f"{stamp}-{question.id}.meta.json"
-    path.write_text(json.dumps({"question_id": question.id, "text": question.text,
-                                "gold": question.gold}, indent=1))
+    path.write_text(json.dumps({"question_id": question.id, "musique_id": question.musique_id,
+                                "text": question.text, "gold": question.gold}, indent=1))
     return path
 
 
@@ -140,13 +140,14 @@ async def main() -> None:
     p.add_argument("--controller", choices=["heuristic", "typesafe"], default="heuristic")
     p.add_argument("--save", action="store_true", help="write every event to runs/")
     args = p.parse_args()
-    question = load_questions()[args.question]
+    data = load_demo()
+    question = data.questions[args.question]
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     if args.save:
         RUNS_DIR.mkdir(exist_ok=True)
         write_meta(question, stamp)
     rows = []
-    async with build_demo_harness(load_config(), controller=args.controller) as harness:
+    async with build_demo_harness(load_config(), data=data, controller=args.controller) as harness:
         await harness.setup()
         for mode in ("retrieval", "harness"):
             print(f"\n=== {mode} mode: {question.text}")

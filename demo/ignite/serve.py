@@ -17,7 +17,7 @@ from agentic_search.core.harness import Harness
 from agentic_search.server import create_app
 from agentic_search.server.config import AuthConfig, ServiceConfig
 from demo.ignite.build import build_demo_harness, load_config
-from demo.ignite.corpus import Question, load_questions
+from demo.ignite.corpus import Question, load_demo
 
 VIEWER_DIR = Path(__file__).parent / "viewer"
 HOST = "127.0.0.1"  # localhost only: the service has no auth
@@ -47,12 +47,13 @@ def main() -> None:
 
     args = build_parser().parse_args()
     cfg = load_config()
-    profiles = {"ignite": build_demo_harness(cfg)}
+    data = load_demo()
+    profiles = {"ignite": build_demo_harness(cfg, data=data)}
     if os.environ.get("TYPESAFE_API_KEY"):
-        profiles["ignite-typesafe"] = build_demo_harness(cfg, controller="typesafe")
+        profiles["ignite-typesafe"] = build_demo_harness(cfg, data=data, controller="typesafe")
     logging.basicConfig(level=logging.INFO)
     print(f"Ignite demo: http://{HOST}:{args.port}/  (profiles: {', '.join(profiles)})")
-    uvicorn.run(create_demo_app(profiles, load_questions()), host=HOST, port=args.port)
+    uvicorn.run(create_demo_app(profiles, data.questions), host=HOST, port=args.port)
 
 
 if __name__ == "__main__":

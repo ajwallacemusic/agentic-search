@@ -2,19 +2,38 @@
 
 One question, one corpus, one pair of models, two modes. **Retrieval** plans one pass and ranks
 what it finds. **Harness** runs the full loop: plan → query → judge → decide, and goes again when
-it does not have enough. The viewer shows both side by side as they run: which tools hit which
-sources, when the loop decides to keep going, and the bill.
+it does not have enough. The viewer shows both side by side as they run: which tools the agent
+uses on each turn and what it searches for, when the loop decides to keep going, and the bill.
 
 Talk: "Will the Real Agentic Search Please Stand Up?" (Egen Ignite). Spec:
 `docs/superpowers/specs/2026-10-29-ignite-demo-design.md`.
 
-The corpus is synthetic: **Lumen Retail**, a made-up company. The hero question needs four hops,
-each in a different source:
+The corpus is public data with human labels: a seeded sample of **MuSiQue** (multi-hop questions
+over Wikipedia paragraphs). It is the same sample the public eval scores: 60 questions (20 each
+2-, 3- and 4-hop) and 5,000 paragraphs, in one source, `wiki`. Nothing in it was written by us.
+The demo questions are picked from the sample by MuSiQue id in `questions.yaml`.
 
-> Did last month's latency spike come from the new reranker, and is it fixed?
+Be open about the pick: the hero was chosen from a scan of all 20 sampled 4-hop questions
+because it shows the gap clearly (`tuning-log.md`, round 9). The fair numbers are the
+60-question averages in `results-musique.md`.
 
-`INC-4821` (incident, no root cause) → `DEP-0913-07` (the deploy that enabled reranker v2) →
-`PR-1203` (the fix) → `DASH-W38-search` (p95 back to baseline).
+The hero question is a 4-hop question (`4hop1__777217_32392_823060_610794`):
+
+> What county is the city that shares a border with the state capital of the state where Andrew
+> Deveaux was born located in?
+
+Each hop needs a fact from the hop before it, so one planned pass cannot know what to search for
+next. Its four supporting paragraphs are the gold.
+
+| Hop | Gold paragraph | What it gives |
+|---|---|---|
+| 1 | *Andrew Deveaux* | born in South Carolina |
+| 2 | *Charleston, South Carolina* | the state capital moved to Columbia in 1786 |
+| 3 | *WWNQ* | a radio station in Forest Acres, serving the Columbia market |
+| 4 | *Forest Acres, South Carolina* | Forest Acres is in Richland County (the answer) |
+
+Hops 2 and 3 sit in paragraphs about other things (Charleston, a radio station), so a search for
+the question's own words does not find them.
 
 ## Setup
 
@@ -23,6 +42,10 @@ uv sync --extra server --extra local --extra openai --extra gcp
 gcloud auth application-default login
 export IGNITE_GCP_PROJECT=<your project>        # rehearsals used gen-ai-accel-dev
 ```
+
+The first run downloads MuSiQue (about 30 MB) into `public/.cache/` (git-ignored) and checks it
+against a pinned SHA-256. After that the demo needs no download. Do the first run before the
+talk.
 
 Models and prices are in `config.yaml` (Vertex, `global` endpoint):
 
@@ -40,13 +63,13 @@ set `ANTHROPIC_API_KEY` and `uv sync --extra anthropic`.
 ### How the harness is built
 
 The YAML `files` backend loads a folder of files and keeps only file metadata (path, size, …).
-The deploy log needs filterable `date`, `service` and `pr`, so `build.py` builds one
-`FilesBackend.from_documents(...)` per source from `data/*.jsonl` in Python, and `serve.py`
-passes those `Harness` objects to the library's `create_app`. Nothing under `src/` changed.
+Each paragraph needs its `title` as metadata, so `corpus.py` loads the MuSiQue sample,
+`build.py` builds a `FilesBackend.from_documents(...)` from it in Python, and `serve.py` passes
+that `Harness` to the library's `create_app`. Nothing under `src/` changed.
 
 `build.py` also works around three library gaps (each worth its own library PR):
 
-- `SerialEmbedder`: `Harness.setup()` indexes all five sources at once; the shared
+- `SerialEmbedder`: `Harness.setup()` indexes all sources at once; the shared
   sentence-transformers model segfaults when two threads load or run it.
 - `RequestDefaults` / `make_client`: the library's Vertex client cannot send `reasoning_effort`
   or a per-request timeout. The demo sends `reasoning_effort: low`, cuts a request at 15 s and
@@ -57,15 +80,16 @@ passes those `Harness` objects to the library's `create_app`. Nothing under `src
 ## Commands
 
 ```bash
-uv run python -m demo.ignite.check_data                      # corpus checks: ids, gold ids, the hero chain
 uv run python -m demo.ignite.run_side_by_side --question hero         # terminal trace + summary
 uv run python -m demo.ignite.run_side_by_side --question hero --save  # also writes runs/<stamp>-hero-*.jsonl
 uv run python -m demo.ignite.serve                           # http://127.0.0.1:8765/ (viewer + API)
-uv run python -m demo.ignite.eval --modes bm25,retrieval,harness      # writes beir/ and results.md
+uv run python -m demo.ignite.public.eval_public --dataset musique     # writes results-musique.md
 uv run pytest demo/ignite/tests -q                           # demo tests (offline; needs node)
 ```
 
-Other questions: `--question <id>`; ids are in `data/questions.yaml`.
+Other questions: `--question <id>`; ids are in `questions.yaml`. To add one, add a line with a
+MuSiQue id from the seed-7 sample; `load_demo` fails if the id is not in the sample. Setup embeds
+5,000 paragraphs, so `serve` and the runner take a minute or two to start.
 
 **Jev (TypeSafe) controller**, optional: set `TYPESAFE_API_KEY`, then
 `run_side_by_side --controller typesafe`. `serve` adds an `ignite-typesafe` profile when the key
@@ -77,6 +101,9 @@ is set (the viewer itself runs the `ignite` profile).
 
 - **Live:** open `http://127.0.0.1:8765/`, pick a question, press **Run**. Both modes start at
   the same time.
+- **Swimlanes:** one row per tool (`lexical`, `vector`, `filter`, `fetch`), one column per turn.
+  Each dot shows what that call searched for; hover for the full arguments. There is one source,
+  so the story is tool choice and follow-up searches, not source switching.
 - **Replay:** press **Switch to replay** (or open `viewer/index.html` straight from Finder; no
   server or internet needed). Pick the three files of one saved run:
   `<stamp>-hero-retrieval.jsonl`, `<stamp>-hero-harness.jsonl` and `<stamp>-hero.meta.json`.
@@ -85,26 +112,21 @@ is set (the viewer itself runs the `ignite` profile).
 
 ## Numbers for the slides
 
-`results.md` (11 questions, one run each):
+Hero question, round 9 of `tuning-log.md` (5 runs): the harness found all four gold paragraphs
+in 4 of 5 runs, in 14–19 s, for about $0.019. Retrieval found 1 of 4 in all 5 runs, for about
+$0.005.
 
-| | retrieval recall@10 | harness recall@10 | harness cost vs retrieval |
-|---|---|---|---|
-| multi-hop (7) | 0.738 | 0.952 | ~2.3× |
-| single-hop (4) | 1.000 | 1.000 | ~2.3× |
-
-Hero question, round 8 of `tuning-log.md`: harness found all four hops in 4 of 5 runs in
-13–16 s for about $0.026; retrieval missed at least one hop in 5 of 5 for about $0.009.
+MuSiQue, all 60 sampled questions (`results-musique.md`): recall@10 is 0.792 for harness and
+0.647 for retrieval. On 4-hop questions it is 0.775 vs 0.550. The harness costs about 2.6×.
 
 Say on the slide: both modes run with `max_limit: 8` and `max_calls_per_turn: 6`
-(`config.yaml`). Small result pages make a single pass miss more than the loop does. On
-single-hop questions both modes score the same (nDCG@10 1.000) and the harness costs about 2.3×
-as much.
+(`config.yaml`). Small result pages make a single pass miss more than the loop does.
 
 ## Public datasets (real labels, not written by us)
 
-The synthetic corpus was written and tuned for this demo, so its numbers can look rigged. These
-two public sets check the same claims on data with human labels. Same planner, judge and settings
-as the demo; one source each; one run per query; seed 7.
+Both sets have human labels; nothing was written or tuned by us. MuSiQue is also the live demo's
+corpus. WANDS checks the "least agentic setting that works" point. Same planner, judge and
+settings as the demo; one source each; one run per query; seed 7.
 
 | dataset | what it tests | sample | bm25 | retrieval | harness | harness cost vs retrieval |
 |---|---|---|---|---|---|---|
@@ -140,7 +162,7 @@ WANDS, Chen et al., ECIR 2022 (MIT), github.com/wayfair/WANDS.
 2. Before the talk: `gcloud auth application-default login` (tokens expire), start `serve`, run
    the hero question once to warm up (model connections, embedder load), then reload the page.
 3. Keep a second tab open on `viewer/index.html` from disk with the backup run loaded in replay.
-4. Keep `results.md` open in a third tab.
+4. Keep `results-musique.md` open in a third tab.
 
 ## Fallback
 
@@ -148,12 +170,14 @@ If a live run stalls past 60 seconds or shows **✗ Search failed**: press **Swi
 (or go to the replay tab) and say so plainly: "the live API is slow, here is the same run from
 this morning."
 
-Backup runs in `runs/` (round 8 settings):
+Backup runs in `runs/`:
 
-- `20261029-115838-hero-*`: harness 4/4 in 13.5 s, retrieval 1/4.
-- `20261029-120008-hero-*`: harness 4/4 in 15.5 s, retrieval 2/4.
+- `20261029-163918-hero-*`: harness 4/4 in 11.1 s, retrieval 1/4.
+- `20261029-163955-hero-*`: harness 4/4 in 11.9 s, retrieval 1/4.
+- `20261029-163707-hero-*`: harness 4/4 in 15.2 s, retrieval 1/4.
 
-Known risk: Vertex latency spikes. A planner call that times out three times in a row ends the
-harness run with `APITimeoutError`. It happened in 1 of 5 runs on Gemini 3.8 Flash and 0 of 5 on
-3.5 Flash. Since the review fix, one model call waits at most about 30 s (15 s, one retry),
+The harness found all four in 9 of 12 hero runs so far, so do expect a 3/4 now and then.
+
+Known risk: Vertex latency spikes. A planner call that times out twice in a row ends the
+harness run with `APITimeoutError`. One model call waits at most about 30 s (15 s, one retry),
 and the viewer shows "⚠ Past 60 s. Switch to replay?" in a live column that runs long.

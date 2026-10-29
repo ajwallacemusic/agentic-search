@@ -1,10 +1,9 @@
-from agentic_search.core.types import And, Budget, Eq, FieldType, FilterOnly
-from demo.ignite.corpus import SOURCES
-from demo.ignite.tests.helpers import offline_harness
+from agentic_search.core.types import Budget
+from demo.ignite.tests.helpers import demo_data, offline_harness
 
 
 def test_one_backend_per_source_in_order():
-    assert list(offline_harness().backends) == list(SOURCES)
+    assert list(offline_harness().backends) == list(demo_data().documents) == ["wiki"]
 
 
 def test_budget_matches_spec():
@@ -16,19 +15,10 @@ def test_heuristic_controller_is_builtin():
     assert offline_harness().controller_decider is None
 
 
-async def test_deploys_are_filterable_by_date_and_service():
+async def test_paragraph_titles_are_filterable():
     manifests = await offline_harness().setup()
-    fields = {f.name: f for f in manifests["deploys"].collections[0].fields}
-    assert fields["date"].type == FieldType.DATE and fields["date"].filterable
-    assert fields["service"].filterable
-
-
-async def test_filter_search_finds_the_hero_deploy():
-    h = offline_harness()
-    op = FilterOnly(source="deploys", filter=And(clauses=[Eq(field="service", value="search-api"),
-                                        Eq(field="date", value="2026-09-13")]), limit=10)
-    hits = await h.backends["deploys"].execute(op)
-    assert "DEP-0913-07" in [x.doc_id for x in hits]
+    fields = {f.name: f for f in manifests["wiki"].collections[0].fields}
+    assert fields["title"].filterable
 
 
 def test_sources_are_described():
@@ -109,7 +99,8 @@ def test_judge_can_use_its_own_model(monkeypatch):
     cfg["driver"] = {**cfg["driver"], "model": "gemini-3.8-flash"}
     cfg["judge"] = {**cfg["driver"], "model": "gemini-3.5-flash-lite"}
     from agentic_search.embedders.local import HashEmbedder
-    h = build_demo_harness(cfg, embedder=HashEmbedder())
+    from demo.ignite.tests.helpers import demo_data
+    h = build_demo_harness(cfg, data=demo_data(), embedder=HashEmbedder())
     assert h.driver.id == "vertex:gemini-3.8-flash"
     assert h.analyzer_decider.id.endswith("gemini-3.5-flash-lite")
 
@@ -122,12 +113,6 @@ def test_a_stalled_turn_is_cut_short():
     assert s.call_timeout <= 15 and s.decider_timeout <= 15
     for role in ("driver", "judge"):
         assert cfg[role]["request_timeout_s"] * (cfg[role]["max_retries"] + 1) <= 30
-
-
-def test_source_descriptions_give_the_year():
-    from demo.ignite.build import SOURCE_DESCRIPTIONS
-
-    assert all("2026" in d for d in SOURCE_DESCRIPTIONS.values())
 
 
 def test_build_harness_for_one_source():

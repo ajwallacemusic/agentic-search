@@ -9,14 +9,25 @@ const html = readFileSync(new URL("../viewer/index.html", import.meta.url), "utf
 const core = html.split("/* <core> */")[1].split("/* </core> */")[0];
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(core + "\n;globalThis.core = { SOURCES, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable };", ctx);
-const { SOURCES, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable } = ctx.core;
+vm.runInContext(core + "\n;globalThis.core = { TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable };", ctx);
+const { TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable } = ctx.core;
 
 const ev = (type, extra = {}) => ({ type, search_id: "s", seq: 0, turn: 0, at_ms: 0, ...extra });
 const frame = (e) => `id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
 
-test("SOURCES are in swimlane order", () => {
-  assert.deepEqual([...SOURCES], ["incidents", "deploys", "pull_requests", "dashboards", "runbooks"]);
+test("lanes are the known tools in order, then any other tool seen", () => {
+  assert.deepEqual([...TOOLS], ["lexical_search", "vector_search", "filter_search", "fetch"]);
+  assert.deepEqual([...laneNames([{ name: "fetch" }, { name: "zoom" }, { name: "zoom" }])],
+    ["lexical_search", "vector_search", "filter_search", "fetch", "zoom"]);
+});
+
+test("chipLabel shows what the call searched for", () => {
+  assert.equal(chipLabel({ text: "Battle of Hastings", source: "wiki" }), "Battle of Hastings");
+  assert.equal(chipLabel({ hyde_text: "a paragraph about X", field: "embedding" }), "a paragraph about X");
+  assert.equal(chipLabel({ doc_ids: ["msq-a", "msq-b"], collection: "wiki" }), "msq-a, msq-b");
+  assert.equal(chipLabel({ filter: { field: "title", op: "eq", value: "Paris" }, source: "wiki" }), "title = Paris");
+  assert.equal(chipLabel({ pattern: "Columbia.*border", collection: "wiki" }), "/Columbia.*border/");
+  assert.equal(chipLabel({}), "");
 });
 
 test("parseSse splits frames and keeps the partial tail", () => {
@@ -69,9 +80,9 @@ test("reduce records decide notes", () => {
 });
 
 test("reduce keeps the latest results and usage", () => {
-  let s = reduce(initialState("retrieval"), ev("results_updated", { hits: [{ key: "incidents:INC-1", doc_id: "INC-1" }], pool_size: 1, n_relevant: 1 }));
+  let s = reduce(initialState("retrieval"), ev("results_updated", { hits: [{ key: "wiki:msq-1", doc_id: "msq-1" }], pool_size: 1, n_relevant: 1 }));
   s = reduce(s, ev("usage_updated", { usage: { turns: 2, tool_calls: 7, cost_usd: 0.01 }, at_ms: 3000 }));
-  assert.equal(s.hits[0].doc_id, "INC-1");
+  assert.equal(s.hits[0].doc_id, "msq-1");
   assert.equal(s.metrics.turns, 2);
   assert.equal(s.metrics.toolCalls, 7);
   assert.equal(s.metrics.costUsd, 0.01);
@@ -137,13 +148,13 @@ test("schedule keeps relative timing and scales by speed", () => {
 test("assignFiles matches files by suffix", () => {
   const files = [
     { name: "20261029-1200-hero-harness.jsonl", text: "h" },
-    { name: "20261029-1200-hero.meta.json", text: '{"gold": ["INC-4821"], "text": "Q?"}' },
+    { name: "20261029-1200-hero.meta.json", text: '{"gold": ["msq-gold"], "text": "Q?"}' },
     { name: "20261029-1200-hero-retrieval.jsonl", text: "r" },
   ];
   const got = assignFiles(files);
   assert.equal(got.retrieval, "r");
   assert.equal(got.harness, "h");
-  assert.deepEqual([...got.meta.gold], ["INC-4821"]);
+  assert.deepEqual([...got.meta.gold], ["msq-gold"]);
 });
 
 test("assignFiles works without meta", () => {

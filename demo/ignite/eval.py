@@ -1,31 +1,17 @@
-"""Score bm25, retrieval and harness modes on the Ignite questions; write results.md.
-
-Run: uv run python -m demo.ignite.eval --modes bm25,retrieval,harness
-
-Uses the library's eval runner on the BEIR export, with the demo's five-source harness (the
-generic scripts/eval_beir.py builds a single-source corpus and reports recall@100).
-"""
+"""Eval helpers shared by public/eval_public.py: a no-model BM25 baseline, per-group runs of the
+library's eval runner, and markdown tables."""
 
 from __future__ import annotations
 
-import argparse
-import asyncio
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Callable
 
 from agentic_search.backends.files import FilesBackend
 from agentic_search.core.harness import Harness
 from agentic_search.core.types import Document, Query
-from agentic_search.eval.datasets import BeirDataset, load_beir
+from agentic_search.eval.datasets import BeirDataset
 from agentic_search.eval.runner import EvalReport, run_eval
 from agentic_search.models.base import PlannerView, PlanResult, ToolCall, ToolSpec
-from demo.ignite.build import SOURCE_DESCRIPTIONS, build_demo_harness, load_config
-from demo.ignite.corpus import DATA_DIR, SOURCES, load_documents, load_questions
-from demo.ignite.export_beir import BEIR_DIR, export_beir
-
-RESULTS_PATH = Path(__file__).parent / "results.md"
-KINDS = {"single_hop": "Single-hop", "multi_hop": "Multi-hop"}
 
 
 class AllSourcesBM25Driver:
@@ -49,12 +35,6 @@ class AllSourcesBM25Driver:
 
     async def run_delegate(self, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError
-
-
-def bm25_harness(data_dir: Path = DATA_DIR) -> Harness:
-    """Plain BM25 per Ignite source, fused; no model calls."""
-    docs = load_documents(data_dir)
-    return bm25_harness_for({s: docs[s] for s in SOURCES}, SOURCE_DESCRIPTIONS)
 
 
 def bm25_harness_for(docs: dict[str, list[Document]], descriptions: dict[str, str]) -> Harness:
@@ -81,14 +61,6 @@ class TurnRecorder:
 class KindReport:
     report: EvalReport
     turns: list[int] = field(default_factory=list)
-
-
-async def evaluate(modes: list[str], harness_for: Callable[[str], Harness], *,
-                   beir_dir: Path = BEIR_DIR) -> dict[tuple[str, str], KindReport]:
-    questions = load_questions()
-    groups = {kind: [q.id for q in questions.values() if q.kind == kind] for kind in KINDS}
-    return await evaluate_groups(modes, harness_for, load_beir(export_beir(beir_dir)), groups,
-                                 name="ignite")
 
 
 async def evaluate_groups(modes: list[str], harness_for: Callable[[str], Harness],
@@ -131,31 +103,3 @@ def results_table(reports: dict[tuple[str, str], KindReport], groups: dict[str, 
                          f"{errors} |")
         lines.append("")
     return lines
-
-
-def results_markdown(reports: dict[tuple[str, str], KindReport]) -> str:
-    lines = ["# Ignite eval results", ""] + results_table(reports, KINDS)
-    lines += ["`bm25`: one BM25 search per source with the question text, no model. `retrieval` and "
-              "`harness` use the same planner, judge and settings (`config.yaml`); retrieval runs "
-              "one planned pass, harness runs the full loop.", "",
-              "Small samples: one run per question, 4 single-hop and 7 multi-hop questions. Model "
-              "runs vary, so treat differences of a few points as noise.", ""]
-    return "\n".join(lines)
-
-
-async def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--modes", default="bm25,retrieval,harness")
-    args = p.parse_args()
-
-    def harness_for(mode: str) -> Harness:  # a fresh harness per mode: evaluate() closes each
-        return bm25_harness() if mode == "bm25" else build_demo_harness(load_config())
-
-    reports = await evaluate(args.modes.split(","), harness_for)
-    text = results_markdown(reports)
-    RESULTS_PATH.write_text(text)
-    print(text)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

@@ -1,0 +1,12 @@
+# Demo questions, picked by MuSiQue id from the seed-7 sample (see corpus.py).
+# hero: in the round-9 scan, retrieval found 1 of 4 gold paragraphs, harness 4 of 4.
+- id: hero
+  musique_id: 4hop1__777217_32392_823060_610794
+- id: wluj
+  musique_id: 4hop3__193820_466199_128875_72134
+- id: slavs-anthem
+  musique_id: 4hop2__5206_14670_8987_8529
+- id: astronautalis
+  musique_id: 3hop1__152880_131926_89261
+- id: dell
+  musique_id: 2hop__15416_58040

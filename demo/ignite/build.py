@@ -1,7 +1,7 @@
 """Build the Ignite demo harness: one files backend per source, model roles from config.yaml.
 
 The backends are built in Python because a YAML `files` backend loaded from a directory keeps
-only file metadata (path, size, ...), and the deploy log needs filterable `date` and `service`."""
+only file metadata (path, size, ...), and each paragraph needs its `title` as metadata."""
 
 from __future__ import annotations
 
@@ -20,26 +20,11 @@ from agentic_search.embedders.base import Embedder
 from agentic_search.models.driver import ToolCallingDriver
 from agentic_search.models.llm_judge import LLMJudge
 from agentic_search.models.vertex import vertex_base_url, vertex_client
-from demo.ignite.corpus import DATA_DIR, SOURCES, load_documents
+from demo.ignite.corpus import DemoData, load_demo
 
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
-
-# The corpus spans July-October 2026; saying so stops the planner guessing the year for
-# "last month" when it builds date filters.
-SOURCE_DESCRIPTIONS = {
-    "incidents": ("Incident tickets: one per incident. Fields: opened (date), service, severity, "
-                  "status. Text is the on-call write-up. Covers July-October 2026."),
-    "deploys": ("Deploy log: one record per deploy. Fields: date, service, version, pr (PR "
-                "number), author. Covers July-October 2026."),
-    "pull_requests": ("Pull requests: title and description. Fields: number, merged (date), "
-                      "service, author. Covers June-October 2026."),
-    "dashboards": ("Weekly SLO reports per service: latency, availability, error budget. Fields: "
-                   "service, week, week_start, week_end. Covers July-October 2026."),
-    "runbooks": "Operational runbooks and how-to guides, current as of October 2026. Field: service.",
-}
-
 
 class SerialEmbedder:
     """Runs one `embed` call at a time. `Harness.setup()` indexes every source at once, and a
@@ -106,12 +91,12 @@ def _embedder(cfg: dict[str, Any], ctx: BuildContext) -> Embedder:
 
 def build_demo_harness(cfg: dict[str, Any], *,
                        controller: Literal["heuristic", "typesafe"] = "heuristic",
-                       data_dir: Path = DATA_DIR, driver: Any = None, analyzer: Any = None,
+                       data: DemoData | None = None, driver: Any = None, analyzer: Any = None,
                        embedder: Embedder | None = None) -> Harness:
-    """The Ignite harness: one files backend per demo source. The keyword overrides let tests
-    run offline; by default every role comes from `cfg`."""
-    docs = load_documents(data_dir)
-    return build_harness_for(cfg, {s: docs[s] for s in SOURCES}, SOURCE_DESCRIPTIONS,
+    """The Ignite harness over the demo data (`load_demo()` unless given). The keyword overrides
+    let tests run offline; by default every role comes from `cfg`."""
+    data = data or load_demo()
+    return build_harness_for(cfg, data.documents, data.descriptions,
                              controller=controller, driver=driver, analyzer=analyzer,
                              embedder=embedder)
 

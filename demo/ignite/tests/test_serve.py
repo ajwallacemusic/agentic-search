@@ -1,17 +1,17 @@
 import httpx
 import pytest
 
-from demo.ignite.corpus import load_questions
 from demo.ignite.serve import build_parser, create_demo_app
-from demo.ignite.tests.helpers import offline_harness
+from demo.ignite.tests.helpers import demo_data, offline_harness
 
-HERO = load_questions()["hero"]
+HERO = demo_data().questions["hero"]
 
 
 @pytest.fixture
 def client(tmp_path):
     (tmp_path / "index.html").write_text("<!doctype html><title>viewer</title>")
-    app = create_demo_app({"ignite": offline_harness()}, load_questions(), viewer_dir=tmp_path)
+    app = create_demo_app({"ignite": offline_harness()}, demo_data().questions,
+                          viewer_dir=tmp_path)
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 

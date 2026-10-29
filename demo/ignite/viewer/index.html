@@ -102,7 +102,30 @@
 </main>
 <script>
 /* <core> */
-const SOURCES = ["incidents", "deploys", "pull_requests", "dashboards", "runbooks"];
+// One source (wiki), so the swimlane rows are the tools: what the agent chose to use, per turn.
+const TOOLS = ["lexical_search", "vector_search", "filter_search", "fetch"];
+
+/** Swimlane rows: the known tools in order, then any other tool name the calls used. */
+function laneNames(calls) {
+  const extra = calls.map((c) => c.name).filter((n) => !TOOLS.includes(n));
+  return [...TOOLS, ...new Set(extra)];
+}
+
+function filterLabel(f) {
+  if (!f || typeof f !== "object") return "";
+  if (Array.isArray(f.clauses)) return f.clauses.map(filterLabel).join(" & ");
+  if ("value" in f) return `${f.field} = ${f.value}`;
+  return `${f.field} ${f.gte ?? ""}…${f.lte ?? ""}`;
+}
+
+/** What a call searched for: its text, HyDE text, regex, the ids it fetched, or its filter. */
+function chipLabel(args) {
+  if (args.text) return args.text;
+  if (args.hyde_text) return args.hyde_text;
+  if (args.pattern) return `/${args.pattern}/`;
+  if (Array.isArray(args.doc_ids)) return args.doc_ids.join(", ");
+  return filterLabel(args.filter);
+}
 const PHASES = ["plan", "query", "judge", "decide"];
 
 /** Split an SSE text buffer into parsed event objects; return the unfinished tail as `rest`. */
@@ -273,16 +296,16 @@ function render(mode) {
     const cls = p === s.phase ? "on" : (s.done || (phaseIdx >= 0 && i < phaseIdx)) ? "done" : "";
     return `<span class="phase ${cls}">${p}</span>`;
   }).join(" → ");
-  const rows = SOURCES.map((src) => {
+  const rows = laneNames(s.calls).map((tool) => {
     const cells = turns.map((t) => {
-      const chips = s.calls.filter((c) => c.source === src && c.turn === t).map((c) => {
+      const chips = s.calls.filter((c) => c.name === tool && c.turn === t).map((c) => {
         const n = c.error ? "" : c.nHits === null ? " …" : ` <span class="n">(${c.nHits})</span>`;
         const title = esc(c.error || shortArgs(c.args));
-        return `<span class="chip ${c.error ? "err" : ""}" title="${title}">${esc(c.name)}${n}</span>`;
+        return `<span class="chip ${c.error ? "err" : ""}" title="${title}">${esc(chipLabel(c.args) || c.name)}${n}</span>`;
       }).join("");
       return `<td>${chips}</td>`;
     }).join("");
-    return `<tr><th class="src">${src}</th>${cells}</tr>`;
+    return `<tr><th class="src">${tool.replace("_search", "")}</th>${cells}</tr>`;
   }).join("");
   const head = turns.map((t) => `<th>turn ${t + 1}</th>`).join("");
   const decisions = s.decisions.map((d) =>
@@ -300,7 +323,7 @@ function render(mode) {
     <div class="error" id="overtime-${mode}" hidden>⚠ Past 60 s. Switch to replay?</div>
     ${missing}
     <div class="phases">${phases}</div>
-    <table class="lanes"><thead><tr><th class="src">source</th>${head}</tr></thead><tbody>${rows}</tbody></table>
+    <table class="lanes"><thead><tr><th class="src">tool</th>${head}</tr></thead><tbody>${rows}</tbody></table>
     <div class="decisions">${decisions}</div>
     ${s.error ? `<div class="error">✗ Search failed: ${esc(s.error)}</div>` : ""}
     <ol class="hits">${hits || `<li class="empty">no results yet</li>`}</ol>

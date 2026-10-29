@@ -1,7 +1,6 @@
 import json
 
 from agentic_search.events import ToolCallStarted
-from demo.ignite.corpus import load_questions
 from demo.ignite.run_side_by_side import (
     format_event,
     gold_recall,
@@ -9,22 +8,22 @@ from demo.ignite.run_side_by_side import (
     save_path,
     summary_table,
 )
-from demo.ignite.tests.helpers import broken_harness, offline_harness
+from demo.ignite.tests.helpers import HERO_ID, broken_harness, demo_data, offline_harness
 
-HERO = load_questions()["hero"]
+HERO = demo_data().questions["hero"]
 
 
 def test_gold_recall_counts_doc_ids_in_top_10():
-    ids = ["x"] * 9 + ["INC-4821", "PR-1203"]
-    assert gold_recall(ids, ["INC-4821", "PR-1203"]) == 1
+    ids = ["x"] * 9 + ["msq-a", "msq-b"]
+    assert gold_recall(ids, ["msq-a", "msq-b"]) == 1
 
 
 async def test_run_one_summarizes_harness_mode():
     lines: list[str] = []
     s = await run_one(offline_harness(), HERO, "harness", save_to=None, print_fn=lines.append)
-    assert s.mode == "harness" and s.tool_calls >= 2 and s.turns >= 2 and s.gold_total == 4
-    assert s.gold_recall >= 1  # INC-4821 is found on turn 0
-    assert any("incidents" in line and "lexical_search" in line for line in lines)
+    assert s.mode == "harness" and s.tool_calls >= 2 and s.turns >= 2 and s.gold_total == 2
+    assert s.gold_recall >= 1  # the first supporting paragraph is found on turn 0
+    assert any("wiki" in line and HERO_ID in line for line in lines)
 
 
 async def test_save_writes_each_event_as_it_arrives(tmp_path):
@@ -46,9 +45,9 @@ async def test_failed_run_is_summarized(tmp_path):
 
 def test_format_event_shows_source_and_tool():
     line = format_event(ToolCallStarted(
-        search_id="s", seq=1, turn=0, at_ms=1.0, call_id="c", source="deploys",
-        name="filter_search", arguments={"source": "deploys", "filter": {"op": "eq"}}))
-    assert "deploys" in line and "filter_search" in line
+        search_id="s", seq=1, turn=0, at_ms=1.0, call_id="c", source="wiki",
+        name="filter_search", arguments={"source": "wiki", "filter": {"op": "eq"}}))
+    assert "wiki" in line and "filter_search" in line
 
 
 def test_save_path_names_question_and_mode():

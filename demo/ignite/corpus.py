@@ -1,46 +1,50 @@
-"""The Ignite demo corpus: one JSONL file per source, plus the demo questions."""
+"""The Ignite demo data: the seeded MuSiQue sample as one `wiki` source, plus the demo questions
+picked from it by MuSiQue id in questions.yaml."""
 
 from __future__ import annotations
 
-import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 import yaml
 from pydantic import BaseModel
 
-from agentic_search.core.types import Document, TextPart
+from agentic_search.core.types import Document
+from demo.ignite.public.datasets import sample_musique
+from demo.ignite.public.fetch import fetch
 
-SOURCES: tuple[str, ...] = ("incidents", "deploys", "pull_requests", "dashboards", "runbooks")
-DATA_DIR = Path(__file__).parent / "data"
+QUESTIONS_PATH = Path(__file__).parent / "questions.yaml"
+MUSIQUE_FILE = "musique_ans_v1.0_dev.jsonl"
 
 
 class Question(BaseModel):
     id: str
     text: str
-    kind: Literal["single_hop", "multi_hop"]
+    kind: str  # MuSiQue hop group: "2hop", "3hop" or "4hop"
     gold: list[str]
+    musique_id: str
 
 
-def load_records(data_dir: Path = DATA_DIR) -> dict[str, list[dict]]:
-    """Source name -> raw rows `{"id", "title", "text", "metadata"}`."""
-    out: dict[str, list[dict]] = {}
-    for source in SOURCES:
-        path = Path(data_dir) / f"{source}.jsonl"
-        with path.open(encoding="utf-8") as f:
-            out[source] = [json.loads(line) for line in f if line.strip()]
-    return out
+@dataclass
+class DemoData:
+    documents: dict[str, list[Document]]
+    descriptions: dict[str, str]
+    questions: dict[str, Question]
 
 
-def load_documents(data_dir: Path = DATA_DIR) -> dict[str, list[Document]]:
-    return {
-        source: [Document(doc_id=r["id"], content=[TextPart(text=f"{r['title']}\n\n{r['text']}")],
-                          metadata={**r["metadata"], "title": r["title"]})
-                 for r in rows]
-        for source, rows in load_records(data_dir).items()
-    }
-
-
-def load_questions(data_dir: Path = DATA_DIR) -> dict[str, Question]:
-    raw = yaml.safe_load((Path(data_dir) / "questions.yaml").read_text()) or []
-    return {q.id: q for q in (Question(**r) for r in raw)}
+def load_demo(musique_path: Path | None = None,
+              questions_path: Path = QUESTIONS_PATH) -> DemoData:
+    """The same sample the public eval scores (default settings, seed 7), so every demo question's
+    supporting paragraphs are in the corpus. Fetches MuSiQue into the cache on first use."""
+    sample = sample_musique(musique_path or fetch("musique") / MUSIQUE_FILE)
+    group_of = {qid: g for g, qids in sample.groups.items() for qid in qids}
+    questions: dict[str, Question] = {}
+    for pick in yaml.safe_load(Path(questions_path).read_text()) or []:
+        mid = pick["musique_id"]
+        if mid not in sample.queries:
+            raise ValueError(f"question {pick['id']!r}: MuSiQue id {mid!r} is not in the sample")
+        questions[pick["id"]] = Question(id=pick["id"], text=sample.queries[mid],
+                                         kind=group_of[mid], gold=sorted(sample.qrels[mid]),
+                                         musique_id=mid)
+    return DemoData(documents={sample.source: sample.documents},
+                    descriptions={sample.source: sample.description}, questions=questions)
