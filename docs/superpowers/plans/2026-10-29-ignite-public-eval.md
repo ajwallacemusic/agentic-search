@@ -72,7 +72,7 @@
 - `build_harness_for(cfg, docs: dict[str, list[Document]], descriptions: dict[str, str], *, controller="heuristic", driver=None, analyzer=None, embedder=None) -> Harness`; `build_demo_harness` calls it with the Ignite sources.
 - `evaluate_groups(modes, harness_for, dataset: BeirDataset, groups: dict[str, list[str]], *, name: str) -> dict[tuple[str, str], KindReport]`; `evaluate` calls it with the Ignite kinds.
 - `bm25_harness_for(docs, descriptions) -> Harness`; `bm25_harness` calls it.
-- `results_table(reports, groups: dict[str, str], *, title: str, notes: list[str]) -> str`, reused by `results_markdown`.
+- `results_table(reports, groups: dict[str, str]) -> list[str]` (markdown lines), reused by `results_markdown`.
 - CLI: `uv run python -m demo.ignite.public.eval_public --dataset musique|wands [--n …] [--seed 7] [--modes bm25,retrieval,harness]` writes `demo/ignite/results-<dataset>.md` with the sample settings, source hashes and per-group tables.
 
 - [ ] Tests: the existing Ignite eval tests stay green; `test_build_harness_for_one_source`; `test_eval_public_bm25_on_fixture_writes_tables` (fixture MuSiQue sample, bm25 only, offline). Run, fail, implement, pass, commit.

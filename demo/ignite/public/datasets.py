@@ -142,8 +142,10 @@ def sample_wands(folder: Path, *, n: int = 60, seed: int = 7) -> PublicSample:
     graded: dict[str, dict[str, int]] = {}
     for row in labels:
         gain = WANDS_GAIN.get(row["label"])
-        if gain:
-            graded.setdefault(row["query_id"], {})[f"wands-{row['product_id']}"] = gain
+        if gain:  # 14 pairs carry two labels; keep the higher grade, not the file's last one
+            q = graded.setdefault(row["query_id"], {})
+            key = f"wands-{row['product_id']}"
+            q[key] = max(q.get(key, 0), gain)
     with_exact = sorted((q for q, g in graded.items() if 2 in g.values()), key=int)
     chosen = sorted(random.Random(seed).sample(with_exact, min(n, len(with_exact))), key=int)
     texts = {r["query_id"]: r["query"] for r in _tsv(folder / "query.csv")}

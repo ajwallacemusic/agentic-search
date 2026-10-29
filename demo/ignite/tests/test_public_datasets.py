@@ -132,3 +132,10 @@ def test_wands_sample_is_deterministic(tmp_path):
     folder = _wands(tmp_path)
     assert sample_wands(folder, n=2, seed=5).queries == sample_wands(folder, n=2, seed=5).queries
     assert len(sample_wands(folder, n=2).queries) == 2
+
+
+def test_conflicting_labels_keep_the_higher_grade(tmp_path):
+    folder = _wands(tmp_path)
+    with (folder / "label.csv").open("a") as f:
+        f.write("6\t0\t0\tPartial\n7\t0\t3\tExact\n")  # 0/0 was Exact, 0/3 was Partial
+    assert sample_wands(folder, n=10).qrels["0"] == {"wands-0": 2, "wands-3": 2}

@@ -23,7 +23,8 @@ ABOUT = {
     "musique": ("MuSiQue v1.0 (Trivedi et al., TACL 2022, CC BY 4.0): multi-hop questions over "
                 "Wikipedia paragraphs, built so a single-hop shortcut cannot answer them. Gold: "
                 "the supporting paragraphs. recall@10 = share of supporting paragraphs in the top "
-                "10."),
+                "10. Distractors come from other questions and are unlabeled, so a near-duplicate "
+                "of a gold paragraph counts as a miss for every mode alike."),
     "wands": ("WANDS (Wayfair, Chen et al., ECIR 2022, MIT): product search with human labels. "
               "Gold: Exact = 2, Partial = 1. Many queries have dozens of Exact products, so "
               "recall@10 stays low for every mode; nDCG@10 is the headline metric."),

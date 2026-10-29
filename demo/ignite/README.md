@@ -112,8 +112,10 @@ as the demo; one source each; one run per query; seed 7.
 | WANDS (Wayfair product search) | does the loop help plain ranking? | 60 queries, 42,994 products | nDCG@10 0.715 | **0.796** | 0.776 | ~3.5× |
 
 - **MuSiQue:** the loop gains most on 4-hop questions (recall@10 0.775 vs 0.550).
-- **WANDS:** one planned pass is best; the loop costs about 3.5× and ranks slightly worse. Use the
-  least agentic setting that works.
+- **WANDS:** the loop does not improve ranking (nDCG@10 0.776 vs 0.796, within noise for one run
+  of 60 queries) and costs about 3.5×. Use the least agentic setting that works.
+- Per-hop gaps of a few points (e.g. MuSiQue 3-hop, 0.750 vs 0.717) are within noise too; quote
+  the "All" rows and 4-hop.
 - Full tables: `results-musique.md`, `results-wands.md`. Live runs took about 12 and 21
   minutes and cost about $1.50 and $2.10.
 

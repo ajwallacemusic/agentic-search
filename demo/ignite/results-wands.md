@@ -17,3 +17,5 @@ Source files (SHA-256): `product.csv` d993926254572e6eba96c8fd87cc549a17fb91ad37
 `bm25`: one BM25 search with the question text, no model. `retrieval` and `harness` use the same planner, judge and settings as the Ignite demo (`config.yaml`).
 
 One run per query. Model runs vary, so treat differences of a few points as noise.
+
+Label note: 14 (query, product) pairs in `label.csv` carry two labels. This run kept the file's last label; the sampler now keeps the higher grade. One pair is in this sample (query 425, product 40107: Exact and Partial), so at most one grade in one of 60 queries differs from a re-run.
