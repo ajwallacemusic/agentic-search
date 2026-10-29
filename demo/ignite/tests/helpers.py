@@ -14,3 +14,21 @@ def offline_harness(**kwargs):
     ])
     return build_demo_harness(load_config(), driver=driver, analyzer=KeywordJudge(["search-api"]),
                               embedder=HashEmbedder(), **kwargs)
+
+
+class BrokenDriver:
+    """A driver whose plan() always raises, to test failed runs."""
+
+    id = "broken-driver"
+    supports_images = False
+
+    async def plan(self, view, tools):
+        raise RuntimeError("model unavailable")
+
+    async def run_delegate(self, *args, **kwargs):
+        raise NotImplementedError
+
+
+def broken_harness():
+    return build_demo_harness(load_config(), driver=BrokenDriver(),
+                              analyzer=KeywordJudge(["search-api"]), embedder=HashEmbedder())

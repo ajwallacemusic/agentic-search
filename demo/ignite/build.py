@@ -5,6 +5,7 @@ only file metadata (path, size, ...), and the deploy log needs filterable `date`
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any, Literal
@@ -37,6 +38,22 @@ SOURCE_DESCRIPTIONS = {
 }
 
 
+class SerialEmbedder:
+    """Runs one `embed` call at a time. `Harness.setup()` indexes every source at once, and a
+    shared in-process sentence-transformers model segfaults when two threads load or run it."""
+
+    def __init__(self, inner: Embedder):
+        self.inner = inner
+        self._lock = asyncio.Lock()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.inner, name)
+
+    async def embed(self, items: list[Any], purpose: Any) -> list[Any]:
+        async with self._lock:
+            return await self.inner.embed(items, purpose)
+
+
 def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     return yaml.safe_load(Path(path).read_text()) or {}
 
@@ -62,7 +79,7 @@ def build_demo_harness(cfg: dict[str, Any], *,
                                              max_calls_per_turn=int(cfg.get("max_calls_per_turn", 8)))
         analyzer = analyzer or LLMJudge(client)
     decider = build("decider", cfg["typesafe"], ctx) if controller == "typesafe" else None
-    embedder = embedder or _embedder(cfg, ctx)
+    embedder = SerialEmbedder(embedder or _embedder(cfg, ctx))
     docs = load_documents(data_dir)
     backends = [FilesBackend.from_documents(source, docs[source], embedder=embedder,
                                             description=SOURCE_DESCRIPTIONS[source])

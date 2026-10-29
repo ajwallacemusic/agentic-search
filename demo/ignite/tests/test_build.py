@@ -33,3 +33,26 @@ async def test_filter_search_finds_the_hero_deploy():
 
 def test_sources_are_described():
     assert all(b.description for b in offline_harness().backends.values())
+
+
+async def test_serial_embedder_never_runs_two_calls_at_once():
+    import asyncio
+
+    from agentic_search.core.types import Modality, TextPart
+    from demo.ignite.build import SerialEmbedder
+
+    class Tracking:
+        id, dim, local, modalities = "t", 3, True, {Modality.TEXT}
+        active = peak = 0
+
+        async def embed(self, items, purpose):
+            Tracking.active += 1
+            Tracking.peak = max(Tracking.peak, Tracking.active)
+            await asyncio.sleep(0.01)
+            Tracking.active -= 1
+            return [[1.0, 0.0, 0.0] for _ in items]
+
+    e = SerialEmbedder(Tracking())
+    await asyncio.gather(*(e.embed([TextPart(text="x")], "document") for _ in range(5)))
+    assert Tracking.peak == 1
+    assert e.id == "t" and e.local is True and e.dim == 3
