@@ -100,6 +100,38 @@ Say on the slide: both modes run with `max_limit: 8` and `max_calls_per_turn: 6`
 single-hop questions both modes score the same (nDCG@10 1.000) and the harness costs about 2.3×
 as much.
 
+## Public datasets (real labels, not written by us)
+
+The synthetic corpus was written and tuned for this demo, so its numbers can look rigged. These
+two public sets check the same claims on data with human labels. Same planner, judge and settings
+as the demo; one source each; one run per query; seed 7.
+
+| dataset | what it tests | sample | bm25 | retrieval | harness | harness cost vs retrieval |
+|---|---|---|---|---|---|---|
+| MuSiQue (multi-hop Wikipedia) | does the loop chase hops? | 60 questions (20 each 2/3/4-hop), 5,000 paragraphs | recall@10 0.468 | 0.647 | **0.792** | ~2.6× |
+| WANDS (Wayfair product search) | does the loop help plain ranking? | 60 queries, 42,994 products | nDCG@10 0.715 | **0.796** | 0.776 | ~3.5× |
+
+- **MuSiQue:** the loop gains most on 4-hop questions (recall@10 0.775 vs 0.550).
+- **WANDS:** one planned pass is best; the loop costs about 3.5× and ranks slightly worse. Use the
+  least agentic setting that works.
+- Full tables: `results-musique.md`, `results-wands.md`. Live runs took about 12 and 21
+  minutes and cost about $1.50 and $2.10.
+
+Why MuSiQue and not HotpotQA: MuSiQue was built to drop questions a single-hop shortcut can answer,
+a known weakness of HotpotQA, and each question ships with its own 20 paragraphs, so a sample is
+self-contained.
+
+Re-run (downloads into `public/.cache/`, git-ignored; each file is checked against a pinned
+SHA-256):
+
+```bash
+uv run python -m demo.ignite.public.eval_public --dataset musique   # --n 20 per hop, --corpus-size 5000
+uv run python -m demo.ignite.public.eval_public --dataset wands     # --n 60
+```
+
+Credits: MuSiQue, Trivedi et al., TACL 2022 (CC BY 4.0), github.com/StonyBrookNLP/musique.
+WANDS, Chen et al., ECIR 2022 (MIT), github.com/wayfair/WANDS.
+
 ## Rehearsal checklist
 
 1. Rehearse three times on the presentation laptop, on the venue network if you can.
