@@ -128,3 +128,17 @@ def test_source_descriptions_give_the_year():
     from demo.ignite.build import SOURCE_DESCRIPTIONS
 
     assert all("2026" in d for d in SOURCE_DESCRIPTIONS.values())
+
+
+def test_build_harness_for_one_source():
+    from agentic_search.core.types import Document, TextPart
+    from agentic_search.embedders.local import HashEmbedder
+    from agentic_search.testing import KeywordJudge, ScriptedDriver
+    from demo.ignite.build import build_harness_for, load_config
+
+    docs = {"wiki": [Document(doc_id="a", content=[TextPart(text="hello")])]}
+    h = build_harness_for(load_config(), docs, {"wiki": "Wikipedia paragraphs."},
+                          driver=ScriptedDriver(), analyzer=KeywordJudge(["x"]),
+                          embedder=HashEmbedder())
+    assert list(h.backends) == ["wiki"] and h.backends["wiki"].collection == "wiki"
+    assert h.backends["wiki"].description == "Wikipedia paragraphs."

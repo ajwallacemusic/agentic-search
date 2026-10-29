@@ -15,7 +15,7 @@ import yaml
 from agentic_search.backends.files import FilesBackend
 from agentic_search.config import BuildContext, build, resolve_env
 from agentic_search.core.harness import Harness, HarnessSettings
-from agentic_search.core.types import Budget
+from agentic_search.core.types import Budget, Document
 from agentic_search.embedders.base import Embedder
 from agentic_search.models.driver import ToolCallingDriver
 from agentic_search.models.llm_judge import LLMJudge
@@ -108,7 +108,21 @@ def build_demo_harness(cfg: dict[str, Any], *,
                        controller: Literal["heuristic", "typesafe"] = "heuristic",
                        data_dir: Path = DATA_DIR, driver: Any = None, analyzer: Any = None,
                        embedder: Embedder | None = None) -> Harness:
-    """The keyword overrides let tests run offline; by default every role comes from `cfg`."""
+    """The Ignite harness: one files backend per demo source. The keyword overrides let tests
+    run offline; by default every role comes from `cfg`."""
+    docs = load_documents(data_dir)
+    return build_harness_for(cfg, {s: docs[s] for s in SOURCES}, SOURCE_DESCRIPTIONS,
+                             controller=controller, driver=driver, analyzer=analyzer,
+                             embedder=embedder)
+
+
+def build_harness_for(cfg: dict[str, Any], docs: dict[str, list[Document]],
+                      descriptions: dict[str, str], *,
+                      controller: Literal["heuristic", "typesafe"] = "heuristic",
+                      driver: Any = None, analyzer: Any = None,
+                      embedder: Embedder | None = None) -> Harness:
+    """A harness over `docs` (source name -> documents), one files backend per source, with the
+    planner, judge, controller, budget and settings from `cfg`."""
     ctx = BuildContext(base_dir=CONFIG_PATH.parent)
     if driver is None or analyzer is None:
         client = make_client(cfg["driver"])
@@ -117,11 +131,9 @@ def build_demo_harness(cfg: dict[str, Any], *,
         analyzer = analyzer or LLMJudge(judge_client)
     decider = build("decider", cfg["typesafe"], ctx) if controller == "typesafe" else None
     embedder = SerialEmbedder(embedder or _embedder(cfg, ctx))
-    docs = load_documents(data_dir)
-    backends = [FilesBackend.from_documents(source, docs[source], embedder=embedder,
-                                            collection=source,
-                                            description=SOURCE_DESCRIPTIONS[source])
-                for source in SOURCES]
+    backends = [FilesBackend.from_documents(source, source_docs, embedder=embedder,
+                                            collection=source, description=descriptions[source])
+                for source, source_docs in docs.items()]
     return Harness(backends, driver, embedders=[embedder], analyzer=analyzer, controller=decider,
                    mode="harness", budget=Budget(**cfg["budget"]),
                    settings=HarnessSettings(**cfg.get("settings", {})))

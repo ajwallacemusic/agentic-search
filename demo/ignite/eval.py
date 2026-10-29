@@ -16,8 +16,8 @@ from typing import Any, Callable
 
 from agentic_search.backends.files import FilesBackend
 from agentic_search.core.harness import Harness
-from agentic_search.core.types import Query
-from agentic_search.eval.datasets import load_beir
+from agentic_search.core.types import Document, Query
+from agentic_search.eval.datasets import BeirDataset, load_beir
 from agentic_search.eval.runner import EvalReport, run_eval
 from agentic_search.models.base import PlannerView, PlanResult, ToolCall, ToolSpec
 from demo.ignite.build import SOURCE_DESCRIPTIONS, build_demo_harness, load_config
@@ -52,11 +52,15 @@ class AllSourcesBM25Driver:
 
 
 def bm25_harness(data_dir: Path = DATA_DIR) -> Harness:
-    """Plain BM25 per source, fused; no model calls."""
+    """Plain BM25 per Ignite source, fused; no model calls."""
     docs = load_documents(data_dir)
-    backends = [FilesBackend.from_documents(s, docs[s], collection=s,
-                                            description=SOURCE_DESCRIPTIONS[s]) for s in SOURCES]
-    return Harness(backends, AllSourcesBM25Driver(list(SOURCES)), mode="retrieval")
+    return bm25_harness_for({s: docs[s] for s in SOURCES}, SOURCE_DESCRIPTIONS)
+
+
+def bm25_harness_for(docs: dict[str, list[Document]], descriptions: dict[str, str]) -> Harness:
+    backends = [FilesBackend.from_documents(s, d, collection=s, description=descriptions[s])
+                for s, d in docs.items()]
+    return Harness(backends, AllSourcesBM25Driver(list(docs)), mode="retrieval")
 
 
 class TurnRecorder:
@@ -81,33 +85,42 @@ class KindReport:
 
 async def evaluate(modes: list[str], harness_for: Callable[[str], Harness], *,
                    beir_dir: Path = BEIR_DIR) -> dict[tuple[str, str], KindReport]:
-    dataset = load_beir(export_beir(beir_dir))
     questions = load_questions()
+    groups = {kind: [q.id for q in questions.values() if q.kind == kind] for kind in KINDS}
+    return await evaluate_groups(modes, harness_for, load_beir(export_beir(beir_dir)), groups,
+                                 name="ignite")
+
+
+async def evaluate_groups(modes: list[str], harness_for: Callable[[str], Harness],
+                          dataset: BeirDataset, groups: dict[str, list[str]], *,
+                          name: str) -> dict[tuple[str, str], KindReport]:
+    """Run each mode over each group of query ids; a fresh harness per mode."""
     out: dict[tuple[str, str], KindReport] = {}
     for mode in modes:
         harness = harness_for(mode)
         run_mode = "retrieval" if mode == "bm25" else mode
         async with harness:
-            for kind in KINDS:
-                qids = [q.id for q in questions.values() if q.kind == kind]
+            for group, qids in groups.items():
                 recorder = TurnRecorder(harness)
-                report = await run_eval(recorder, dataset, name=f"ignite/{mode}/{kind}",  # type: ignore[arg-type]
-                                        query_ids=qids, k=10, recall_k=10, concurrency=2,
+                report = await run_eval(recorder, dataset,  # type: ignore[arg-type]
+                                        name=f"{name}/{mode}/{group}", query_ids=qids, k=10,
+                                        recall_k=10, concurrency=2,
                                         mode=run_mode)  # type: ignore[arg-type]
                 turns = [recorder.turns.get(dataset.queries[r.query_id], 0) for r in report.runs]
-                out[(mode, kind)] = KindReport(report=report, turns=turns)
+                out[(mode, group)] = KindReport(report=report, turns=turns)
     return out
 
 
-def results_markdown(reports: dict[tuple[str, str], KindReport]) -> str:
-    lines = ["# Ignite eval results", ""]
-    for kind, title in KINDS.items():
+def results_table(reports: dict[tuple[str, str], KindReport], groups: dict[str, str]) -> list[str]:
+    """Markdown lines: one table per group (key -> heading), one row per mode."""
+    lines: list[str] = []
+    for group, title in groups.items():
         lines += [f"## {title} questions", "",
                   "| mode | nDCG@10 | recall@10 | MRR | avg turns | avg tool calls | avg cost | "
                   "avg seconds | n | errors |",
                   "|---|---|---|---|---|---|---|---|---|---|"]
-        for (mode, k), kr in reports.items():
-            if k != kind:
+        for (mode, g), kr in reports.items():
+            if g != group:
                 continue
             r = kr.report
             turns = sum(kr.turns) / len(kr.turns) if kr.turns else 0.0
@@ -117,6 +130,11 @@ def results_markdown(reports: dict[tuple[str, str], KindReport]) -> str:
                          f"${r.mean('cost_usd'):.4f} | {r.mean('seconds'):.1f} | {len(r.runs)} | "
                          f"{errors} |")
         lines.append("")
+    return lines
+
+
+def results_markdown(reports: dict[tuple[str, str], KindReport]) -> str:
+    lines = ["# Ignite eval results", ""] + results_table(reports, KINDS)
     lines += ["`bm25`: one BM25 search per source with the question text, no model. `retrieval` and "
               "`harness` use the same planner, judge and settings (`config.yaml`); retrieval runs "
               "one planned pass, harness runs the full loop.", "",
