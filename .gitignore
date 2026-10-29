@@ -8,3 +8,6 @@ eval-results/
 
 # The Ignite demo corpus is committed data, not a downloaded dataset.
 !demo/ignite/data/
+
+# Public eval datasets, downloaded on demand (demo/ignite/public/fetch.py).
+demo/ignite/public/.cache/
