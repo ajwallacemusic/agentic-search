@@ -140,3 +140,13 @@ def test_fix_pr_must_name_the_causing_pr(tmp_path):
     data = _copy_data(tmp_path)
     _edit(data, "PR-1203", text=_row(data, "PR-1203")["text"].replace("1187", "the rollout"))
     assert any("PR-1203" in p and "1187" in p for p in check(data))
+
+
+def test_corpus_files_are_tracked_by_git():
+    import subprocess
+
+    tracked = subprocess.run(["git", "ls-files", str(DATA_DIR)], capture_output=True, text=True,
+                             check=True).stdout.split()
+    names = {Path(p).name for p in tracked}
+    assert {"incidents.jsonl", "deploys.jsonl", "pull_requests.jsonl", "dashboards.jsonl",
+            "runbooks.jsonl", "questions.yaml"} <= names

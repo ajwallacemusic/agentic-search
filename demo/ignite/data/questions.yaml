@@ -1,0 +1,68 @@
+- id: hero
+  text: Did last month's latency spike come from the new reranker, and is it fixed?
+  kind: multi_hop
+  gold:
+  - INC-4821
+  - DEP-0913-07
+  - PR-1203
+  - DASH-W38-search
+- id: reranker-author
+  text: Who authored the reranker v2 rollout PR?
+  kind: single_hop
+  gold:
+  - PR-1187
+- id: eu-slowdown
+  text: What caused the slow search pages for EU shoppers in August?
+  kind: single_hop
+  gold:
+  - INC-4710
+- id: apple-pay
+  text: When was the Apple Pay button turned on in web checkout?
+  kind: single_hop
+  gold:
+  - DEP-0902-04
+- id: key-rotation
+  text: What are the steps for rotating the auth-gateway signing key?
+  kind: single_hop
+  gold:
+  - RB-auth-certs
+- id: checkout-errors
+  text: Which deploy caused the checkout order errors in early October, and what fixed it?
+  kind: multi_hop
+  gold:
+  - INC-4902
+  - DEP-1005-02
+  - PR-1226
+- id: catalog-lag
+  text: Was the catalog indexing lag in July caused by a deploy, and when did it recover?
+  kind: multi_hop
+  gold:
+  - INC-4598
+  - DEP-0715-02
+  - DASH-W31-catalog
+- id: carousel-reviewers
+  text: Who reviewed the change that broke the homepage recommendation carousel?
+  kind: multi_hop
+  gold:
+  - INC-4877
+  - DEP-0928-03
+  - PR-1209
+- id: login-outage
+  text: What triggered the August login outage, and which change stops it happening again?
+  kind: multi_hop
+  gold:
+  - INC-4655
+  - DEP-0807-01
+  - PR-1120
+- id: latency-fix-release
+  text: Which search-api release shipped the fix for the September latency incident?
+  kind: multi_hop
+  gold:
+  - PR-1203
+  - DEP-0918-05
+- id: checkout-recovery
+  text: Did checkout-api meet its error-rate SLO in the week the tax client fix merged?
+  kind: multi_hop
+  gold:
+  - PR-1226
+  - DASH-W41-checkout

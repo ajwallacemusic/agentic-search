@@ -26,16 +26,18 @@ logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 
+# The corpus spans July-October 2026; saying so stops the planner guessing the year for
+# "last month" when it builds date filters.
 SOURCE_DESCRIPTIONS = {
     "incidents": ("Incident tickets: one per incident. Fields: opened (date), service, severity, "
-                  "status. Text is the on-call write-up."),
+                  "status. Text is the on-call write-up. Covers July-October 2026."),
     "deploys": ("Deploy log: one record per deploy. Fields: date, service, version, pr (PR "
-                "number), author."),
+                "number), author. Covers July-October 2026."),
     "pull_requests": ("Pull requests: title and description. Fields: number, merged (date), "
-                      "service, author."),
+                      "service, author. Covers June-October 2026."),
     "dashboards": ("Weekly SLO reports per service: latency, availability, error budget. Fields: "
-                   "service, week, week_start, week_end."),
-    "runbooks": "Operational runbooks and how-to guides. Field: service.",
+                   "service, week, week_start, week_end. Covers July-October 2026."),
+    "runbooks": "Operational runbooks and how-to guides, current as of October 2026. Field: service.",
 }
 
 

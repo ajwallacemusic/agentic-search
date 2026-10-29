@@ -112,3 +112,19 @@ def test_judge_can_use_its_own_model(monkeypatch):
     h = build_demo_harness(cfg, embedder=HashEmbedder())
     assert h.driver.id == "vertex:gemini-3.8-flash"
     assert h.analyzer_decider.id.endswith("gemini-3.5-flash-lite")
+
+
+def test_a_stalled_turn_is_cut_short():
+    from demo.ignite.build import load_config
+
+    cfg = load_config()
+    s = offline_harness().settings
+    assert s.call_timeout <= 15 and s.decider_timeout <= 15
+    for role in ("driver", "judge"):
+        assert cfg[role]["request_timeout_s"] * (cfg[role]["max_retries"] + 1) <= 30
+
+
+def test_source_descriptions_give_the_year():
+    from demo.ignite.build import SOURCE_DESCRIPTIONS
+
+    assert all("2026" in d for d in SOURCE_DESCRIPTIONS.values())

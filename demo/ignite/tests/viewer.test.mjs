@@ -9,8 +9,8 @@ const html = readFileSync(new URL("../viewer/index.html", import.meta.url), "utf
 const core = html.split("/* <core> */")[1].split("/* </core> */")[0];
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(core + "\n;globalThis.core = { SOURCES, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles };", ctx);
-const { SOURCES, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles } = ctx.core;
+vm.runInContext(core + "\n;globalThis.core = { SOURCES, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime };", ctx);
+const { SOURCES, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime } = ctx.core;
 
 const ev = (type, extra = {}) => ({ type, search_id: "s", seq: 0, turn: 0, at_ms: 0, ...extra });
 const frame = (e) => `id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
@@ -150,4 +150,11 @@ test("assignFiles works without meta", () => {
   const got = assignFiles([{ name: "x-retrieval.jsonl", text: "r" }, { name: "x-harness.jsonl", text: "h" }]);
   assert.equal(got.meta, null);
   assert.equal(got.harness, "h");
+});
+
+test("overtime flags a live column still running past 60 s", () => {
+  assert.equal(overtime(61, false, false), true);
+  assert.equal(overtime(59, false, false), false);
+  assert.equal(overtime(90, true, false), false);   // finished
+  assert.equal(overtime(90, false, true), false);   // replay
 });

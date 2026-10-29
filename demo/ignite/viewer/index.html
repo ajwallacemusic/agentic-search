@@ -223,6 +223,10 @@ function assignFiles(files) {
   }
   return out;
 }
+/** A live column still running past the spec's 60 s stall line: time to switch to replay. */
+function overtime(seconds, done, replay) {
+  return !replay && !done && seconds > 60;
+}
 /* </core> */
 
 const MODES = ["retrieval", "harness"];
@@ -272,6 +276,7 @@ function render(mode) {
     : view.started[mode] ? (performance.now() - view.started[mode]) / 1000 : m.seconds;
   el.innerHTML = `
     <h2><span>${TITLES[mode]}</span><span class="clock">${secs.toFixed(1)} s</span></h2>
+    ${overtime(secs, s.done, view.replay) ? `<div class="error">⚠ Past 60 s. Switch to replay?</div>` : ""}
     <div class="phases">${phases}</div>
     <table class="lanes"><thead><tr><th class="src">source</th>${head}</tr></thead><tbody>${rows}</tbody></table>
     <div class="decisions">${decisions}</div>

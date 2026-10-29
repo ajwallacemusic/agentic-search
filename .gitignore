@@ -5,3 +5,6 @@ __pycache__/
 data/
 eval-results/
 *.egg-info/
+
+# The Ignite demo corpus is committed data, not a downloaded dataset.
+!demo/ignite/data/
