@@ -56,3 +56,59 @@ async def test_serial_embedder_never_runs_two_calls_at_once():
     await asyncio.gather(*(e.embed([TextPart(text="x")], "document") for _ in range(5)))
     assert Tracking.peak == 1
     assert e.id == "t" and e.local is True and e.dim == 3
+
+
+def test_harness_settings_come_from_config():
+    from demo.ignite.build import load_config
+
+    cfg = load_config()
+    s = offline_harness().settings
+    for key, value in cfg["settings"].items():
+        assert getattr(s, key) == value
+
+
+def test_each_collection_is_named_after_its_source():
+    assert all(b.collection == name for name, b in offline_harness().backends.items())
+
+
+async def test_request_defaults_are_added_to_every_completion_call():
+    from demo.ignite.build import RequestDefaults
+
+    seen = {}
+
+    class Inner:
+        class chat:
+            class completions:
+                @staticmethod
+                async def create(**kwargs):
+                    seen.update(kwargs)
+                    return "ok"
+
+    client = RequestDefaults(Inner(), reasoning_effort="low")
+    assert await client.chat.completions.create(model="m") == "ok"
+    assert seen == {"model": "m", "reasoning_effort": "low"}
+
+
+def test_vertex_driver_gets_request_defaults(monkeypatch):
+    from demo.ignite.build import RequestDefaults, make_client
+
+    monkeypatch.setenv("IGNITE_GCP_PROJECT", "demo-project-1")
+    client = make_client({"type": "vertex", "model": "gemini-3.8-flash",
+                          "project_env": "IGNITE_GCP_PROJECT", "price_per_mtok": [0.75, 3.75],
+                          "reasoning_effort": "low", "request_timeout_s": 30, "max_retries": 1})
+    assert isinstance(client._client, RequestDefaults)
+    assert client._client.defaults == {"reasoning_effort": "low"}
+    assert client.price == (0.75, 3.75) and client.id == "vertex:gemini-3.8-flash"
+
+
+def test_judge_can_use_its_own_model(monkeypatch):
+    from demo.ignite.build import build_demo_harness, load_config
+
+    monkeypatch.setenv("IGNITE_GCP_PROJECT", "demo-project-1")
+    cfg = load_config()
+    cfg["driver"] = {**cfg["driver"], "model": "gemini-3.8-flash"}
+    cfg["judge"] = {**cfg["driver"], "model": "gemini-3.5-flash-lite"}
+    from agentic_search.embedders.local import HashEmbedder
+    h = build_demo_harness(cfg, embedder=HashEmbedder())
+    assert h.driver.id == "vertex:gemini-3.8-flash"
+    assert h.analyzer_decider.id.endswith("gemini-3.5-flash-lite")

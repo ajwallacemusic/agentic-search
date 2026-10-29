@@ -65,6 +65,7 @@ def _hero_rules(docs: dict[str, dict], incidents: list[dict]) -> list[str]:
     rule("PR-1203", m.get("merged") == FIX_DATE, f"merged must be {FIX_DATE}")
     rule("PR-1203", "inc-4821" in text["PR-1203"], "text must reference INC-4821")
     rule("PR-1203", "reranker v2" in text["PR-1203"], "text must mention 'reranker v2'")
+    rule("PR-1203", "1187" in text["PR-1203"], "text must name the causing PR 1187")
 
     m = dash["metadata"]
     rule("DASH-W38-search", m.get("service") == "search-api", "service must be search-api")

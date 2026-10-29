@@ -13,12 +13,13 @@ from typing import Any, Literal
 import yaml
 
 from agentic_search.backends.files import FilesBackend
-from agentic_search.config import BuildContext, build
-from agentic_search.core.harness import Harness
+from agentic_search.config import BuildContext, build, resolve_env
+from agentic_search.core.harness import Harness, HarnessSettings
 from agentic_search.core.types import Budget
 from agentic_search.embedders.base import Embedder
 from agentic_search.models.driver import ToolCallingDriver
 from agentic_search.models.llm_judge import LLMJudge
+from agentic_search.models.vertex import vertex_base_url, vertex_client
 from demo.ignite.corpus import DATA_DIR, SOURCES, load_documents
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,40 @@ class SerialEmbedder:
             return await self.inner.embed(items, purpose)
 
 
+class RequestDefaults:
+    """Wraps an AsyncOpenAI client so every `chat.completions.create` call also sends
+    `defaults` (e.g. reasoning_effort); the library's client has no setting for them."""
+
+    def __init__(self, inner: Any, **defaults: Any):
+        self.inner = inner
+        self.defaults = defaults
+        self.chat = self
+        self.completions = self
+
+    async def create(self, **kwargs: Any) -> Any:
+        return await self.inner.chat.completions.create(**kwargs, **self.defaults)
+
+
+def make_client(cfg: dict[str, Any]) -> Any:
+    """The library's client factory, except a Vertex driver also gets `reasoning_effort`, a
+    per-request timeout and a retry count: Gemini's default thinking makes judging slow, and a
+    stalled request should be retried rather than eat the demo's time budget."""
+    cfg = resolve_env(cfg)
+    if cfg["type"] != "vertex":
+        return build("client", cfg, BuildContext(base_dir=CONFIG_PATH.parent))
+    from openai import AsyncOpenAI
+
+    location = cfg.get("location", "global")
+    raw = AsyncOpenAI(base_url=vertex_base_url(cfg["project"], location), api_key="unused",
+                      timeout=float(cfg.get("request_timeout_s", 60)),
+                      max_retries=int(cfg.get("max_retries", 2)))
+    defaults = {"reasoning_effort": cfg["reasoning_effort"]} if "reasoning_effort" in cfg else {}
+    price = cfg.get("price_per_mtok")
+    return vertex_client(cfg["model"], project=cfg["project"], location=location,
+                         client=RequestDefaults(raw, **defaults),
+                         price_per_mtok=(float(price[0]), float(price[1])) if price else None)
+
+
 def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     return yaml.safe_load(Path(path).read_text()) or {}
 
@@ -74,15 +109,17 @@ def build_demo_harness(cfg: dict[str, Any], *,
     """The keyword overrides let tests run offline; by default every role comes from `cfg`."""
     ctx = BuildContext(base_dir=CONFIG_PATH.parent)
     if driver is None or analyzer is None:
-        client = build("client", cfg["driver"], ctx)
-        driver = driver or ToolCallingDriver(client,
-                                             max_calls_per_turn=int(cfg.get("max_calls_per_turn", 8)))
-        analyzer = analyzer or LLMJudge(client)
+        client = make_client(cfg["driver"])
+        driver = driver or ToolCallingDriver(client)
+        judge_client = make_client(cfg["judge"]) if cfg.get("judge") else client
+        analyzer = analyzer or LLMJudge(judge_client)
     decider = build("decider", cfg["typesafe"], ctx) if controller == "typesafe" else None
     embedder = SerialEmbedder(embedder or _embedder(cfg, ctx))
     docs = load_documents(data_dir)
     backends = [FilesBackend.from_documents(source, docs[source], embedder=embedder,
+                                            collection=source,
                                             description=SOURCE_DESCRIPTIONS[source])
                 for source in SOURCES]
     return Harness(backends, driver, embedders=[embedder], analyzer=analyzer, controller=decider,
-                   mode="harness", budget=Budget(**cfg["budget"]))
+                   mode="harness", budget=Budget(**cfg["budget"]),
+                   settings=HarnessSettings(**cfg.get("settings", {})))

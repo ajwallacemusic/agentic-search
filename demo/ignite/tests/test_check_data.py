@@ -134,3 +134,9 @@ def test_check_reports_size_and_mix(tmp_path):
     (data / "runbooks.jsonl").write_text("")
     problems = check(data)
     assert any("runbooks" in p and "size" in p for p in problems)
+
+
+def test_fix_pr_must_name_the_causing_pr(tmp_path):
+    data = _copy_data(tmp_path)
+    _edit(data, "PR-1203", text=_row(data, "PR-1203")["text"].replace("1187", "the rollout"))
+    assert any("PR-1203" in p and "1187" in p for p in check(data))
