@@ -9,8 +9,8 @@ const html = readFileSync(new URL("../viewer/index.html", import.meta.url), "utf
 const core = html.split("/* <core> */")[1].split("/* </core> */")[0];
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(core + "\n;globalThis.core = { SOURCES, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime };", ctx);
-const { SOURCES, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime } = ctx.core;
+vm.runInContext(core + "\n;globalThis.core = { SOURCES, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable };", ctx);
+const { SOURCES, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable } = ctx.core;
 
 const ev = (type, extra = {}) => ({ type, search_id: "s", seq: 0, turn: 0, at_ms: 0, ...extra });
 const frame = (e) => `id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
@@ -157,4 +157,31 @@ test("overtime flags a live column still running past 60 s", () => {
   assert.equal(overtime(59, false, false), false);
   assert.equal(overtime(90, true, false), false);   // finished
   assert.equal(overtime(90, false, true), false);   // replay
+});
+
+test("clockSeconds: a paused replay keeps the replay clock", () => {
+  const s = { ...initialState("harness"), metrics: { ...initialState("harness").metrics, seconds: 4 } };
+  assert.equal(clockSeconds(s, { replay: true, vt: 6500 }), 6.5);
+});
+
+test("clockSeconds: live uses wall time since start; finished uses the final time", () => {
+  const s = initialState("harness");
+  assert.equal(clockSeconds(s, { replay: false, startedMs: 1000, nowMs: 3500 }), 2.5);
+  const done = { ...s, done: true, metrics: { ...s.metrics, seconds: 9 } };
+  assert.equal(clockSeconds(done, { replay: true, vt: 20000 }), 9);
+  assert.equal(clockSeconds(s, { replay: false, startedMs: null, nowMs: 5 }), 0);
+});
+
+test("questionText prefers meta, then search_started, and never throws", () => {
+  const started = { type: "search_started", question: { content: [{ kind: "text", text: "Q from run?" }] } };
+  assert.equal(questionText({ text: "Q from meta?" }, [started]), "Q from meta?");
+  assert.equal(questionText(null, [started]), "Q from run?");
+  assert.equal(questionText(null, [{ type: "search_started", question: "plain string?" }]), "plain string?");
+  assert.equal(questionText(null, [{ type: "search_started" }]), "");
+  assert.equal(questionText(null, []), "");
+});
+
+test("replayable needs at least one run file", () => {
+  assert.equal(replayable({ retrieval: "r", harness: null, meta: null }), true);
+  assert.equal(replayable({ retrieval: null, harness: null, meta: { gold: [] } }), false);
 });

@@ -227,6 +227,28 @@ function assignFiles(files) {
 function overtime(seconds, done, replay) {
   return !replay && !done && seconds > 60;
 }
+/** Seconds shown on a column's clock. Finished: the run's final time. Replay: the replay clock,
+ *  playing or paused. Live: wall time since the column started. */
+function clockSeconds(state, { replay = false, vt = 0, startedMs = null, nowMs = 0 } = {}) {
+  if (state.done) return state.metrics.seconds;
+  if (replay) return vt / 1000;
+  return startedMs == null ? 0 : (nowMs - startedMs) / 1000;
+}
+
+/** The question for a replay: the meta file's text, else the run's own search_started event. */
+function questionText(meta, events) {
+  if (meta && typeof meta.text === "string" && meta.text) return meta.text;
+  const started = (events || []).find((e) => e && e.type === "search_started");
+  const q = started && started.question;
+  if (typeof q === "string") return q;
+  const parts = q && Array.isArray(q.content) ? q.content : [];
+  return parts.map((c) => (c && typeof c.text === "string" ? c.text : "")).join(" ").trim();
+}
+
+/** A replay can start with either mode's file; the other column stays empty. */
+function replayable(got) {
+  return Boolean(got && (got.retrieval || got.harness));
+}
 /* </core> */
 
 const MODES = ["retrieval", "harness"];
@@ -271,12 +293,12 @@ function render(mode) {
     return `<li>${esc(h.doc_id)} <span class="hit-src">${esc(h.source)}${h.title ? " · " + esc(h.title) : ""}</span>${rel}${gold}</li>`;
   }).join("");
   const m = s.metrics;
-  const secs = s.done ? m.seconds
-    : view.replay && player.playing ? player.vt / 1000
-    : view.started[mode] ? (performance.now() - view.started[mode]) / 1000 : m.seconds;
+  const missing = view.replay && player.runs && !player.runs[mode].length
+    ? `<div class="empty">No saved file for this mode.</div>` : "";
   el.innerHTML = `
-    <h2><span>${TITLES[mode]}</span><span class="clock">${secs.toFixed(1)} s</span></h2>
-    ${overtime(secs, s.done, view.replay) ? `<div class="error">⚠ Past 60 s. Switch to replay?</div>` : ""}
+    <h2><span>${TITLES[mode]}</span><span class="clock" id="clock-${mode}"></span></h2>
+    <div class="error" id="overtime-${mode}" hidden>⚠ Past 60 s. Switch to replay?</div>
+    ${missing}
     <div class="phases">${phases}</div>
     <table class="lanes"><thead><tr><th class="src">source</th>${head}</tr></thead><tbody>${rows}</tbody></table>
     <div class="decisions">${decisions}</div>
@@ -289,6 +311,17 @@ function render(mode) {
       <div><span>cost</span><strong>$${m.costUsd.toFixed(4)}</strong></div>
       <div><span>stop</span><strong>${esc(m.stopReason || (s.done ? "" : "running"))}</strong></div>
     </footer>`;
+  renderClock(mode);
+}
+
+/** Update only the clock and the overtime cue, so ticks don't rebuild the column (and its
+ *  hover tooltips) between events. */
+function renderClock(mode) {
+  const s = view.states[mode];
+  const secs = clockSeconds(s, { replay: view.replay, vt: player.vt, startedMs: view.started[mode],
+                                 nowMs: performance.now() });
+  $(`clock-${mode}`).textContent = `${secs.toFixed(1)} s`;
+  $(`overtime-${mode}`).hidden = !overtime(secs, s.done, view.replay);
 }
 
 function reset() {
@@ -298,7 +331,7 @@ function reset() {
 function startClock() {
   clearInterval(view.timer);
   view.timer = setInterval(() => {
-    for (const mode of MODES) if (!view.states[mode].done && view.started[mode]) render(mode);
+    for (const mode of MODES) if (!view.states[mode].done && view.started[mode]) renderClock(mode);
     if (MODES.every((m) => view.states[m].done)) clearInterval(view.timer);
   }, 100);
 }
@@ -388,20 +421,24 @@ function enterReplay() {
 }
 
 async function loadFiles(fileList) {
-  const files = await Promise.all([...fileList].map(async (f) => ({ name: f.name, text: await f.text() })));
-  const got = assignFiles(files);
-  if (!got.retrieval || !got.harness) {
-    banner("Replay needs both files of one run: *-retrieval.jsonl and *-harness.jsonl.");
-    return;
+  try {
+    const files = await Promise.all([...fileList].map(async (f) => ({ name: f.name, text: await f.text() })));
+    const got = assignFiles(files);
+    if (!replayable(got)) {
+      banner("Pick the files of one run: *-retrieval.jsonl and/or *-harness.jsonl (plus .meta.json).");
+      return;
+    }
+    player.runs = { retrieval: got.retrieval ? parseJsonl(got.retrieval) : [],
+                    harness: got.harness ? parseJsonl(got.harness) : [] };
+    view.gold = new Set((got.meta && Array.isArray(got.meta.gold) && got.meta.gold) || []);
+    $("question").textContent = questionText(got.meta, [...player.runs.harness, ...player.runs.retrieval]);
+    banner(`Replay: a saved run, played back with its original timing.${view.gold.size ? " ★ marks the gold documents." : ""}`);
+    rewind();
+    $("play").textContent = "Play";
+    $("play").disabled = false;
+  } catch (e) {
+    banner(`Could not load these files: ${e.message}`);
   }
-  player.runs = { retrieval: parseJsonl(got.retrieval), harness: parseJsonl(got.harness) };
-  view.gold = new Set((got.meta && got.meta.gold) || []);
-  const started = player.runs.harness.find((e) => e.type === "search_started");
-  const qText = (got.meta && got.meta.text) || (started && started.question.content.map((c) => c.text || "").join(" "));
-  $("question").textContent = qText || "";
-  banner(`Replay: a saved run, played back with its original timing.${view.gold.size ? " ★ marks the gold documents." : ""}`);
-  rewind();
-  $("play").disabled = false;
 }
 
 function rewind() {
@@ -424,12 +461,13 @@ function tick() {
   let pending = false;
   for (const mode of MODES) {
     const offs = player.offsets[mode];
+    const before = player.idx[mode];
     while (player.idx[mode] < offs.length && offs[player.idx[mode]].delayMs <= player.vt) {
       view.states[mode] = reduce(view.states[mode], offs[player.idx[mode]].ev);
       player.idx[mode] += 1;
     }
     if (player.idx[mode] < offs.length) pending = true;
-    render(mode);
+    if (player.idx[mode] !== before) render(mode); else renderClock(mode);
   }
   if (!pending) { pause(); $("play").textContent = "Replay again"; }
 }
