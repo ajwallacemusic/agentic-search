@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Retrieval vs Harness</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #ffffff; --fg: #111111; --muted: #4a4a4a; --line: #c8c8c8; --panel: #f4f4f4;
+    --accent: #0b4f9c; --good: #0a6b2d; --bad: #a3141b; --warn: #7a4b00;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 20px; line-height: 1.35;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center;
+    padding: 14px 20px; border-bottom: 2px solid var(--fg);
+  }
+  header h1 { font-size: 26px; margin: 0 12px 0 0; }
+  select, button, input[type=file] { font: inherit; }
+  select { padding: 6px 8px; max-width: 46ch; }
+  button {
+    padding: 6px 16px; border: 2px solid var(--fg); background: var(--bg); color: var(--fg);
+    border-radius: 6px; cursor: pointer; font-weight: 600;
+  }
+  button.primary { background: var(--fg); color: var(--bg); }
+  button:disabled { opacity: .45; cursor: default; }
+  .spacer { flex: 1; }
+  #question { padding: 10px 20px; font-size: 24px; font-weight: 600; border-bottom: 1px solid var(--line); }
+  #banner { display: none; padding: 8px 20px; background: var(--fg); color: var(--bg); font-weight: 600; }
+  #replay-bar { display: none; gap: 12px; align-items: center; flex-wrap: wrap; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  section.col { padding: 14px 20px 20px; border-right: 1px solid var(--line); min-width: 0; }
+  section.col:last-child { border-right: 0; }
+  .col h2 { margin: 0 0 8px; font-size: 24px; display: flex; justify-content: space-between; gap: 12px; }
+  .clock { font-variant-numeric: tabular-nums; font-weight: 700; }
+  .phases { display: flex; gap: 6px; margin: 6px 0 12px; flex-wrap: wrap; }
+  .phase {
+    padding: 2px 12px; border: 2px solid var(--line); border-radius: 999px; color: var(--muted);
+  }
+  .phase.on { border-color: var(--fg); color: var(--fg); font-weight: 700; }
+  .phase.on::before { content: "▶ "; }
+  .phase.done { color: var(--fg); }
+  table.lanes { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .lanes th, .lanes td { border: 1px solid var(--line); padding: 4px 6px; vertical-align: top; }
+  .lanes th { background: var(--panel); text-align: left; font-size: 18px; }
+  .lanes th.src { width: 9.5em; }
+  .chip { display: block; font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chip::before { content: "● "; color: var(--accent); }
+  .chip.err { color: var(--bad); }
+  .chip.err::before { content: "✗ "; color: var(--bad); }
+  .chip .n { color: var(--muted); }
+  .decisions { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; min-height: 1em; }
+  .badge {
+    border: 2px solid var(--fg); border-left-width: 8px; border-radius: 6px; padding: 4px 10px;
+    font-size: 19px;
+  }
+  .badge b { text-transform: uppercase; letter-spacing: .03em; }
+  .badge.stop { border-color: var(--good); }
+  .badge.refine, .badge.broaden, .badge.switch_source { border-color: var(--warn); }
+  .error { color: var(--bad); font-weight: 700; margin: 8px 0; }
+  ol.hits { margin: 6px 0 12px; padding-left: 1.6em; }
+  ol.hits li { margin: 3px 0; }
+  .hit-src { color: var(--muted); font-size: 18px; }
+  .rel { font-weight: 700; }
+  .gold { font-weight: 700; color: var(--good); }
+  footer.metrics {
+    display: grid; grid-template-columns: repeat(5, auto); gap: 4px 16px; border-top: 2px solid var(--fg);
+    padding-top: 8px; font-variant-numeric: tabular-nums;
+  }
+  footer.metrics span { color: var(--muted); font-size: 18px; display: block; }
+  footer.metrics strong { font-size: 24px; }
+  .empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Retrieval vs Harness</h1>
+  <div id="live-bar">
+    <label>Question <select id="q-select"></select></label>
+    <button id="run" class="primary">Run</button>
+  </div>
+  <div id="replay-bar">
+    <input type="file" id="files" multiple accept=".jsonl,.json">
+    <button id="play" disabled>Play</button>
+    <button id="pause" disabled>Pause</button>
+    <label>Speed <select id="speed"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option></select></label>
+  </div>
+  <div class="spacer"></div>
+  <button id="switch">Switch to replay</button>
+</header>
+<div id="banner"></div>
+<div id="question">Pick a question and press Run.</div>
+<main>
+  <section class="col" id="col-retrieval"></section>
+  <section class="col" id="col-harness"></section>
+</main>
+<script>
+/* <core> */
+const SOURCES = ["incidents", "deploys", "pull_requests", "dashboards", "runbooks"];
+const PHASES = ["plan", "query", "judge", "decide"];
+
+/** Split an SSE text buffer into parsed event objects; return the unfinished tail as `rest`. */
+function parseSse(buffer) {
+  const text = buffer.replace(/\r\n?/g, "\n");
+  const frames = text.split("\n\n");
+  const rest = frames.pop();
+  const events = [];
+  for (const frame of frames) {
+    const data = [];
+    for (const line of frame.split("\n")) {
+      if (line.startsWith(":")) continue;
+      if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+    }
+    if (!data.length) continue;
+    try { events.push(JSON.parse(data.join("\n"))); } catch (e) { /* skip a bad frame */ }
+  }
+  return { events, rest };
+}
+
+function initialState(mode) {
+  return {
+    mode, phase: null, turn: 0, done: false, error: null, calls: [], decisions: [], hits: [], notes: {},
+    metrics: { turns: 0, toolCalls: 0, seconds: 0, costUsd: 0, stopReason: null },
+  };
+}
+
+function withUsage(metrics, usage, atMs) {
+  const m = { ...metrics };
+  if (usage) { m.turns = usage.turns; m.toolCalls = usage.tool_calls; m.costUsd = usage.cost_usd; }
+  if (typeof atMs === "number") m.seconds = atMs / 1000;
+  return m;
+}
+
+/** turn -> controller note, from a final result's trace. The library's decide events carry no
+ *  note, so notes come from the trace (sent with the final event when include_trace is set). */
+function notesFromTrace(result) {
+  const out = {};
+  const events = (result && result.trace && result.trace.events) || [];
+  for (const e of events) if (e.type === "decision" && e.data && e.data.note) out[e.turn] = e.data.note;
+  return out;
+}
+
+/** Fold one event into the column state. Unknown event types leave the state unchanged. */
+function reduce(state, ev) {
+  switch (ev.type) {
+    case "search_started":
+      return { ...state, metrics: withUsage(state.metrics, null, ev.at_ms) };
+    case "phase_started":
+      return { ...state, phase: ev.phase, turn: ev.turn, metrics: withUsage(state.metrics, null, ev.at_ms) };
+    case "phase_finished": {
+      const s = { ...state, metrics: withUsage(state.metrics, null, ev.at_ms) };
+      const sum = ev.summary || {};
+      if (ev.phase === "decide" && sum.action) {
+        const note = sum.note || state.notes[ev.turn] || "";
+        s.decisions = [...state.decisions, { turn: ev.turn, action: sum.action, note }];
+      }
+      return s;
+    }
+    case "tool_call_started":
+      return { ...state, calls: [...state.calls, {
+        id: ev.call_id, turn: ev.turn, source: ev.source, name: ev.name, args: ev.arguments || {},
+        atMs: ev.at_ms, nHits: null, error: null }] };
+    case "tool_call_finished":
+      return { ...state, calls: state.calls.map((c) => c.id !== ev.call_id ? c : {
+        ...c, nHits: ev.n_hits, error: ev.error ? `${ev.error.kind}: ${ev.error.message}` : null }) };
+    case "results_updated":
+      return { ...state, hits: ev.hits || [] };
+    case "usage_updated":
+      return { ...state, metrics: withUsage(state.metrics, ev.usage, ev.at_ms) };
+    case "search_finished": {
+      const m = withUsage(state.metrics, ev.result && ev.result.usage, ev.at_ms);
+      m.stopReason = ev.stop_reason;
+      const notes = { ...state.notes, ...notesFromTrace(ev.result) };
+      const decisions = state.decisions.map((d) => d.note ? d : { ...d, note: notes[d.turn] || "" });
+      return { ...state, done: true, phase: null, metrics: m, notes, decisions };
+    }
+    case "search_failed": {
+      const m = withUsage(state.metrics, null, ev.at_ms);
+      m.stopReason = "failed";
+      return { ...state, done: true, phase: null, error: `${ev.error_type}: ${ev.message}`, metrics: m };
+    }
+    default:
+      return state;
+  }
+}
+/* </core> */
+
+const MODES = ["retrieval", "harness"];
+const TITLES = { retrieval: "Retrieval mode (one pass)", harness: "Harness mode (full loop)" };
+const view = { states: {}, started: {}, gold: new Set(), replay: false, timer: null };
+
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const $ = (id) => document.getElementById(id);
+
+function shortArgs(args) {
+  const shown = Object.entries(args).filter(([k]) => k !== "source" && k !== "collection");
+  return shown.map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`).join(" ");
+}
+
+function render(mode) {
+  const s = view.states[mode];
+  const el = $(`col-${mode}`);
+  const maxTurn = Math.max(0, s.turn, ...s.calls.map((c) => c.turn));
+  const turns = [...Array(maxTurn + 1).keys()];
+  const phaseIdx = PHASES.indexOf(s.phase);
+  const phases = PHASES.map((p, i) => {
+    const cls = p === s.phase ? "on" : (s.done || (phaseIdx >= 0 && i < phaseIdx)) ? "done" : "";
+    return `<span class="phase ${cls}">${p}</span>`;
+  }).join(" → ");
+  const rows = SOURCES.map((src) => {
+    const cells = turns.map((t) => {
+      const chips = s.calls.filter((c) => c.source === src && c.turn === t).map((c) => {
+        const n = c.error ? "" : c.nHits === null ? " …" : ` <span class="n">(${c.nHits})</span>`;
+        const title = esc(c.error || shortArgs(c.args));
+        return `<span class="chip ${c.error ? "err" : ""}" title="${title}">${esc(c.name)}${n}</span>`;
+      }).join("");
+      return `<td>${chips}</td>`;
+    }).join("");
+    return `<tr><th class="src">${src}</th>${cells}</tr>`;
+  }).join("");
+  const head = turns.map((t) => `<th>turn ${t + 1}</th>`).join("");
+  const decisions = s.decisions.map((d) =>
+    `<div class="badge ${esc(d.action)}">after turn ${d.turn + 1}: <b>${esc(d.action.replace("_", " "))}</b>${d.note ? " — " + esc(d.note) : ""}</div>`).join("");
+  const hits = s.hits.slice(0, 10).map((h) => {
+    const rel = h.judged && h.p_relevant != null && h.p_relevant >= 0.5 ? ` <span class="rel">✓ relevant</span>` : "";
+    const gold = view.replay && view.gold.has(h.doc_id) ? ` <span class="gold">★ gold</span>` : "";
+    return `<li>${esc(h.doc_id)} <span class="hit-src">${esc(h.source)}${h.title ? " · " + esc(h.title) : ""}</span>${rel}${gold}</li>`;
+  }).join("");
+  const m = s.metrics;
+  const secs = s.done ? m.seconds : view.started[mode] ? (performance.now() - view.started[mode]) / 1000 : m.seconds;
+  el.innerHTML = `
+    <h2><span>${TITLES[mode]}</span><span class="clock">${secs.toFixed(1)} s</span></h2>
+    <div class="phases">${phases}</div>
+    <table class="lanes"><thead><tr><th class="src">source</th>${head}</tr></thead><tbody>${rows}</tbody></table>
+    <div class="decisions">${decisions}</div>
+    ${s.error ? `<div class="error">✗ Search failed: ${esc(s.error)}</div>` : ""}
+    <ol class="hits">${hits || `<li class="empty">no results yet</li>`}</ol>
+    <footer class="metrics">
+      <div><span>turns</span><strong>${m.turns}</strong></div>
+      <div><span>tool calls</span><strong>${m.toolCalls}</strong></div>
+      <div><span>seconds</span><strong>${m.seconds.toFixed(1)}</strong></div>
+      <div><span>cost</span><strong>$${m.costUsd.toFixed(4)}</strong></div>
+      <div><span>stop</span><strong>${esc(m.stopReason || (s.done ? "" : "running"))}</strong></div>
+    </footer>`;
+}
+
+function reset() {
+  for (const mode of MODES) { view.states[mode] = initialState(mode); view.started[mode] = null; render(mode); }
+}
+
+function startClock() {
+  clearInterval(view.timer);
+  view.timer = setInterval(() => {
+    for (const mode of MODES) if (!view.states[mode].done && view.started[mode]) render(mode);
+    if (MODES.every((m) => view.states[m].done)) clearInterval(view.timer);
+  }, 100);
+}
+
+function apply(mode, ev) {
+  view.states[mode] = reduce(view.states[mode], ev);
+  render(mode);
+}
+
+function banner(text) {
+  $("banner").textContent = text || "";
+  $("banner").style.display = text ? "block" : "none";
+}
+
+// ---- live mode ----------------------------------------------------------------
+const live = { questions: [], aborts: [] };
+
+async function loadQuestions() {
+  try {
+    const r = await fetch("/ignite/questions");
+    live.questions = await r.json();
+    $("q-select").innerHTML = live.questions.map((q) => `<option value="${esc(q.id)}">${esc(q.id)} — ${esc(q.text)}</option>`).join("");
+  } catch (e) {
+    banner("Live server not reachable. Use Switch to replay.");
+  }
+}
+
+async function streamMode(mode, question, signal) {
+  view.started[mode] = performance.now();
+  try {
+    const resp = await fetch("/v1/search/stream", {
+      method: "POST", signal, headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: "ignite", question, mode, snapshot_k: 10, include_trace: true }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      const { events, rest } = parseSse(buffer);
+      buffer = rest;
+      for (const ev of events) apply(mode, ev);
+      if (done) break;
+    }
+    if (!view.states[mode].done) apply(mode, { type: "search_failed", error_type: "StreamClosed", message: "the stream ended without a result" });
+  } catch (e) {
+    if (e.name === "AbortError") return;
+    apply(mode, { type: "search_failed", error_type: e.name || "Error", message: e.message });
+  }
+}
+
+function runLive() {
+  const q = live.questions.find((x) => x.id === $("q-select").value);
+  if (!q) return;
+  stopLive();
+  view.replay = false;
+  banner("");
+  $("question").textContent = q.text;
+  reset();
+  startClock();
+  live.aborts = MODES.map(() => new AbortController());
+  MODES.forEach((mode, i) => streamMode(mode, q.text, live.aborts[i].signal));
+}
+
+function stopLive() {
+  live.aborts.forEach((a) => a.abort());
+  live.aborts = [];
+}
+
+// ---- replay mode (filled in by the replay task) -----------------------------
+function enterReplay() {
+  stopLive();
+  clearInterval(view.timer);
+  view.replay = true;
+  $("live-bar").style.display = "none";
+  $("replay-bar").style.display = "flex";
+  $("switch").style.display = "none";
+  banner("Replay: a saved run, played back with its original timing.");
+  $("question").textContent = "Load the -retrieval.jsonl and -harness.jsonl files of one run (and its .meta.json).";
+  reset();
+}
+
+$("run").addEventListener("click", runLive);
+$("switch").addEventListener("click", enterReplay);
+reset();
+if (location.protocol === "file:") enterReplay(); else loadQuestions();
+</script>
+</body>
+</html>
