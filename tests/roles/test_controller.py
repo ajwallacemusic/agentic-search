@@ -1,9 +1,17 @@
+from agentic_search import Harness
+from agentic_search.core.harness import HarnessSettings
 from agentic_search.core.hooks import Hooks
 from agentic_search.core.state import SearchState
 from agentic_search.core.types import Budget, Hit, Query, StopReason
-from agentic_search.models.base import Action, TurnSummary
+from agentic_search.models.base import Action, Fact, Step, TurnSummary
 from agentic_search.roles.controller import Controller
-from agentic_search.testing import FailingDecider, KeywordJudge, ScriptedController
+from agentic_search.testing import (
+    FailingDecider,
+    KeywordJudge,
+    ScriptedController,
+    ScriptedDriver,
+    call,
+)
 
 
 def state(budget=None, history=(), relevant=None):
@@ -91,3 +99,78 @@ async def test_decide_hook_raises_falls_back_to_heuristic():
     assert len(errors) > 0
     assert "PermissionError" in errors[0].data["error"]
     assert errors[0].data["decider"] == "scripted-controller"
+
+
+def with_steps(s, *steps):
+    s.steps = [Step(text=t, done=d) for t, d in steps]
+    return s
+
+
+def idle(**kw):
+    return TurnSummary(turn=0, n_calls=1, n_errors=0, n_new=0, n_new_relevant=0, top_keys=[], **kw)
+
+
+def test_fact_turn_continues_with_the_current_step():
+    s = with_steps(state(history=[turn(n_new_relevant=0, n_new=0, top=())]), ("a", True), ("find b", False))
+    s.history[-1].n_facts = 1
+    d = Controller(None).heuristic(s)
+    assert d.action is Action.CONTINUE and d.note == "step 2: find b"
+    s.history[-1].n_facts, s.history[-1].n_steps_done = 0, 1
+    assert Controller(None).heuristic(s).action is Action.CONTINUE
+
+
+def test_open_step_turns_stop_into_continue():
+    s = with_steps(state(history=[turn(n_new_relevant=0)], relevant=True), ("find a", False))
+    d = Controller(None).heuristic(s)
+    assert d.action is Action.CONTINUE and d.note == "step 1: find a"
+    s = with_steps(state(history=[turn(n_new_relevant=0)], relevant=False), ("find a", False))
+    assert Controller(None).heuristic(s).action is Action.CONTINUE
+    s = with_steps(state(history=[turn(n_calls=2, n_errors=2)]), ("find a", False))
+    assert Controller(None).heuristic(s).action is Action.REFINE
+
+
+def test_two_idle_turns_stop_as_stuck():
+    s = with_steps(state(history=[idle(), idle()], relevant=True), ("a", True), ("find b", False))
+    d = Controller(None).heuristic(s)
+    assert d.action is Action.STOP and d.note == "stuck on step 2"
+    s.history[0].n_facts = 1
+    assert Controller(None).heuristic(s).action is Action.CONTINUE
+    s = with_steps(state(history=[idle()], relevant=True), ("find b", False))
+    assert Controller(None).heuristic(s).action is Action.CONTINUE
+
+
+def test_all_steps_done_uses_the_old_rules():
+    s = with_steps(state(history=[turn(n_new_relevant=0)], relevant=True), ("a", True))
+    assert Controller(None).heuristic(s).action is Action.STOP
+    s = state(history=[turn(n_new_relevant=0)], relevant=False)
+    assert Controller(None).heuristic(s).action is Action.BROADEN
+
+
+async def test_steps_on_without_a_plan_behaves_like_off(docs_backend):
+    async def go(steps):
+        driver = ScriptedDriver([[call("lexical_search", source="docs", text="headache")]] * 3)
+        h = Harness([docs_backend], driver, embedders=[docs_backend.embedder],
+                    settings=HarnessSettings(steps=steps))
+        res = await h.search("q", budget=Budget(max_turns=3))
+        return res.stop_reason, res.usage.tool_calls, res.keys()
+    assert await go(True) == await go(False)
+
+
+async def test_budget_beats_an_open_step(docs_backend):
+    driver = ScriptedDriver([[call("plan_steps", steps=["a", "b", "c"]),
+                              call("lexical_search", source="docs", text="headache")],
+                             [call("lexical_search", source="docs", text="fever")],
+                             [call("lexical_search", source="docs", text="cough")]])
+    h = Harness([docs_backend], driver, embedders=[docs_backend.embedder],
+                settings=HarnessSettings(steps=True))
+    res = await h.search("q", budget=Budget(max_turns=2))
+    assert res.stop_reason is StopReason.BUDGET_TURNS
+
+
+async def test_controller_view_carries_steps():
+    ctrl = ScriptedController([Action.STOP])
+    s = with_steps(state(history=[turn()]), ("a", False))
+    s.notebook = [Fact(text="f", source_key="s:a", turn=0)]
+    d = await Controller(ctrl).decide(s)
+    assert d.action is Action.STOP
+    assert ctrl.views[0].steps[0].text == "a" and ctrl.views[0].notebook[0].text == "f"
