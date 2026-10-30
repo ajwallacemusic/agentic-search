@@ -23,9 +23,9 @@ def demo_data() -> DemoData:
     folder = Path(tempfile.mkdtemp(prefix="ignite-test-"))
     path, _ = _musique(folder)
     questions = folder / "questions.yaml"
-    questions.write_text(yaml.safe_dump([{"id": "hero", "musique_id": HERO_ID},
-                                         {"id": "two", "musique_id": "2hop__1"}]))
-    return load_demo(path, questions)
+    questions.write_text(yaml.safe_dump([{"id": "hero", "set": "musique", "ref": HERO_ID},
+                                         {"id": "two", "set": "musique", "ref": "2hop__1"}]))
+    return load_demo(corpora={"musique"}, musique_path=path, questions_path=questions)["musique"]
 
 
 def offline_harness(**kwargs):

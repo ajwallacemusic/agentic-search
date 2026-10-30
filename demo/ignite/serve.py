@@ -47,7 +47,7 @@ def main() -> None:
 
     args = build_parser().parse_args()
     cfg = load_config()
-    data = load_demo()
+    data = load_demo(corpora={"musique"})["musique"]
     profiles = {"ignite": build_demo_harness(cfg, data=data)}
     if os.environ.get("TYPESAFE_API_KEY"):
         profiles["ignite-typesafe"] = build_demo_harness(cfg, data=data, controller="typesafe")

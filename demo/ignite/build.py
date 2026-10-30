@@ -23,7 +23,7 @@ from agentic_search.embedders.base import Embedder
 from agentic_search.models.driver import ToolCallingDriver
 from agentic_search.models.llm_judge import LLMJudge
 from agentic_search.models.vertex import vertex_base_url, vertex_client
-from demo.ignite.corpus import DemoData, load_demo
+from demo.ignite.corpus import DemoData
 
 logger = logging.getLogger(__name__)
 
@@ -149,11 +149,10 @@ def _embedder(cfg: dict[str, Any], ctx: BuildContext) -> Embedder:
 
 def build_demo_harness(cfg: dict[str, Any], *,
                        controller: Literal["heuristic", "typesafe"] = "heuristic",
-                       data: DemoData | None = None, driver: Any = None, analyzer: Any = None,
+                       data: DemoData, driver: Any = None, analyzer: Any = None,
                        embedder: Embedder | None = None) -> Harness:
-    """The Ignite harness over the demo data (`load_demo()` unless given). The keyword overrides
-    let tests run offline; by default every role comes from `cfg`."""
-    data = data or load_demo()
+    """The Ignite harness over one corpus of the demo data. The keyword overrides let tests run
+    offline; by default every role comes from `cfg`."""
     return build_harness_for(cfg, data.documents, data.descriptions,
                              controller=controller, driver=driver, analyzer=analyzer,
                              embedder=embedder)
