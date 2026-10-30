@@ -115,8 +115,17 @@ def test_a_stalled_turn_is_cut_short():
     cfg = load_config()
     s = offline_harness().settings
     assert s.call_timeout <= 15 and s.decider_timeout <= 15
-    for role in ("driver", "judge"):
-        assert cfg[role]["request_timeout_s"] * (cfg[role]["max_retries"] + 1) <= 30
+    assert cfg["judge"]["request_timeout_s"] * (cfg["judge"]["max_retries"] + 1) <= 30
+    # Argon plans slowly; one planning call may take up to 45 s, retried once.
+    assert cfg["driver"]["request_timeout_s"] * (cfg["driver"]["max_retries"] + 1) <= 90
+
+
+def test_planner_is_gemini_4_argon():
+    from demo.ignite.build import load_config
+
+    driver = load_config()["driver"]
+    assert driver["model"] == "gemini-4-argon" and driver["price_per_mtok"] == [2.0, 10.0]
+    assert driver["request_timeout_s"] == 45
 
 
 def test_build_harness_for_one_source():
