@@ -1,0 +1,113 @@
+# Ignite Demo: WANDS, and Questions That Need the Loop
+
+**Status:** approved by AJ in chat, 2026-10-30
+**Builds on:** `docs/superpowers/specs/2026-10-29-ignite-demo-design.md` and the demo in `demo/ignite/` as merged to `main` at `93c5e72` (live demo on MuSiQue; public eval for MuSiQue and WANDS).
+
+## 1. Why
+
+The talk's message is "use the least agentic setting that works". Today the live demo only shows a case where the loop wins (MuSiQue). The room should also see, on the same models:
+
+1. **A case where the loop does not help:** WANDS as published (plain product searches such as "gray sectional sofa"). Measured already: nDCG@10 0.796 retrieval vs 0.776 harness, at about 3.5× the cost.
+2. **The same catalogue, with questions that need two steps:** our own WANDS questions, where the agent must look up one product first and then search with what it learned. The loop should win here.
+
+The point for the room: same catalogue, same models; the *kind of question* decides whether the loop is worth paying for.
+
+## 2. Goals
+
+- The live demo can run on three question sets: **MuSiQue** (exists), **WANDS** (published queries) and **WANDS match** (our questions).
+- A new labeled question set, "WANDS match", with rule-based relevance labels anyone can check.
+- An eval of bm25, retrieval and harness on WANDS match, written up like the existing public results.
+- README and slide numbers updated for all three parts.
+
+## 3. Non-goals
+
+- No changes under `src/` or `scripts/` (same rule as the first spec). A library gap is raised as a separate PR.
+- No new datasets beyond MuSiQue and WANDS.
+- No "same maker" or "same collection" questions: WANDS has no maker or brand field, and the first word of a product name is not a real collection (for example, "vezina" names a loveseat, a stool and a kitchen mat). AJ dropped this idea for that reason.
+- No LLM-written relevance labels. Labels come from rules over WANDS fields only.
+
+## 4. Anti-goals (a failure even if it works)
+
+- **Questions tuned to make the harness win.** The question set is fixed, by rule, before any model runs on it. Every question is scored and reported, including ones the harness loses. If a stage hero is picked from a scan, the README says so (as it already does for the MuSiQue hero).
+- **Labels nobody can check.** Each question's rule is written next to it, and the labels are rebuilt from the rule and `product.csv` by code. Nothing is hand-edited.
+- **A question that gives the answer away.** The question names the product the shopper owns, but never the attribute to match. "Find a nightstand that matches my Winkleman teak end table", not "find a light wood nightstand".
+
+## 5. The WANDS match questions
+
+### 5.1 Pattern: "look it up, then match it"
+
+Each question names one real WANDS product the shopper owns (the **anchor**) and asks for one or two other product types that match it on one attribute. Example:
+
+> I have the Winkleman recycled teak end table. Find a coffee table and a rug in the same style.
+
+- Step 1: find the anchor and read the attribute (here `style: rustic`).
+- Step 2: search the target product types for that attribute value.
+
+Three attributes, all parsed from `product_features` (`key : value` pairs split on `|`):
+
+| attribute | feature key | products with it |
+|---|---|---|
+| wood tone | `dswoodtone` | ~8,700 |
+| color | `color` | ~15,200 |
+| style | `style` | ~16,700 |
+
+A product can list the same key more than once with different values (about 1,100 products for wood tone, 3,200 for color, 2,000 for style). Rules for this (my call):
+
+- The anchor must have **exactly one** value for the question's attribute.
+- A target product matches if **any** of its values for that attribute equals the anchor's value.
+
+### 5.2 How many, and how they are chosen
+
+- About **20 questions**, mixed across the three attributes.
+- Candidates are chosen by a seeded script (seed 7) with these rules. The builder may tune the thresholds, but must fix them before any model run:
+  - The anchor has exactly one value for the attribute, and its name is **unique in the catalogue** (351 names appear more than once; my call).
+  - Each target product type (a `product_class`) is different from the anchor's.
+  - The rule's gold set has at least 5 products and is not most of the class: the attribute must narrow the class (a cap such as "at most half of the class", builder's call).
+  - The attribute value does not appear in the anchor's name (otherwise one pass could match it from the question words).
+- The question **text** is written by hand (Claude drafts it), from the anchor name and target types only. It is stored next to the rule.
+
+### 5.3 Labels
+
+- Gold for a question = every product whose `product_class` is one of the question's targets **and** any of whose attribute values equals the anchor's single value (after normalizing case and spaces). Relevance 1 (binary).
+- The anchor itself is never gold.
+- Labels are generated by code from the rule and the pinned `product.csv`, and written to a reviewable file. A test fails if the committed labels differ from what the rule produces.
+- Many questions will have dozens of right answers, so recall@10 is capped well below 1 for every mode. **Headline metric: precision@10** (share of the top 10 that is right). Also report nDCG@10 and MRR, as the existing tables do. The library eval has no precision@10, so the demo computes it (builder's call how; the existing `TurnRecorder` already wraps each search).
+
+### 5.4 Where it lives
+
+The question file (rule + text per question) and the generated labels live in `demo/ignite/` next to the MuSiQue `questions.yaml`. Names and layout are the builder's call.
+
+## 6. WANDS as published
+
+- Uses the existing seeded sample (`sample_wands`, 60 queries, full catalogue, Exact = 2, Partial = 1). The numbers in `results-wands.md` stay the reference.
+- For the live demo, pick 2–3 WANDS queries for the question picker. For example, one where retrieval and harness tie and one where the harness costs more for nothing. Same disclosure rule as the MuSiQue hero.
+
+## 7. Catalogue metadata: unchanged (AJ's decision)
+
+The WANDS documents stay exactly as they are (`_product_doc` in `public/datasets.py`). No new metadata fields. This keeps the published WANDS result (`results-wands.md`) valid without a re-run. In the match questions the agent reads the anchor's attribute from the product text (the features are part of the text), then searches with it. Both modes get the same tools; only the loop differs.
+
+## 8. Live demo changes
+
+- **Server:** one harness per corpus. MuSiQue stays as is. One WANDS harness serves both WANDS question sets (same 42,994-product catalogue). The viewer picks the corpus with the question.
+- **Viewer:** the question picker groups questions by set (MuSiQue / WANDS / WANDS match). Everything else (tool swimlanes, decisions, the bill, replay) stays the same. In replay, ★ gold marks work for all three sets.
+- **Runner:** `run_side_by_side --question <id>` works for questions from any set; question ids are unique across sets.
+- **Backups:** at least two clean saved runs for the WANDS match hero, and one for a WANDS published query, in `runs/`.
+- **Start-up time:** the WANDS harness embeds 42,994 products. `serve` must be ready in a time that works before a talk; the target is under 5 minutes on the presentation laptop. If it is slower, cache the embeddings on disk inside the demo (git-ignored), without changing `src/`. The builder measures this first.
+
+## 9. Eval and results
+
+- Extend `demo/ignite/public/eval_public.py` (or add a sibling) so `--dataset wands-match` scores bm25, retrieval and harness on the WANDS match questions, and writes `demo/ignite/results-wands-match.md` in the same shape as the other results files, with precision@10 added.
+- Groups in the table: by attribute (wood tone / color / style) plus an "All" row.
+- One run per question, as for the other sets. Record cost and time.
+
+## 10. Acceptance
+
+- The WANDS match labels are rebuilt from rules by code, and a test checks the committed labels match.
+- `results-wands-match.md` exists with all questions scored for all three modes. **No target result is required:** if the harness does not win, report it, and come back to AJ before changing the question set.
+- The viewer runs live and in replay for one question from each of the three sets.
+- README: a short section per set, the three-part story for the talk, and how to re-run.
+- `uv run pytest -q`, `uv run pytest demo/ignite/tests -q` and `uv run ruff check` stay clean; nothing under `src/` changed.
+
+## 11. Left to the builder
+
+File names and layout; the exact selection thresholds (fixed before any model run); how precision@10 is computed; whether the embedding cache is needed; the order of the work.
