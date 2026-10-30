@@ -49,3 +49,51 @@ Acres → Richland County): retrieval 1/4, harness 4/4 in the scan.
 | wluj (spare 4-hop) | 2/4 ×4, 3/4 | 4/4, 3/4, 4/4, 4/4, 3/4 | 11.1–12.9 s | ~$0.006 / ~$0.014 |
 
 **Passes** spec §9: harness 4/4 in 4 of 5 runs, all under 45 s; retrieval misses in 5 of 5.
+
+## Round 10: step tracking and Gemini 4 Argon (2026-10-30)
+
+Changes: library step tracking on (`settings.steps: true`, branch `feat/step-tracking`); planner
+`gemini-3.5-flash` → `gemini-4-argon` (`reasoning_effort: low`, cut at 45 s, 1 retry); all runs in
+project `ajw-sandbox-497707` (`gen-ai-accel-dev` refuses Argon with a 403 terms-of-use error).
+Judge unchanged.
+
+WANDS match, harness P@10 (20 questions, one run each):
+
+| Planner | Steps | P@10 | Note |
+|---|---|---|---|
+| 3.5 Flash | off | 0.050 | stepping stone judged not relevant; loop loses its place |
+| 3.5 Flash | on | 0.055 | Flash rarely writes facts to the notebook |
+| Argon, cut at 15 s | on | 0.180 | 3 time-outs |
+| Argon, cut at 45 s | on | 0.260 | no errors (scratch run) |
+| Argon, cut at 45 s | on | 0.230 | committed `results-wands-match.md`; retrieval 0.020 |
+
+Full re-run with Argon (committed results files), harness vs retrieval:
+
+| Set | Metric | Retrieval | Harness | Flash harness (round 9 settings + steps) |
+|---|---|---|---|---|
+| MuSiQue (60) | recall@10 | 0.715 | 0.886 | 0.828 |
+| WANDS (60) | nDCG@10 | 0.772 | 0.803 | 0.794 |
+| WANDS match (20) | P@10 | 0.020 | 0.230 | 0.055 |
+
+Harness cost per question with Argon: about $0.035 (MuSiQue), $0.050 (WANDS), $0.052 (WANDS
+match). Time: about 39–40 s on average. Step-tracking spec §6 goal for WANDS match was 0.30:
+**not met** (0.230). MuSiQue and WANDS quality goals are met; the WANDS cost bound (within 10% of
+$0.0273) is not, because Argon costs more per token than Flash.
+
+Picks, from the per-question scores of that re-run:
+
+- `match-hero` = `match-19` (P@10 harness 0.9, retrieval 0.0). Next best: `match-04` (0.8 vs 0.0).
+- `awning` = WANDS 260 (tie at nDCG 1.0; harness ~4× cost).
+- `trays` = WANDS 346 (harness 0.93 vs 0.96; ~4.5× cost).
+
+Rehearsals:
+
+| Question | Retrieval gold@10 | Harness gold@10 | Harness time | Cost per run (retrieval / harness) |
+|---|---|---|---|---|
+| match-hero (5 runs) | 0/40 ×5 | 10, 8, 2, 7, 10 (of 40) | 34.9–60.3 s | ~$0.010 / ~$0.052 |
+| hero (3 runs) | 1/4 ×3 | 4/4 ×3 | 31.5–34.9 s | ~$0.010 / ~$0.043 |
+| trays (1 run) | 9/19 | 9/19 | 44.4 s | $0.013 / $0.054 |
+
+Kept as backups: match-hero runs 1, 2 and 5; all 3 hero runs; trays. Runs 3 and 4 of match-hero
+were deleted. Replay checked in a headless browser for one run per set: no page errors, steps and
+facts show.

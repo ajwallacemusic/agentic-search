@@ -3,27 +3,41 @@
 One question, one corpus, one pair of models, two modes. **Retrieval** plans one pass and ranks
 what it finds. **Harness** runs the full loop: plan → query → judge → decide, and goes again when
 it does not have enough. The viewer shows both side by side as they run: which tools the agent
-uses on each turn and what it searches for, when the loop decides to keep going, and the bill.
+uses on each turn and what it searches for, the step it is on, when the loop decides to keep
+going, and the bill.
 
-Talk: "Will the Real Agentic Search Please Stand Up?" (Egen Ignite). Spec:
-`docs/superpowers/specs/2026-10-29-ignite-demo-design.md`.
+Talk: "Will the Real Agentic Search Please Stand Up?" (Egen Ignite). Specs:
+`docs/superpowers/specs/2026-10-29-ignite-demo-design.md`,
+`docs/superpowers/specs/2026-10-30-ignite-wands-design.md`.
 
-The corpus is public data with human labels: a seeded sample of **MuSiQue** (multi-hop questions
-over Wikipedia paragraphs). It is the same sample the public eval scores: 60 questions (20 each
-2-, 3- and 4-hop) and 5,000 paragraphs, in one source, `wiki`. Nothing in it was written by us.
-The demo questions are picked from the sample by MuSiQue id in `questions.yaml`.
+## The story in three parts
 
-Be open about the pick: the hero was chosen from a scan of all 20 sampled 4-hop questions
-because it shows the gap clearly (`tuning-log.md`, round 9). The fair numbers are the
-60-question averages in `results-musique.md`.
+1. **MuSiQue: the loop wins on multi-hop questions.** Each hop needs a fact from the hop before
+   it. One planned pass cannot know what to search for next.
+2. **WANDS: the loop barely helps plain product search.** Same models, same settings. Ranking
+   gets a little better for about 4× the cost. Use the least agentic setting that works.
+3. **WANDS match: the loop wins again when the question has steps.** Same WANDS catalogue, our own
+   rule-labeled questions: "I have product X. Find a Y with the same wood tone." First find X and
+   read its wood tone, then search for Y. One pass cannot do the second step.
 
-The hero question is a 4-hop question (`4hop1__777217_32392_823060_610794`):
+Three question sets, two corpora, all in `questions.yaml`:
+
+| set | corpus | questions | gold |
+|---|---|---|---|
+| `musique` | MuSiQue sample, 5,000 Wikipedia paragraphs (`wiki`) | MuSiQue ids | the supporting paragraphs (human labels) |
+| `wands` | WANDS catalogue, 42,994 products (`products`) | WANDS query ids | "Exact" labels (human labels) |
+| `wands-match` | the same WANDS catalogue | rule ids from `wands_match.yaml` | made by a rule from WANDS product features (ours) |
+
+Be open about the picks: every demo question was picked from a full scan because it shows the
+point clearly (`tuning-log.md`, rounds 9 and 10). The fair numbers are the averages in
+`results-musique.md`, `results-wands.md` and `results-wands-match.md`.
+
+### MuSiQue hero
+
+`hero` (`4hop1__777217_32392_823060_610794`):
 
 > What county is the city that shares a border with the state capital of the state where Andrew
 > Deveaux was born located in?
-
-Each hop needs a fact from the hop before it, so one planned pass cannot know what to search for
-next. Its four supporting paragraphs are the gold.
 
 | Hop | Gold paragraph | What it gives |
 |---|---|---|
@@ -35,6 +49,38 @@ next. Its four supporting paragraphs are the gold.
 Hops 2 and 3 sit in paragraphs about other things (Charleston, a radio station), so a search for
 the question's own words does not find them.
 
+### WANDS picks
+
+- `awning` (query 260, "retractable side awning"): a tie. Both modes nDCG@10 1.0; the harness
+  costs about 4× more.
+- `trays` (query 346, "nesting tray set"): the harness costs about 4.5× more and scores a little
+  lower (nDCG@10 0.93 vs 0.96).
+
+### WANDS match hero
+
+`match-hero` (rule `match-19`):
+
+> I have the Alaniz star single rocking chair. Find a patio sofa or patio table with the same wood
+> tone.
+
+The chair's features say `dswoodtone : light wood`. Gold: the 40 patio sofas and patio tables with
+that wood tone. The question never says "light wood", so a single pass searches for the chair or
+for "patio sofa" and finds no gold. The harness makes a 2-step plan, opens the chair, notes "wood
+tone: light wood" in its notebook, then searches patio sofas and tables for it.
+
+How the questions are made (`public/wands_match.py`):
+
+- The anchor product has exactly one value for the attribute (`wood_tone` from `dswoodtone`,
+  `color`, or `style`). Its name is unique in the catalogue, and the value is not in its name.
+- Gold: every product in the target classes whose feature has the same value. Not the anchor.
+- `select` picks the rules, deterministically. We wrote only the question text. `labels`
+  rebuilds `wands_match_labels.json` from the rules; a test checks the committed file matches.
+
+```bash
+uv run python -m demo.ignite.public.wands_match select   # candidate rules (prints YAML)
+uv run python -m demo.ignite.public.wands_match labels   # rewrites wands_match_labels.json
+```
+
 ## Setup
 
 ```bash
@@ -43,19 +89,26 @@ gcloud auth application-default login
 export IGNITE_GCP_PROJECT=ajw-sandbox-497707     # all demo runs use this project (Gemini 4 Argon works here; gen-ai-accel-dev refuses it)
 ```
 
-The first run downloads MuSiQue (about 30 MB) into `public/.cache/` (git-ignored) and checks it
-against a pinned SHA-256. After that the demo needs no download. Do the first run before the
-talk.
+The first run downloads MuSiQue (about 30 MB) and WANDS into `public/.cache/` (git-ignored) and
+checks each file against a pinned SHA-256. After that the demo needs no download. Do the first run
+before the talk.
 
-Models and prices are in `config.yaml` (Vertex, `global` endpoint):
+**Start-up time.** Setup embeds every document. The first WANDS start embeds 42,994 products and
+takes about 4.5 minutes. The vectors are then kept in
+`public/.cache/embeddings/document-vectors.npz` (`embedding_cache` in `config.yaml`), and later
+starts take about 10 s. Start `serve` once before the talk to fill the cache.
 
-| role | model | price per 1M tokens (in / out) |
-|---|---|---|
-| planner (driver) | `gemini-3.5-flash` | $1.50 / $9.00 |
-| judge | `gemini-3.5-flash-lite` | $0.30 / $2.50 |
+Models and prices are in `config.yaml` (Vertex, `global` endpoint, project `ajw-sandbox-497707`):
 
-Both modes use the same pair. Why these and not Gemini 3.8 Flash: see `tuning-log.md`. In short,
-3.7/3.8 Flash stalled for 35–60 s on about one call in eight, which kills a live run.
+| role | model | price per 1M tokens (in / out) | per call |
+|---|---|---|---|
+| planner (driver) | `gemini-4-argon` | $2.00 / $10.00 | `reasoning_effort: low`, cut at 45 s, 1 retry |
+| judge | `gemini-3.5-flash-lite` | $0.30 / $2.50 | cut at 15 s, 1 retry |
+
+Both modes use the same pair. Argon prices are the introductory prices; they are reported to go
+to $4 / $20 on 2026-12-01. Why Argon: with `gemini-3.5-flash` as the planner, the WANDS match
+harness scored P@10 0.055, because Flash did not write facts to its notebook. Argon does
+(`tuning-log.md`, round 10).
 
 To use Anthropic instead: comment out `driver:` and `judge:` and uncomment the `anthropic` line;
 set `ANTHROPIC_API_KEY` and `uv sync --extra anthropic`.
@@ -63,17 +116,22 @@ set `ANTHROPIC_API_KEY` and `uv sync --extra anthropic`.
 ### How the harness is built
 
 The YAML `files` backend loads a folder of files and keeps only file metadata (path, size, …).
-Each paragraph needs its `title` as metadata, so `corpus.py` loads the MuSiQue sample,
-`build.py` builds a `FilesBackend.from_documents(...)` from it in Python, and `serve.py` passes
-that `Harness` to the library's `create_app`. Nothing under `src/` changed.
+Each document needs its title as metadata, so `corpus.py` loads the samples, `build.py` builds
+one `FilesBackend.from_documents(...)` per corpus in Python, and `serve.py` passes those to the
+library's `create_app` (profile `ignite` for MuSiQue, `ignite-wands` for WANDS).
+
+**Step tracking** (`settings.steps: true` in `config.yaml`) is a library feature on branch
+`feat/step-tracking`, not yet on `main`. The planner keeps a short step plan and a notebook of
+facts it read in documents, with the document each fact came from. The loop does not stop while a
+step is open. The viewer shows the steps and facts as they happen. This demo branch sits on top of
+`feat/step-tracking`; the demo itself changes nothing under `src/`.
 
 `build.py` also works around three library gaps (each worth its own library PR):
 
 - `SerialEmbedder`: `Harness.setup()` indexes all sources at once; the shared
   sentence-transformers model segfaults when two threads load or run it.
 - `RequestDefaults` / `make_client`: the library's Vertex client cannot send `reasoning_effort`
-  or a per-request timeout. The demo sends `reasoning_effort: low`, cuts a request at 15 s and
-  retries twice.
+  or a per-request timeout.
 - The library's `decide` events leave out the controller's note. The viewer reads the notes from
   the trace in the final event, so in live mode the notes appear when each run ends.
 
@@ -81,77 +139,80 @@ that `Harness` to the library's `create_app`. Nothing under `src/` changed.
 
 ```bash
 uv run python -m demo.ignite.run_side_by_side --question hero         # terminal trace + summary
+uv run python -m demo.ignite.run_side_by_side --question match-hero   # WANDS match hero
 uv run python -m demo.ignite.run_side_by_side --question hero --save  # also writes runs/<stamp>-hero-*.jsonl
 uv run python -m demo.ignite.serve                           # http://127.0.0.1:8765/ (viewer + API)
-uv run python -m demo.ignite.public.eval_public --dataset musique     # writes results-musique.md
 uv run pytest demo/ignite/tests -q                           # demo tests (offline; needs node)
 ```
 
-Other questions: `--question <id>`; ids are in `questions.yaml`. To add one, add a line with a
-MuSiQue id from the seed-7 sample; `load_demo` fails if the id is not in the sample. Setup embeds
-5,000 paragraphs, so `serve` and the runner take a minute or two to start.
+Other questions: `--question <id>`; ids are in `questions.yaml`. To add one, add a line with its
+set and ref (a MuSiQue id, a WANDS query id from the seed-7 sample, or a rule id);
+`load_demo` fails if the ref is not in the sample.
 
 **Jev (TypeSafe) controller**, optional: set `TYPESAFE_API_KEY`, then
 `run_side_by_side --controller typesafe`. `serve` adds an `ignite-typesafe` profile when the key
-is set (the viewer itself runs the `ignite` profile).
+is set (the viewer itself runs the `ignite` and `ignite-wands` profiles).
 
 ## The viewer
 
 `viewer/index.html`, one file, no build step, no network calls except to `serve.py`.
 
-- **Live:** open `http://127.0.0.1:8765/`, pick a question, press **Run**. Both modes start at
-  the same time.
-- **Swimlanes:** one row per tool (`lexical`, `vector`, `filter`, `fetch`), one column per turn.
-  Each dot shows what that call searched for; hover for the full arguments. There is one source,
-  so the story is tool choice and follow-up searches, not source switching.
+- **Live:** open `http://127.0.0.1:8765/`, pick a question (grouped by set), press **Run**. Both modes
+  start at the same time.
+- **Swimlanes:** one row per tool (`lexical`, `vector`, `hybrid`, `filter`, `fetch`, …), one
+  column per turn. Each dot shows what that call searched for; hover for the full arguments.
+- **Steps:** under the harness lanes, the step plan with the current step marked **NOW**, and
+  each fact the planner noted, with its document.
 - **Replay:** press **Switch to replay** (or open `viewer/index.html` straight from Finder; no
   server or internet needed). Pick the three files of one saved run:
-  `<stamp>-hero-retrieval.jsonl`, `<stamp>-hero-harness.jsonl` and `<stamp>-hero.meta.json`.
+  `<stamp>-<id>-retrieval.jsonl`, `<stamp>-<id>-harness.jsonl` and `<stamp>-<id>.meta.json`.
   Press **Play**. Speed 1×/2×/4×, **Pause**, **Replay again**. Gold docs get ★ gold in replay
   only.
 
 ## Numbers for the slides
 
-Hero question, round 9 of `tuning-log.md` (5 runs): the harness found all four gold paragraphs
-in 4 of 5 runs, in 14–19 s, for about $0.019. Retrieval found 1 of 4 in all 5 runs, for about
-$0.005.
+All numbers: Argon planner, step tracking on, project `ajw-sandbox-497707`, one run per
+question, seed 7, 2026-10-30.
 
-MuSiQue, all 60 sampled questions (`results-musique.md`): recall@10 is 0.792 for harness and
-0.647 for retrieval. On 4-hop questions it is 0.775 vs 0.550. The harness costs about 2.6×.
+| set | what it tests | sample | metric | bm25 | retrieval | harness | harness cost vs retrieval |
+|---|---|---|---|---|---|---|---|
+| MuSiQue (multi-hop Wikipedia) | does the loop chase hops? | 60 questions (20 each 2/3/4-hop), 5,000 paragraphs | recall@10 | 0.468 | 0.715 | **0.886** | ~3.4× |
+| WANDS (Wayfair product search) | does the loop help plain ranking? | 60 queries, 42,994 products | nDCG@10 | 0.715 | 0.772 | 0.803 | ~4.0× |
+| WANDS match (ours) | does the loop help when a step needs a fact read on the way? | 20 questions, same catalogue | P@10 | 0.015 | 0.020 | **0.230** | ~4.9× |
+
+- **MuSiQue:** 4-hop recall@10 0.800 vs 0.637. 2 of 60 harness runs ended on a planner time-out.
+- **WANDS:** +0.03 nDCG@10 for about 4× the cost and about 4× the time (39 s vs 10 s). One run of
+  60 queries; treat the gain as small.
+- **WANDS match:** wood tone 0.271 vs 0.000, style 0.267 vs 0.050, color 0.157 vs 0.000 (P@10).
+  The harness gets 0 on 11 of 20 questions; quote the average, not only the hero.
+- The harness is slow: about 30–40 s per question, against about 10 s for retrieval.
+
+Hero runs (`tuning-log.md`, round 10):
+
+- MuSiQue `hero`: harness 4/4 gold in 3 of 3 runs, 31–35 s, about $0.043. Retrieval 1/4, about
+  $0.010.
+- WANDS match `match-hero`: harness gold in top 10 was 10, 8, 2, 7 and 10 in 5 runs, 35–60 s,
+  about $0.052. Retrieval 0 in all 5.
 
 Say on the slide: both modes run with `max_limit: 8` and `max_calls_per_turn: 6`
-(`config.yaml`). Small result pages make a single pass miss more than the loop does.
+(`config.yaml`), and a budget of 4 turns.
 
-## Public datasets (real labels, not written by us)
+## Public datasets and re-runs
 
-Both sets have human labels; nothing was written or tuned by us. MuSiQue is also the live demo's
-corpus. WANDS checks the "least agentic setting that works" point. Same planner, judge and
-settings as the demo; one source each; one run per query; seed 7.
+MuSiQue and WANDS have human labels; nothing in them was written or tuned by us. WANDS match
+uses the WANDS catalogue with our rule labels.
 
-| dataset | what it tests | sample | bm25 | retrieval | harness | harness cost vs retrieval |
-|---|---|---|---|---|---|---|
-| MuSiQue (multi-hop Wikipedia) | does the loop chase hops? | 60 questions (20 each 2/3/4-hop), 5,000 paragraphs | recall@10 0.468 | 0.647 | **0.792** | ~2.6× |
-| WANDS (Wayfair product search) | does the loop help plain ranking? | 60 queries, 42,994 products | nDCG@10 0.715 | **0.796** | 0.776 | ~3.5× |
+```bash
+uv run python -m demo.ignite.public.eval_public --dataset musique       # --n 20 per hop, --corpus-size 5000
+uv run python -m demo.ignite.public.eval_public --dataset wands         # --n 60
+uv run python -m demo.ignite.public.eval_public --dataset wands-match   # all 20 rules
+```
 
-- **MuSiQue:** the loop gains most on 4-hop questions (recall@10 0.775 vs 0.550).
-- **WANDS:** the loop does not improve ranking (nDCG@10 0.776 vs 0.796, within noise for one run
-  of 60 queries) and costs about 3.5×. Use the least agentic setting that works.
-- Per-hop gaps of a few points (e.g. MuSiQue 3-hop, 0.750 vs 0.717) are within noise too; quote
-  the "All" rows and 4-hop.
-- Full tables: `results-musique.md`, `results-wands.md`. Live runs took about 12 and 21
-  minutes and cost about $1.50 and $2.10.
+The three runs took about 25, 25 and 10 minutes and cost about $2.70, $3.80 and $1.30.
 
 Why MuSiQue and not HotpotQA: MuSiQue was built to drop questions a single-hop shortcut can answer,
 a known weakness of HotpotQA, and each question ships with its own 20 paragraphs, so a sample is
 self-contained.
-
-Re-run (downloads into `public/.cache/`, git-ignored; each file is checked against a pinned
-SHA-256):
-
-```bash
-uv run python -m demo.ignite.public.eval_public --dataset musique   # --n 20 per hop, --corpus-size 5000
-uv run python -m demo.ignite.public.eval_public --dataset wands     # --n 60
-```
 
 Credits: MuSiQue, Trivedi et al., TACL 2022 (CC BY 4.0), github.com/StonyBrookNLP/musique.
 WANDS, Chen et al., ECIR 2022 (MIT), github.com/wayfair/WANDS.
@@ -159,10 +220,11 @@ WANDS, Chen et al., ECIR 2022 (MIT), github.com/wayfair/WANDS.
 ## Rehearsal checklist
 
 1. Rehearse three times on the presentation laptop, on the venue network if you can.
-2. Before the talk: `gcloud auth application-default login` (tokens expire), start `serve`, run
-   the hero question once to warm up (model connections, embedder load), then reload the page.
-3. Keep a second tab open on `viewer/index.html` from disk with the backup run loaded in replay.
-4. Keep `results-musique.md` open in a third tab.
+2. Before the talk: `gcloud auth application-default login` (tokens expire), start `serve` (fills
+   the embedding cache on the first start), run `hero` and `match-hero` once to warm up, then
+   reload the page.
+3. Keep a second tab open on `viewer/index.html` from disk with the backup runs loaded in replay.
+4. Keep the three `results-*.md` files open in a third tab.
 
 ## Fallback
 
@@ -170,14 +232,19 @@ If a live run stalls past 60 seconds or shows **✗ Search failed**: press **Swi
 (or go to the replay tab) and say so plainly: "the live API is slow, here is the same run from
 this morning."
 
-Backup runs in `runs/`:
+Backup runs in `runs/` (Argon):
 
-- `20261029-163918-hero-*`: harness 4/4 in 11.1 s, retrieval 1/4.
-- `20261029-163955-hero-*`: harness 4/4 in 11.9 s, retrieval 1/4.
-- `20261029-163707-hero-*`: harness 4/4 in 15.2 s, retrieval 1/4.
+- `20261030-133739-hero-*`, `20261030-133833-hero-*`, `20261030-133927-hero-*`: MuSiQue hero,
+  harness 4/4, retrieval 1/4.
+- `20261030-132807-match-hero-*`: harness 10 gold in top 10, retrieval 0.
+- `20261030-133338-match-hero-*`: harness 10 gold in top 10, retrieval 0.
+- `20261030-132917-match-hero-*`: harness 8 gold in top 10, retrieval 0.
+- `20261030-133448-trays-*`: WANDS, both modes 9 of 19 gold in top 10; harness 4× the cost.
 
-The harness found all four in 9 of 12 hero runs so far, so do expect a 3/4 now and then.
+The `20261029-*-hero-*` runs are older, from the Flash planner.
 
-Known risk: Vertex latency spikes. A planner call that times out twice in a row ends the
-harness run with `APITimeoutError`. One model call waits at most about 30 s (15 s, one retry),
-and the viewer shows "⚠ Past 60 s. Switch to replay?" in a live column that runs long.
+**Known risk: live time.** A harness run takes 30–60 s with Argon, and the viewer shows "⚠ Past
+60 s. Switch to replay?" in a live column that runs long. A planner call that times out twice in a
+row ends the harness run with `APITimeoutError` (2 of 60 MuSiQue runs in the eval). One planner
+call waits at most about 90 s (45 s, one retry). For the WANDS match hero, expect a weak run (2/10
+once in 5); keep the replay ready.

@@ -15,3 +15,16 @@
 - id: dell
   set: musique
   ref: 2hop__15416_58040
+# WANDS picks: chosen from one full scan with Argon (2026-10-30, results-wands*.md), not at random.
+# match-hero: harness P@10 0.9, retrieval 0.0 (find the chair, read its wood tone, then match).
+- id: match-hero
+  set: wands-match
+  ref: match-19
+# awning: a tie. Both modes nDCG 1.0; harness costs ~4x more.
+- id: awning
+  set: wands
+  ref: '260'
+# trays: harness costs ~4.5x more and scores a little lower (nDCG 0.93 vs 0.96).
+- id: trays
+  set: wands
+  ref: '346'
