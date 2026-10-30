@@ -50,10 +50,12 @@ class TurnRecorder:
     def __init__(self, harness: Harness):
         self.harness = harness
         self.turns: dict[str, int] = {}
+        self.top10: dict[str, list[str]] = {}
 
     async def search(self, question: str | Query, **kwargs: Any) -> Any:
         result = await self.harness.search(question, **kwargs)
         self.turns[str(question)] = result.usage.turns
+        self.top10[str(question)] = [h.hit.doc_id for h in result.hits[:10]]
         return result
 
 
@@ -61,6 +63,11 @@ class TurnRecorder:
 class KindReport:
     report: EvalReport
     turns: list[int] = field(default_factory=list)
+    precision: list[float] = field(default_factory=list)  # P@10 per run; an errored run is 0
+
+
+def _precision_at_10(top10: list[str], qrels: dict[str, int]) -> float:
+    return sum(qrels.get(doc_id, 0) > 0 for doc_id in top10[:10]) / 10
 
 
 async def evaluate_groups(modes: list[str], harness_for: Callable[[str], Harness],
@@ -79,7 +86,10 @@ async def evaluate_groups(modes: list[str], harness_for: Callable[[str], Harness
                                         recall_k=10, concurrency=2,
                                         mode=run_mode)  # type: ignore[arg-type]
                 turns = [recorder.turns.get(dataset.queries[r.query_id], 0) for r in report.runs]
-                out[(mode, group)] = KindReport(report=report, turns=turns)
+                precision = [_precision_at_10(recorder.top10.get(dataset.queries[r.query_id], []),
+                                              dataset.qrels.get(r.query_id, {}))
+                             for r in report.runs]
+                out[(mode, group)] = KindReport(report=report, turns=turns, precision=precision)
     return out
 
 
@@ -88,16 +98,17 @@ def results_table(reports: dict[tuple[str, str], KindReport], groups: dict[str, 
     lines: list[str] = []
     for group, title in groups.items():
         lines += [f"## {title} questions", "",
-                  "| mode | nDCG@10 | recall@10 | MRR | avg turns | avg tool calls | avg cost | "
-                  "avg seconds | n | errors |",
-                  "|---|---|---|---|---|---|---|---|---|---|"]
+                  "| mode | nDCG@10 | P@10 | recall@10 | MRR | avg turns | avg tool calls | "
+                  "avg cost | avg seconds | n | errors |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|"]
         for (mode, g), kr in reports.items():
             if g != group:
                 continue
             r = kr.report
             turns = sum(kr.turns) / len(kr.turns) if kr.turns else 0.0
             errors = sum(run.error is not None for run in r.runs)
-            lines.append(f"| {mode} | {r.mean('ndcg'):.3f} | {r.mean('recall'):.3f} | "
+            p10 = sum(kr.precision) / len(kr.precision) if kr.precision else 0.0
+            lines.append(f"| {mode} | {r.mean('ndcg'):.3f} | {p10:.3f} | {r.mean('recall'):.3f} | "
                          f"{r.mean('mrr'):.3f} | {turns:.1f} | {r.mean('tool_calls'):.1f} | "
                          f"${r.mean('cost_usd'):.4f} | {r.mean('seconds'):.1f} | {len(r.runs)} | "
                          f"{errors} |")

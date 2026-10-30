@@ -19,7 +19,12 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel
 
-from demo.ignite.public.datasets import _tsv
+from demo.ignite.public.datasets import (
+    WANDS_DESCRIPTION,
+    PublicSample,
+    _product_doc,
+    _tsv,
+)
 
 DEMO_DIR = Path(__file__).parent.parent
 MATCH_PATH = DEMO_DIR / "wands_match.yaml"
@@ -176,6 +181,21 @@ def select_rules(products: dict[str, Product], *, n: int = 20, seed: int = 7, mi
                                        attribute=attr, targets=[c for c, _ in picked]))
                 break
     return rules
+
+
+def sample_wands_match(folder: Path, rules_path: Path = MATCH_PATH,
+                       labels_path: Path = LABELS_PATH) -> PublicSample:
+    """The WANDS match questions over the full catalogue (the same documents as `sample_wands`),
+    with the committed rule labels (relevance 1), grouped by attribute."""
+    rules = load_rules(rules_path)
+    labels = json.loads(Path(labels_path).read_text())
+    groups = {a: [r.id for r in rules if r.attribute == a] for a in ATTRIBUTES}
+    return PublicSample(
+        name="wands-match", source="products", description=WANDS_DESCRIPTION,
+        documents=[_product_doc(r) for r in _tsv(Path(folder) / "product.csv")],
+        queries={r.id: r.text for r in rules},
+        qrels={r.id: {d: 1 for d in labels[r.id]} for r in rules},
+        groups={a: ids for a, ids in groups.items() if ids})
 
 
 def _select_yaml(products: dict[str, Product], rules: list[MatchRule]) -> str:

@@ -99,6 +99,9 @@ def sample_musique(path: Path, *, per_hop: int = 20, corpus_size: int = 5000,
 # ---- WANDS --------------------------------------------------------------------------------
 
 WANDS_GAIN = {"Exact": 2, "Partial": 1}
+WANDS_DESCRIPTION = ("Wayfair product catalogue, one product per item: name, class, category "
+                     "path, description, features. Fields: title, product_class, category, "
+                     "rating_count, average_rating.")
 
 
 def _tsv(path: Path) -> list[dict[str, str]]:
@@ -151,9 +154,5 @@ def sample_wands(folder: Path, *, n: int = 60, seed: int = 7) -> PublicSample:
     texts = {r["query_id"]: r["query"] for r in _tsv(folder / "query.csv")}
     docs = [_product_doc(r) for r in _tsv(folder / "product.csv")]
     return PublicSample(
-        name="wands", source="products",
-        description=("Wayfair product catalogue, one product per item: name, class, category "
-                     "path, description, features. Fields: title, product_class, category, "
-                     "rating_count, average_rating."),
-        documents=docs, queries={q: texts[q] for q in chosen},
+        name="wands", source="products", description=WANDS_DESCRIPTION, documents=docs, queries={q: texts[q] for q in chosen},
         qrels={q: graded[q] for q in chosen}, groups={"all": chosen})

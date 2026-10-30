@@ -136,3 +136,25 @@ def test_committed_labels_match_the_rules():
 
     from demo.ignite.public.wands_match import LABELS_PATH, build_labels, load_rules
     assert build_labels(load_rules(), _real_products()) == json.loads(LABELS_PATH.read_text())
+
+
+def test_sample_wands_match_groups_by_attribute(tmp_path):
+    import json
+
+    import yaml
+
+    from demo.ignite.public.wands_match import sample_wands_match
+    folder = _folder(tmp_path)
+    rules = [MatchRule(id="m1", anchor_id="1", attribute="style", targets=["Coffee Tables"],
+                       text="I have the winkleman teak end table. A coffee table to match?"),
+             MatchRule(id="m2", anchor_id="13", attribute="wood_tone", targets=["Nightstands"],
+                       text="I have the pell dresser. A nightstand to match?")]
+    (tmp_path / "rules.yaml").write_text(yaml.safe_dump([r.model_dump() for r in rules]))
+    (tmp_path / "labels.json").write_text(json.dumps({"m1": ["wands-2", "wands-3"],
+                                                      "m2": ["wands-11", "wands-16"]}))
+    s = sample_wands_match(folder, tmp_path / "rules.yaml", tmp_path / "labels.json")
+    assert s.name == "wands-match" and s.source == "products"
+    assert s.groups == {"style": ["m1"], "wood_tone": ["m2"]}
+    assert s.queries["m1"] == rules[0].text
+    assert s.qrels == {"m1": {"wands-2": 1, "wands-3": 1}, "m2": {"wands-11": 1, "wands-16": 1}}
+    assert len(s.documents) == len(PRODUCTS)

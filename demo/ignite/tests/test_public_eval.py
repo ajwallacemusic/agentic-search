@@ -27,3 +27,16 @@ async def test_all_row_pools_the_group_runs(tmp_path):
     runs = [r for g in sample.groups for r in reports[("bm25", g)].report.runs]
     assert len(pooled.report.runs) == 6
     assert pooled.report.mean("recall") == sum(r.recall for r in runs) / len(runs)
+
+
+async def test_all_row_pools_precision(tmp_path):
+    from demo.ignite.eval import evaluate_groups
+    from demo.ignite.public.eval_public import _harness_for, _with_all
+
+    path, _ = _musique(tmp_path)
+    sample = sample_musique(path, per_hop=2, corpus_size=40)
+    reports = await evaluate_groups(["bm25"], _harness_for(sample), sample.to_beir(),
+                                    sample.groups, name="t")
+    pooled = _with_all(reports, sample.groups)[("bm25", "all")]
+    assert pooled.precision == [p for g in sample.groups for p in reports[("bm25", g)].precision]
+    assert len(pooled.precision) == 6

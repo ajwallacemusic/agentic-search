@@ -1,6 +1,6 @@
 """Score bm25, retrieval and harness modes on a public dataset sample; write results-<name>.md.
 
-Run: uv run python -m demo.ignite.public.eval_public --dataset musique|wands
+Run: uv run python -m demo.ignite.public.eval_public --dataset musique|wands|wands-match
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from demo.ignite.build import build_harness_for, load_config
 from demo.ignite.eval import KindReport, bm25_harness_for, evaluate_groups, results_table
 from demo.ignite.public.datasets import PublicSample, sample_musique, sample_wands
 from demo.ignite.public.fetch import FILES, fetch, sha256_of
+from demo.ignite.public.wands_match import LABELS_PATH, MATCH_PATH, sample_wands_match
 
 RESULTS_DIR = Path(__file__).parent.parent
 
@@ -28,6 +29,13 @@ ABOUT = {
     "wands": ("WANDS (Wayfair, Chen et al., ECIR 2022, MIT): product search with human labels. "
               "Gold: Exact = 2, Partial = 1. Many queries have dozens of Exact products, so "
               "recall@10 stays low for every mode; nDCG@10 is the headline metric."),
+    "wands-match": ("WANDS match: our own questions over the WANDS catalogue (Wayfair, MIT). Each "
+                    "names a product the shopper owns and asks for other product types that match "
+                    "it on wood tone, color or style. Questions and rules are ours (picked by a "
+                    "seeded rule before any model ran, `wands_match.yaml`); labels are built from "
+                    "the rules, not by a model: gold = a target product type with the anchor's "
+                    "value. Most questions have more than 10 right answers, so P@10 (share of "
+                    "the top 10 that is right) is the headline metric."),
 }
 
 
@@ -55,7 +63,8 @@ def _with_all(reports: dict[tuple[str, str], KindReport],
         out[(mode, "all")] = KindReport(
             report=EvalReport(name=f"{first.name.rsplit('/', 1)[0]}/all", k=first.k,
                               recall_k=first.recall_k, runs=runs),
-            turns=[t for p in parts for t in p.turns])
+            turns=[t for p in parts for t in p.turns],
+            precision=[x for p in parts for x in p.precision])
     return out
 
 
@@ -85,15 +94,21 @@ async def write_results(sample: PublicSample, modes: list[str], out: Path, *,
 
 async def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--dataset", choices=sorted(FILES), required=True)
+    p.add_argument("--dataset", choices=[*sorted(FILES), "wands-match"], required=True)
     p.add_argument("--n", type=int, help="musique: questions per hop count (20); wands: queries (60)")
     p.add_argument("--corpus-size", type=int, default=5000, help="musique only")
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--modes", default="bm25,retrieval,harness")
     args = p.parse_args()
-    folder = fetch(args.dataset)
-    hashes = {name: sha256_of(folder / name) for name in FILES[args.dataset]}
-    if args.dataset == "musique":
+    source = "wands" if args.dataset == "wands-match" else args.dataset
+    folder = fetch(source)
+    hashes = {name: sha256_of(folder / name) for name in FILES[source]}
+    if args.dataset == "wands-match":
+        settings = {"questions": MATCH_PATH.name, "labels": LABELS_PATH.name}
+        hashes = {"product.csv": hashes["product.csv"], MATCH_PATH.name: sha256_of(MATCH_PATH),
+                  LABELS_PATH.name: sha256_of(LABELS_PATH)}
+        sample = sample_wands_match(folder)
+    elif args.dataset == "musique":
         settings = {"per_hop": args.n or 20, "corpus_size": args.corpus_size, "seed": args.seed}
         sample = sample_musique(folder / "musique_ans_v1.0_dev.jsonl", **settings)
     else:
