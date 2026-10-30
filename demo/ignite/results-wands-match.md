@@ -11,34 +11,33 @@ Source files (SHA-256): `product.csv` d993926254572e6eba96c8fd87cc549a17fb91ad37
 | mode | nDCG@10 | P@10 | recall@10 | MRR | avg turns | avg tool calls | avg cost | avg seconds | n | errors |
 |---|---|---|---|---|---|---|---|---|---|---|
 | bm25 | 0.032 | 0.043 | 0.002 | 0.040 | 1.0 | 1.0 | $0.0000 | 0.3 | 7 | 0 |
-| retrieval | 0.031 | 0.014 | 0.001 | 0.143 | 1.0 | 2.6 | $0.0063 | 5.4 | 7 | 0 |
-| harness | 0.093 | 0.086 | 0.034 | 0.183 | 2.9 | 9.4 | $0.0208 | 22.0 | 7 | 0 |
+| retrieval | 0.000 | 0.000 | 0.000 | 0.000 | 1.0 | 2.1 | $0.0069 | 5.4 | 7 | 0 |
+| harness | 0.127 | 0.129 | 0.032 | 0.150 | 3.3 | 9.6 | $0.0229 | 15.7 | 7 | 0 |
 
 ## color questions
 
 | mode | nDCG@10 | P@10 | recall@10 | MRR | avg turns | avg tool calls | avg cost | avg seconds | n | errors |
 |---|---|---|---|---|---|---|---|---|---|---|
 | bm25 | 0.000 | 0.000 | 0.000 | 0.000 | 1.0 | 1.0 | $0.0000 | 0.2 | 7 | 0 |
-| retrieval | 0.000 | 0.000 | 0.000 | 0.000 | 1.0 | 2.9 | $0.0061 | 8.2 | 7 | 0 |
-| harness | 0.044 | 0.043 | 0.052 | 0.090 | 3.0 | 11.4 | $0.0221 | 20.6 | 7 | 0 |
+| retrieval | 0.000 | 0.000 | 0.000 | 0.000 | 1.0 | 2.0 | $0.0067 | 4.5 | 7 | 0 |
+| harness | 0.010 | 0.014 | 0.008 | 0.033 | 3.7 | 11.6 | $0.0252 | 15.0 | 7 | 0 |
 
 ## style questions
 
 | mode | nDCG@10 | P@10 | recall@10 | MRR | avg turns | avg tool calls | avg cost | avg seconds | n | errors |
 |---|---|---|---|---|---|---|---|---|---|---|
 | bm25 | 0.000 | 0.000 | 0.000 | 0.022 | 1.0 | 1.0 | $0.0000 | 0.3 | 6 | 0 |
-| retrieval | 0.000 | 0.000 | 0.000 | 0.000 | 1.0 | 3.7 | $0.0071 | 6.4 | 6 | 0 |
-| harness | 0.011 | 0.017 | 0.013 | 0.042 | 3.0 | 10.3 | $0.0211 | 23.0 | 6 | 0 |
+| retrieval | 0.000 | 0.000 | 0.000 | 0.000 | 1.0 | 2.3 | $0.0070 | 5.0 | 6 | 0 |
+| harness | 0.020 | 0.017 | 0.024 | 0.063 | 3.3 | 10.5 | $0.0237 | 16.3 | 6 | 0 |
 
 ## All questions
 
 | mode | nDCG@10 | P@10 | recall@10 | MRR | avg turns | avg tool calls | avg cost | avg seconds | n | errors |
 |---|---|---|---|---|---|---|---|---|---|---|
 | bm25 | 0.011 | 0.015 | 0.001 | 0.021 | 1.0 | 1.0 | $0.0000 | 0.3 | 20 | 0 |
-| retrieval | 0.011 | 0.005 | 0.000 | 0.050 | 1.0 | 3.0 | $0.0065 | 6.7 | 20 | 0 |
-| harness | 0.051 | 0.050 | 0.034 | 0.108 | 3.0 | 10.4 | $0.0213 | 21.8 | 20 | 0 |
+| retrieval | 0.000 | 0.000 | 0.000 | 0.000 | 1.0 | 2.1 | $0.0069 | 5.0 | 20 | 0 |
+| harness | 0.054 | 0.055 | 0.021 | 0.083 | 3.5 | 10.6 | $0.0240 | 15.6 | 20 | 0 |
 
 `bm25`: one BM25 search with the question text, no model. `retrieval` and `harness` use the same planner, judge and settings as the Ignite demo (`config.yaml`).
 
 One run per query. Model runs vary, so treat differences of a few points as noise.
-
