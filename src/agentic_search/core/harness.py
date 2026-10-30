@@ -9,7 +9,7 @@ import time
 import uuid
 from typing import Any, AsyncIterator, Callable, Literal, Sequence
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agentic_search.backends.base import Backend
 from agentic_search.core.annotations import apply_annotations
@@ -76,6 +76,9 @@ class HarnessSettings(BaseModel):
     decider_timeout: float = 60.0
     min_new_relevant: int = 1
     discover_timeout: float | None = 300.0
+    steps: bool = False
+    snippet_chars: int = Field(240, ge=40)
+    fetch_chars: int = Field(1500, ge=100)
 
 
 class _Options(BaseModel):
@@ -334,7 +337,8 @@ class Harness:
                             per_source_concurrency=s.per_source_concurrency, max_limit=s.max_limit)
         analyzer = Analyzer(self.analyzer_decider, hooks=self.hooks, policy=self.policy,
                             relevant_threshold=s.relevant_threshold, judge_weight=s.judge_weight,
-                            batch_size=s.judge_batch_size, timeout=s.decider_timeout)
+                            batch_size=s.judge_batch_size, timeout=s.decider_timeout,
+                            snippet_chars=s.snippet_chars)
         controller = Controller(self.controller_decider, hooks=self.hooks,
                                 relevant_threshold=s.relevant_threshold,
                                 min_new_relevant=s.min_new_relevant, timeout=s.decider_timeout)
