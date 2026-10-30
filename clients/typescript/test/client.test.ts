@@ -57,6 +57,21 @@ describe("AgenticSearchClient", () => {
     expect(headers.get("X-Trace")).toBe("t1");
   });
 
+  it("parses steps_updated and fact_noted events", async () => {
+    const steps = { ...base, seq: 1, type: "steps_updated", steps: [{ text: "a", done: true }, { text: "b", done: false }], current: 1 };
+    const fact = { ...base, seq: 2, type: "fact_noted", fact: "f1", source_key: "docs:d1" };
+    const fetch = fakeFetch(() => sseResponse([frame(0, started), frame(1, steps), frame(2, fact), frame(3, finished)]));
+    const client = new AgenticSearchClient({ baseUrl: "http://svc", fetch });
+    const unknown: string[] = [];
+    const got: SearchEvent[] = [];
+    for await (const ev of client.stream({ question: "q" }, { onUnknownEvent: (t) => unknown.push(t) })) got.push(ev);
+    expect(unknown).toEqual([]);
+    expect(got.map((e) => e.type)).toEqual(["search_started", "steps_updated", "fact_noted", "search_finished"]);
+    const s = got[1]!;
+    if (s.type === "steps_updated") expect(s.current).toBe(1);
+    else throw new Error("expected steps_updated");
+  });
+
   it("skips unknown event types and reports them", async () => {
     const future = { ...base, seq: 1, type: "thinking", text: "hmm" };
     const fetch = fakeFetch(() => sseResponse([frame(0, started), frame(1, future), frame(2, finished)]));

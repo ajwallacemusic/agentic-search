@@ -10,6 +10,7 @@ from agentic_search.core.harness import (
 )
 from agentic_search.core.types import Budget, Query
 from agentic_search.events import (
+           FactNoted,
            HitSummary,
            PhaseFinished,
            PhaseStarted,
@@ -19,6 +20,7 @@ from agentic_search.events import (
            SearchFailed,
            SearchFinished,
            SearchStarted,
+           StepsUpdated,
            ToolCallFinished,
            ToolCallStarted,
            ToolErrorInfo,
@@ -27,7 +29,8 @@ from agentic_search.events import (
 
 __version__ = "0.1.0"
 
-__all__ = ["Budget", "Harness", "HarnessError", "HarnessSettings", "HitSummary", "PhaseFinished",
+__all__ = ["Budget", "FactNoted", "Harness", "HarnessError", "HarnessSettings", "HitSummary", "PhaseFinished",
            "PhaseStarted", "PhaseSummary", "Query", "RankedHit", "ResultsUpdated", "SearchEvent",
            "SearchFailed", "SearchFinished", "SearchResult", "SearchStarted", "SearchStream",
-           "ToolCallFinished", "ToolCallStarted", "ToolErrorInfo", "UsageUpdated", "__version__"]
+           "StepsUpdated", "ToolCallFinished", "ToolCallStarted", "ToolErrorInfo", "UsageUpdated",
+           "__version__"]

@@ -32,6 +32,7 @@ import {
   type TextPart,
   type ToolErrorInfo,
   type ToolErrorKind,
+  type Step,
   type Trace,
   type TraceEvent,
   type Usage,
@@ -81,6 +82,8 @@ const EVENT_FIELDS = {
   usage_updated: fields<EventOf<"usage_updated">>()(["type", "schema_version", "search_id", "seq", "turn", "at_ms", "usage"]),
   search_finished: fields<EventOf<"search_finished">>()(["type", "schema_version", "search_id", "seq", "turn", "at_ms", "result", "stop_reason"]),
   search_failed: fields<EventOf<"search_failed">>()(["type", "schema_version", "search_id", "seq", "turn", "at_ms", "error_type", "message"]),
+  steps_updated: fields<EventOf<"steps_updated">>()(["type", "schema_version", "search_id", "seq", "turn", "at_ms", "steps", "current"]),
+  fact_noted: fields<EventOf<"fact_noted">>()(["type", "schema_version", "search_id", "seq", "turn", "at_ms", "fact", "source_key"]),
 } satisfies Record<SearchEvent["type"], readonly string[]>;
 
 const MODEL_FIELDS = {
@@ -89,6 +92,7 @@ const MODEL_FIELDS = {
   PhaseSummary: fields<PhaseSummary>()(["n_calls", "n_hits", "n_new", "n_errors", "n_judged", "n_relevant", "action", "confidence", "n_ranked", "note", "error"]),
   ToolErrorInfo: fields<ToolErrorInfo>()(["kind", "message", "source"]),
   HitSummary: fields<HitSummary>()(["key", "source", "doc_id", "title", "snippet", "score", "p_relevant", "judged", "rationale", "first_turn", "content"]),
+  Step: fields<Step>()(["text", "done"]),
   Query: fields<Query>()(["content"]),
   TextPart: fields<TextPart>()(["kind", "text"]),
   ImagePart: fields<ImagePart>()(["kind", "uri", "data", "mime"]),
@@ -111,6 +115,8 @@ const EVENT_NULLABLE = {
   usage_updated: nullable<EventOf<"usage_updated">>()([]),
   search_finished: nullable<EventOf<"search_finished">>()([]),
   search_failed: nullable<EventOf<"search_failed">>()([]),
+  steps_updated: nullable<EventOf<"steps_updated">>()(["current"]),
+  fact_noted: nullable<EventOf<"fact_noted">>()([]),
 } satisfies Record<SearchEvent["type"], readonly string[]>;
 
 const MODEL_NULLABLE = {
@@ -119,6 +125,7 @@ const MODEL_NULLABLE = {
   PhaseSummary: nullable<PhaseSummary>()(["n_calls", "n_hits", "n_new", "n_errors", "n_judged", "n_relevant", "action", "confidence", "n_ranked", "note", "error"]),
   ToolErrorInfo: nullable<ToolErrorInfo>()(["source"]),
   HitSummary: nullable<HitSummary>()(["title", "p_relevant", "rationale", "content"]),
+  Step: nullable<Step>()([]),
   Query: nullable<Query>()([]),
   TextPart: nullable<TextPart>()([]),
   ImagePart: nullable<ImagePart>()(["uri", "data"]),
