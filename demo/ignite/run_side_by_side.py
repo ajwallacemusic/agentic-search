@@ -17,11 +17,13 @@ from pydantic import BaseModel
 
 from agentic_search.core.harness import Harness, Mode
 from agentic_search.events import (
+    FactNoted,
     PhaseFinished,
     PhaseStarted,
     SearchEvent,
     SearchFailed,
     SearchFinished,
+    StepsUpdated,
     ToolCallFinished,
     ToolCallStarted,
     UsageUpdated,
@@ -66,6 +68,12 @@ def format_event(ev: SearchEvent) -> str | None:
         return f"      ✗ {ev.error.kind}: {ev.error.message[:ARGS_CHARS]}"
     if isinstance(ev, PhaseFinished) and ev.phase == "decide" and ev.summary.action:
         return f"  ◆ {ev.summary.action}: {ev.summary.note or ''}"
+    if isinstance(ev, StepsUpdated):
+        if ev.current is None:
+            return "▸ all steps done"
+        return f"▸ step {ev.current + 1}: {ev.steps[ev.current].text}"
+    if isinstance(ev, FactNoted):
+        return f"✎ {ev.fact} (from {ev.source_key})"
     if isinstance(ev, SearchFailed):
         return f"  ✗ search failed: {ev.error_type}: {ev.message}"
     return None

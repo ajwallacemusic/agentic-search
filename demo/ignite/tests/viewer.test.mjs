@@ -9,8 +9,8 @@ const html = readFileSync(new URL("../viewer/index.html", import.meta.url), "utf
 const core = html.split("/* <core> */")[1].split("/* </core> */")[0];
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(core + "\n;globalThis.core = { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable };", ctx);
-const { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable } = ctx.core;
+vm.runInContext(core + "\n;globalThis.core = { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml };", ctx);
+const { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml } = ctx.core;
 
 const ev = (type, extra = {}) => ({ type, search_id: "s", seq: 0, turn: 0, at_ms: 0, ...extra });
 const frame = (e) => `id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
@@ -217,4 +217,44 @@ test("questionText prefers meta, then search_started, and never throws", () => {
 test("replayable needs at least one run file", () => {
   assert.equal(replayable({ retrieval: "r", harness: null, meta: null }), true);
   assert.equal(replayable({ retrieval: null, harness: null, meta: { gold: [] } }), false);
+});
+
+test("reduce keeps steps and facts", () => {
+  let s = initialState("harness");
+  assert.equal(JSON.stringify([s.steps, s.current, s.facts]), JSON.stringify([[], null, []]));
+  const steps = [{ text: "find author", done: true }, { text: "find city", done: false }];
+  s = reduce(s, ev("steps_updated", { steps, current: 1 }));
+  assert.equal(JSON.stringify(s.steps), JSON.stringify(steps));
+  assert.equal(s.current, 1);
+  s = reduce(s, ev("fact_noted", { fact: "A wrote B", source_key: "wiki:1" }));
+  s = reduce(s, ev("fact_noted", { fact: "B is in C", source_key: "wiki:2" }));
+  assert.equal(JSON.stringify(s.facts), JSON.stringify([{ fact: "A wrote B", source_key: "wiki:1" }, { fact: "B is in C", source_key: "wiki:2" }]));
+  s = reduce(s, ev("steps_updated", { steps: steps.map((x) => ({ ...x, done: true })), current: null }));
+  assert.equal(s.current, null);
+  assert.equal(s.facts.length, 2);
+});
+
+test("replay keeps steps and facts events", () => {
+  const text = [ev("steps_updated", { steps: [], current: null }), ev("fact_noted", { fact: "f", source_key: "k" })]
+    .map((e) => JSON.stringify(e)).join("\n");
+  assert.equal(parseJsonl(text).length, 2);
+});
+
+test("stepsHtml marks the current step", () => {
+  assert.equal(stepsHtml(initialState("harness")), "");
+  let s = reduce(initialState("harness"), ev("steps_updated", {
+    steps: [{ text: "find <author>", done: true }, { text: "find city", done: false }, { text: "answer", done: false }],
+    current: 1 }));
+  s = reduce(s, ev("fact_noted", { fact: "A wrote B", source_key: "wiki:1" }));
+  const html = stepsHtml(s);
+  assert.equal((html.match(/class="step[ "]/g) || []).length, 3);
+  assert.equal((html.match(/✓/g) || []).length, 1);
+  assert.equal((html.match(/step current/g) || []).length, 1);
+  assert.equal((html.match(/>now</g) || []).length, 1);
+  assert.ok(html.indexOf("step current") > html.indexOf("✓"));
+  assert.ok(html.includes("find &lt;author&gt;"));
+  assert.ok(html.includes("A wrote B") && html.includes("wiki:1"));
+  const allDone = reduce(s, ev("steps_updated", { steps: s.steps.map((x) => ({ ...x, done: true })), current: null }));
+  assert.ok(!stepsHtml(allDone).includes(">now<"));
+  assert.equal(stepsHtml({ ...initialState("harness"), facts: [{ fact: "only", source_key: "k" }] }).includes("only"), true);
 });

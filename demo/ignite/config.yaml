@@ -24,4 +24,4 @@ typesafe: {type: typesafe, api_key_env: TYPESAFE_API_KEY}
 # call_timeout / decider_timeout: the time budget is checked only between turns, so these cap
 # how far one stalled turn can overrun it.
 settings: {max_calls_per_turn: 6, max_limit: 8, judge_batch_size: 48, call_timeout: 15,
-           decider_timeout: 15}
+           decider_timeout: 15, steps: true}

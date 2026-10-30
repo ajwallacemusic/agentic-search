@@ -1,6 +1,7 @@
 import json
 
-from agentic_search.events import ToolCallStarted
+from agentic_search.events import FactNoted, StepsUpdated, ToolCallStarted
+from agentic_search.models.base import Step
 from demo.ignite.run_side_by_side import (
     format_event,
     gold_recall,
@@ -48,6 +49,16 @@ def test_format_event_shows_source_and_tool():
         search_id="s", seq=1, turn=0, at_ms=1.0, call_id="c", source="wiki",
         name="filter_search", arguments={"source": "wiki", "filter": {"op": "eq"}}))
     assert "wiki" in line and "filter_search" in line
+
+
+def test_format_event_shows_steps_and_facts():
+    base = dict(search_id="s", seq=1, turn=0, at_ms=1.0)
+    steps = [Step(text="find the author", done=True), Step(text="find the city", done=False)]
+    assert format_event(StepsUpdated(steps=steps, current=1, **base)) == "▸ step 2: find the city"
+    done = [Step(text="a", done=True)]
+    assert format_event(StepsUpdated(steps=done, current=None, **base)) == "▸ all steps done"
+    assert format_event(FactNoted(fact="X wrote Y", source_key="wiki:1", **base)) == \
+        "✎ X wrote Y (from wiki:1)"
 
 
 def test_save_path_names_question_and_mode():

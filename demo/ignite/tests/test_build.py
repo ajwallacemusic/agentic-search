@@ -57,6 +57,10 @@ def test_harness_settings_come_from_config():
         assert getattr(s, key) == value
 
 
+def test_config_turns_steps_on():
+    assert offline_harness().settings.steps is True
+
+
 def test_each_collection_is_named_after_its_source():
     assert all(b.collection == name for name, b in offline_harness().backends.items())
 

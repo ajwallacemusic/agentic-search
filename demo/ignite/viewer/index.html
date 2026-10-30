@@ -63,6 +63,14 @@
   .badge b { text-transform: uppercase; letter-spacing: .03em; }
   .badge.stop { border-color: var(--good); }
   .badge.refine, .badge.broaden, .badge.switch_source { border-color: var(--warn); }
+  .stepsbox { margin: 8px 0 12px; }
+  ol.steps { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  li.step { border: 2px solid var(--line); border-radius: 6px; padding: 2px 10px; color: var(--muted); }
+  li.step.done { color: var(--fg); }
+  li.step.current { border-color: var(--fg); color: var(--fg); font-weight: 700; }
+  li.step .now { text-transform: uppercase; font-size: 18px; margin-left: 4px; }
+  ul.facts { margin: 0; padding-left: 1.4em; list-style: none; }
+  ul.facts li { margin: 2px 0; }
   .error { color: var(--bad); font-weight: 700; margin: 8px 0; }
   ol.hits { margin: 6px 0 12px; padding-left: 1.6em; }
   ol.hits li { margin: 3px 0; }
@@ -148,7 +156,7 @@ function parseSse(buffer) {
 
 function initialState(mode) {
   return {
-    mode, phase: null, turn: 0, done: false, error: null, calls: [], decisions: [], hits: [], notes: {},
+    mode, phase: null, turn: 0, done: false, error: null, calls: [], decisions: [], hits: [], notes: {}, steps: [], current: null, facts: [],
     metrics: { turns: 0, toolCalls: 0, seconds: 0, costUsd: 0, stopReason: null },
   };
 }
@@ -192,6 +200,10 @@ function reduce(state, ev) {
     case "tool_call_finished":
       return { ...state, calls: state.calls.map((c) => c.id !== ev.call_id ? c : {
         ...c, nHits: ev.n_hits, error: ev.error ? `${ev.error.kind}: ${ev.error.message}` : null }) };
+    case "steps_updated":
+      return { ...state, steps: ev.steps || [], current: ev.current ?? null };
+    case "fact_noted":
+      return { ...state, facts: [...state.facts, { fact: ev.fact, source_key: ev.source_key }] };
     case "results_updated":
       return { ...state, hits: ev.hits || [] };
     case "usage_updated":
@@ -213,7 +225,8 @@ function reduce(state, ev) {
   }
 }
 const KNOWN_TYPES = new Set(["search_started", "phase_started", "phase_finished", "tool_call_started",
-  "tool_call_finished", "results_updated", "usage_updated", "search_finished", "search_failed"]);
+  "tool_call_finished", "results_updated", "usage_updated", "search_finished", "search_failed",
+  "steps_updated", "fact_noted"]);
 
 /** Events from a saved run: one JSON event per line. Skips blank, broken and unknown lines. */
 function parseJsonl(text) {
@@ -273,6 +286,24 @@ function replayable(got) {
   return Boolean(got && (got.retrieval || got.harness));
 }
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/** The step strip (done steps get a tick, the current one is labelled "now") and the notebook of
+ *  facts. Empty when the run has neither. */
+function stepsHtml(state) {
+  const steps = state.steps || [];
+  const facts = state.facts || [];
+  if (!steps.length && !facts.length) return "";
+  const items = steps.map((st, i) => {
+    const cur = i === state.current;
+    const cls = cur ? "step current" : st.done ? "step done" : "step";
+    const mark = st.done ? "✓ " : cur ? "▶ " : "○ ";
+    return `<li class="${cls}">${mark}${esc(st.text)}${cur ? ' <b class="now">now</b>' : ""}</li>`;
+  }).join("");
+  const strip = steps.length ? `<ol class="steps">${items}</ol>` : "";
+  const notes = facts.map((f) => `<li>✎ ${esc(f.fact)} <span class="hit-src">(from ${esc(f.source_key)})</span></li>`).join("");
+  const book = facts.length ? `<ul class="facts">${notes}</ul>` : "";
+  return `<div class="stepsbox">${strip}${book}</div>`;
+}
 
 const SETS = [
   { id: "musique", label: "MuSiQue (multi-hop Wikipedia)" },
@@ -346,6 +377,7 @@ function render(mode) {
     <div class="phases">${phases}</div>
     <table class="lanes"><thead><tr><th class="src">tool</th>${head}</tr></thead><tbody>${rows}</tbody></table>
     <div class="decisions">${decisions}</div>
+    ${stepsHtml(s)}
     ${s.error ? `<div class="error">✗ Search failed: ${esc(s.error)}</div>` : ""}
     <ol class="hits">${hits || `<li class="empty">no results yet</li>`}</ol>
     <footer class="metrics">
