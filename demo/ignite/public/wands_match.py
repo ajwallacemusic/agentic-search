@@ -8,16 +8,24 @@ attribute equals the anchor's single value.
 
 from __future__ import annotations
 
+import argparse
+import json
 import random
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+import yaml
 from pydantic import BaseModel
 
 from demo.ignite.public.datasets import _tsv
 
+DEMO_DIR = Path(__file__).parent.parent
+MATCH_PATH = DEMO_DIR / "wands_match.yaml"
+LABELS_PATH = DEMO_DIR / "wands_match_labels.json"
+# Merchandising classes that name no kind of product.
+NOT_PRODUCT_TYPES = {"Licensed Products"}
 ATTRIBUTES: dict[str, str] = {"wood_tone": "dswoodtone", "color": "color", "style": "style"}
 
 
@@ -94,15 +102,24 @@ def gold_for(rule: MatchRule, products: dict[str, Product]) -> list[str]:
                   if pid != rule.anchor_id and _matches(p, targets, rule.feature_key, value))
 
 
+def load_rules(path: Path = MATCH_PATH) -> list[MatchRule]:
+    return [MatchRule(**r) for r in yaml.safe_load(Path(path).read_text()) or []]
+
+
 def build_labels(rules: list[MatchRule], products: dict[str, Product]) -> dict[str, list[str]]:
     return {r.id: gold_for(r, products) for r in rules}
+
+
+def _speakable(name: str) -> bool:
+    """A name a shopper could say in a question: a few words, no sizes or quote marks."""
+    return 2 <= len(name.split()) <= 6 and not re.search(r"[0-9'\"/(),]", name)
 
 
 def select_rules(products: dict[str, Product], *, n: int = 20, seed: int = 7, min_gold: int = 5,
                  max_share: float = 0.5) -> list[MatchRule]:
     """Seeded rules, round-robin over the attributes. An anchor has one value for the attribute,
     a name unique in the catalogue, the value not in its name, and a category area. Targets are 1
-    or 2 other classes seen in the anchor's area where the value picks out at most `max_share` of the
+    or 2 other classes whose products mostly sit in the anchor's area, where the value picks out at most `max_share` of the
     products that list the attribute; together they give at least `min_gold` gold products."""
     rng = random.Random(seed)
     name_count: dict[str, int] = {}
@@ -113,17 +130,20 @@ def select_rules(products: dict[str, Product], *, n: int = 20, seed: int = 7, mi
     for attr, key in ATTRIBUTES.items():
         pool = sorted(pid for pid, p in products.items()
                       if len(p.features.get(key, [])) == 1 and name_count[p.name] == 1
-                      and p.area and p.classes and p.features[key][0] not in p.name)
+                      and p.area and p.classes and p.features[key][0] not in p.name
+                      and _speakable(p.name))
         rng.shuffle(pool)
         pools[attr] = pool
 
-    by_area: dict[str, set[str]] = {}  # area -> classes seen in it
     by_class: dict[str, list[Product]] = {}
     for p in products.values():
         for c in p.classes:
             by_class.setdefault(c, []).append(p)
-            if p.area:
-                by_area.setdefault(p.area, set()).add(c)
+    by_area: dict[str, set[str]] = {}  # area -> classes whose products are mostly in it
+    for c, members in by_class.items():
+        areas = [p.area for p in members if p.area]
+        if c not in NOT_PRODUCT_TYPES and areas:
+            by_area.setdefault(max(sorted(set(areas)), key=areas.count), set()).add(c)
 
     rules: list[MatchRule] = []
     used: set[str] = set()
@@ -140,7 +160,7 @@ def select_rules(products: dict[str, Product], *, n: int = 20, seed: int = 7, mi
                 anchor = products[pid]
                 value = anchor.features[key][0]
                 eligible = []
-                for klass in sorted(by_area[anchor.area] - anchor.classes):
+                for klass in sorted(by_area.get(anchor.area, set()) - anchor.classes):
                     rows = [p for p in by_class[klass] if p.features.get(key)]
                     hits = sum(value in p.features[key] for p in rows if p is not anchor)
                     if hits and hits <= max_share * len(rows):
@@ -156,3 +176,34 @@ def select_rules(products: dict[str, Product], *, n: int = 20, seed: int = 7, mi
                                        attribute=attr, targets=[c for c, _ in picked]))
                 break
     return rules
+
+
+def _select_yaml(products: dict[str, Product], rules: list[MatchRule]) -> str:
+    lines = []
+    for r in rules:
+        a = products[r.anchor_id]
+        lines += [f"# anchor: {a.name} ({a.product_class}); {r.attribute} = "
+                  f"{anchor_value(r, products)}; gold: {len(gold_for(r, products))}",
+                  yaml.safe_dump([r.model_dump()], sort_keys=False).rstrip()]
+    return "\n".join(lines) + "\n"
+
+
+def main() -> None:
+    from demo.ignite.public.fetch import fetch
+
+    p = argparse.ArgumentParser(description="WANDS match questions: pick rules, build labels.")
+    p.add_argument("command", choices=["select", "labels"])
+    p.add_argument("--n", type=int, default=20)
+    p.add_argument("--seed", type=int, default=7)
+    args = p.parse_args()
+    products = load_products(fetch("wands"))
+    if args.command == "select":
+        print(_select_yaml(products, select_rules(products, n=args.n, seed=args.seed)), end="")
+    else:
+        labels = build_labels(load_rules(), products)
+        LABELS_PATH.write_text(json.dumps(labels, indent=1) + "\n")
+        print(f"wrote {LABELS_PATH} ({sum(map(len, labels.values()))} labels)")
+
+
+if __name__ == "__main__":
+    main()

@@ -104,3 +104,35 @@ def test_select_rules_follows_the_rules(products):
 def test_select_rules_is_deterministic(products):
     assert select_rules(products, n=4, min_gold=2, max_share=0.75) == \
         select_rules(products, n=4, min_gold=2, max_share=0.75)
+
+
+# ---- the committed question set (needs the WANDS cache) ------------------------------------
+
+def _real_products():
+    from demo.ignite.public.fetch import CACHE_DIR
+    folder = CACHE_DIR / "wands"
+    if not (folder / "product.csv").exists():
+        pytest.skip("WANDS not downloaded (run eval_public --dataset wands once)")
+    return load_products(folder)
+
+
+def test_rule_ids_are_unique():
+    from demo.ignite.public.wands_match import load_rules
+    ids = [r.id for r in load_rules()]
+    assert ids and len(ids) == len(set(ids))
+
+
+def test_question_text_names_anchor_and_hides_value():
+    from demo.ignite.public.wands_match import load_rules, norm
+    products = _real_products()
+    for rule in load_rules():
+        text = norm(rule.text)
+        assert products[rule.anchor_id].name in text, rule.id
+        assert anchor_value(rule, products) not in text, rule.id
+
+
+def test_committed_labels_match_the_rules():
+    import json
+
+    from demo.ignite.public.wands_match import LABELS_PATH, build_labels, load_rules
+    assert build_labels(load_rules(), _real_products()) == json.loads(LABELS_PATH.read_text())

@@ -1,0 +1,157 @@
+# WANDS match questions (spec docs/superpowers/specs/2026-10-30-ignite-wands-design.md).
+# Rules picked by `python -m demo.ignite.public.wands_match select` (seed 7, min_gold 5,
+# max_share 0.5) on 2026-10-30, before any model ran on them. Only `text` is hand-written.
+# Labels: `python -m demo.ignite.public.wands_match labels` -> wands_match_labels.json.
+
+# anchor: zangerl solid wood standard bed (Beds); wood_tone = medium wood; gold: 5
+- id: match-01
+  anchor_id: '2568'
+  attribute: wood_tone
+  targets:
+  - Teen Beds
+  text: I have the Zangerl solid wood standard bed. Find a teen bed with the same wood tone.
+# anchor: abbigail cavendish upholstered platform bed (Beds); color = gray; gold: 9
+- id: match-02
+  anchor_id: '3100'
+  attribute: color
+  targets:
+  - Teen Dressers
+  - Teens Headboards
+  text: I have the Abbigail Cavendish upholstered platform bed. Find a teen dresser or a teen headboard in the same color.
+# anchor: montgomery twin daybed (Daybeds & Guest Beds); style = modern & contemporary; gold: 13
+- id: match-03
+  anchor_id: '15875'
+  attribute: style
+  targets:
+  - Teens Headboards
+  text: I have the Montgomery twin daybed. Find a teen headboard in the same style.
+# anchor: lieb extendable dining table (Dining Tables); wood_tone = light wood; gold: 17
+- id: match-04
+  anchor_id: '18034'
+  attribute: wood_tone
+  targets:
+  - Conference Tables
+  - Sideboards & Buffets
+  text: I have the Lieb extendable dining table. Find a sideboard or a conference table with the same wood tone.
+# anchor: wilbar twin tufted upholstered standard bed (Beds); color = gray; gold: 7
+- id: match-05
+  anchor_id: '14856'
+  attribute: color
+  targets:
+  - Teen Dressers
+  text: I have the Wilbar twin tufted upholstered standard bed. Find a teen dresser in the same color.
+# anchor: nuala free standing toilet paper holder (Toilet Paper Holders); style = farmhouse / country; gold: 50
+- id: match-06
+  anchor_id: '18564'
+  attribute: style
+  targets:
+  - Bathroom Sink Faucets
+  - Towel Bars, Racks, and Stands
+  text: I have the Nuala free standing toilet paper holder. Find a bathroom sink faucet and a towel bar in the same style.
+# anchor: schatzi rainbow wave coffee table (Coffee & Cocktail Tables); wood_tone = light wood; gold: 34
+- id: match-07
+  anchor_id: '13556'
+  attribute: wood_tone
+  targets:
+  - Bookcases
+  text: I have the Schatzi rainbow wave coffee table. Find a bookcase with the same wood tone.
+# anchor: bahij twin bed with trundle (Beds|Kids Beds); color = white; gold: 10
+- id: match-08
+  anchor_id: '26394'
+  attribute: color
+  targets:
+  - Kids Headboards
+  text: I have the Bahij twin bed with trundle. Find a kids headboard in the same color.
+# anchor: danille console table (Sofa & Console Tables); style = industrial; gold: 51
+- id: match-09
+  anchor_id: '39667'
+  attribute: style
+  targets:
+  - Accent Chests / Cabinets
+  - Coffee & Cocktail Tables
+  text: I have the Danille console table. Find a coffee table or an accent chest in the same style.
+# anchor: leather upholstered dining chair (Dining Chairs); wood_tone = medium wood; gold: 136
+- id: match-10
+  anchor_id: '14564'
+  attribute: wood_tone
+  targets:
+  - Kitchen Islands
+  - Sideboards & Buffets
+  text: I have the leather upholstered dining chair. Find a kitchen island or a sideboard with the same wood tone.
+# anchor: low profile standard bed (Beds); color = white/gray; gold: 8
+- id: match-11
+  anchor_id: '29235'
+  attribute: color
+  targets:
+  - Dressers & Chests
+  text: I have the low profile standard bed. Find a dresser in the same color.
+# anchor: tenafly end table (End Tables); style = modern & contemporary; gold: 7
+- id: match-12
+  anchor_id: '22968'
+  attribute: style
+  targets:
+  - Reception Benches
+  text: I have the Tenafly end table. Find a reception bench in the same style.
+# anchor: chamberlain dining table (Dining Tables); wood_tone = medium wood; gold: 271
+- id: match-13
+  anchor_id: '915'
+  attribute: wood_tone
+  targets:
+  - Bar Stools
+  - Dining Chairs
+  text: I have the Chamberlain dining table. Find dining chairs or bar stools with the same wood tone.
+# anchor: ellenson ceramic gnome garden statue (Garden Statues); color = red; gold: 19
+- id: match-14
+  anchor_id: '21263'
+  attribute: color
+  targets:
+  - Furniture Cushions
+  text: I have the Ellenson ceramic gnome garden statue. Find outdoor furniture cushions in the same color.
+# anchor: navy swivel stool (Accent Stools); style = modern & contemporary; gold: 131
+- id: match-15
+  anchor_id: '14481'
+  attribute: style
+  targets:
+  - Rocking Chairs
+  - Sofa & Console Tables
+  text: I have the navy swivel stool. Find a rocking chair or a console table in the same style.
+# anchor: beselare full platform bed with trundle (Beds|Kids Beds); wood_tone = gray wood; gold: 22
+- id: match-16
+  anchor_id: '15676'
+  attribute: wood_tone
+  targets:
+  - Kids Desks
+  - Kids Dressers & Chests
+  text: I have the Beselare full platform bed with trundle. Find a kids desk or kids dresser with the same wood tone.
+# anchor: bruster metal rock climber decor (Decorative Objects); color = black; gold: 15
+- id: match-17
+  anchor_id: '33178'
+  attribute: color
+  targets:
+  - Fountains
+  - Vases, Urns, Jars, & Bottles
+  text: I have the Bruster metal rock climber decor. Find a fountain or a vase in the same color.
+# anchor: salina cube bookcase (Bookcases); style = traditional; gold: 59
+- id: match-18
+  anchor_id: '24749'
+  attribute: style
+  targets:
+  - Accent Chests / Cabinets
+  - Plant & Telephone Tables
+  text: I have the Salina cube bookcase. Find an accent cabinet or a plant stand in the same style.
+# anchor: alaniz star single rocking chair (Patio Rockers & Gliders); wood_tone = light wood; gold: 40
+- id: match-19
+  anchor_id: '37512'
+  attribute: wood_tone
+  targets:
+  - Patio Sofas
+  - Patio Tables
+  text: I have the Alaniz star single rocking chair. Find a patio sofa or patio table with the same wood tone.
+# anchor: rooster for figurine (Decorative Objects); color = gold; gold: 6
+- id: match-20
+  anchor_id: '13016'
+  attribute: color
+  targets:
+  - Decorative Plates & Bowls
+  - Vases, Urns, Jars, & Bottles
+  text: I have the rooster for figurine. Find a decorative bowl or a vase in the same color.
