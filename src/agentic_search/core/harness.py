@@ -406,7 +406,8 @@ class Harness:
                     state.usage.add_model(plan.usage)
                     update = WorkspaceUpdate(update.n_facts + more.n_facts,
                                              update.n_steps_done + more.n_steps_done,
-                                             update.changed or more.changed)
+                                             update.changed or more.changed,
+                                             update.plan_set or more.plan_set)
             else:
                 plan, update = await planner.plan(state, tools), WorkspaceUpdate()
                 state.usage.add_model(plan.usage)
@@ -435,7 +436,10 @@ class Harness:
             state.history.append(TurnSummary(
                 turn=state.turn, n_calls=len(calls), n_errors=len(result.errors),
                 n_new=analysis.n_new, n_new_relevant=analysis.n_new_relevant, top_keys=top,
-                n_facts=update.n_facts, n_steps_done=update.n_steps_done))
+                n_facts=update.n_facts, n_steps_done=update.n_steps_done,
+                n_opened=sum(1 for c in calls if c.name == "fetch"
+                             and result.hits_per_call.get(c.id)),
+                plan_set=update.plan_set))
             if single_pass:
                 return StopReason.SINGLE_PASS
             reason = controller.budget_stop(state)

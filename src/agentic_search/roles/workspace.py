@@ -7,10 +7,12 @@ from typing import Any
 
 from agentic_search.core.state import SearchState
 from agentic_search.events import FactNoted, StepsUpdated
-from agentic_search.models.base import Fact, Step, ToolCall, ToolSpec
+from agentic_search.models.base import WORKSPACE_NAMES, Fact, Step, ToolCall, ToolSpec
 
 MAX_STEPS = 6
 MAX_FACT_CHARS = 300
+MAX_FACTS_PER_TURN = 8
+MAX_NOTEBOOK = 30
 
 WORKSPACE_TOOLS: list[ToolSpec] = [
     ToolSpec(
@@ -34,7 +36,6 @@ WORKSPACE_TOOLS: list[ToolSpec] = [
         parameters={"type": "object", "properties": {"step": {"type": "integer"}},
                     "required": ["step"]}),
 ]
-WORKSPACE_NAMES = {t.name for t in WORKSPACE_TOOLS}
 
 
 @dataclass
@@ -42,6 +43,7 @@ class WorkspaceUpdate:
     n_facts: int = 0
     n_steps_done: int = 0
     changed: bool = False
+    plan_set: bool = False
 
 
 def apply_workspace(state: SearchState,
@@ -68,13 +70,20 @@ def apply_workspace(state: SearchState,
                 drop(c, "no usable steps")
                 continue
             state.steps = [Step(text=t) for t in texts[:MAX_STEPS]]
-            update.changed = steps_changed = True
+            update.changed = steps_changed = update.plan_set = True
         elif c.name == "note":
             text, key = c.arguments.get("fact"), c.arguments.get("source_key")
             if not isinstance(text, str) or not text.strip():
                 drop(c, "empty fact")
             elif not isinstance(key, str) or key not in state.pool:
                 drop(c, "unknown source_key")
+            elif any(f.text == text.strip()[:MAX_FACT_CHARS] and f.source_key == key
+                     for f in state.notebook):
+                drop(c, "duplicate fact")
+            elif update.n_facts >= MAX_FACTS_PER_TURN:
+                drop(c, "too many facts this turn")
+            elif len(state.notebook) >= MAX_NOTEBOOK:
+                drop(c, "notebook full")
             else:
                 state.notebook.append(Fact(text=text.strip()[:MAX_FACT_CHARS], source_key=key,
                                            turn=state.turn))

@@ -174,3 +174,15 @@ async def test_controller_view_carries_steps():
     d = await Controller(ctrl).decide(s)
     assert d.action is Action.STOP
     assert ctrl.views[0].steps[0].text == "a" and ctrl.views[0].notebook[0].text == "f"
+
+
+def test_opened_documents_or_a_new_plan_is_not_idle():
+    for kw in ({"n_opened": 1}, {"plan_set": True}):
+        s = with_steps(state(history=[idle(**kw), idle(**kw)], relevant=True), ("find b", False))
+        assert Controller(None).heuristic(s).action is Action.CONTINUE
+
+
+def test_all_error_turns_refine_instead_of_stuck():
+    err = lambda: TurnSummary(turn=0, n_calls=2, n_errors=2, n_new=0, n_new_relevant=0)  # noqa: E731
+    s = with_steps(state(history=[err(), err()]), ("find a", False))
+    assert Controller(None).heuristic(s).action is Action.REFINE

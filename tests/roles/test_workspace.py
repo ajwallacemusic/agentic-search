@@ -1,9 +1,15 @@
 from agentic_search import Harness
 from agentic_search.core.harness import HarnessSettings
 from agentic_search.core.state import SearchState
-from agentic_search.core.types import Budget
-from agentic_search.roles.workspace import MAX_FACT_CHARS, MAX_STEPS, WORKSPACE_NAMES
-from agentic_search.testing import ScriptedDriver, call
+from agentic_search.core.types import Budget, StopReason
+from agentic_search.roles.workspace import (
+    MAX_FACT_CHARS,
+    MAX_FACTS_PER_TURN,
+    MAX_NOTEBOOK,
+    MAX_STEPS,
+    WORKSPACE_NAMES,
+)
+from agentic_search.testing import KeywordJudge, ScriptedDriver, call
 
 
 def lex(text, **kw):
@@ -114,3 +120,44 @@ async def test_delegate_mode_ignores_steps(docs_backend):
     driver = ScriptedDriver(delegate_calls=[[lex("headache")]])
     await make(docs_backend, driver).search("q", mode="model")
     assert not {t.name for t in driver.tools_seen[0]} & WORKSPACE_NAMES
+
+
+async def test_stepping_stone_flow_is_not_stuck(docs_backend):
+    driver = ScriptedDriver([
+        [call("plan_steps", steps=["find stone", "use it"]), lex("headache")],
+        [call("fetch", source="docs", doc_id="d1")],
+        [call("note", fact="stone fact", source_key="docs:d1"), lex("fever")],
+    ])
+    h = Harness([docs_backend], driver, embedders=[docs_backend.embedder],
+                analyzer=KeywordJudge(["zzz"]), settings=HarnessSettings(steps=True))
+    res = await h.search("q", budget=Budget(max_turns=4))
+    assert len(res.trace.of_type("plan")) >= 3
+    assert res.stop_reason is not StopReason.CONTROLLER_STOP
+
+
+async def test_duplicate_facts_are_dropped(docs_backend):
+    _, _, s = await run(docs_backend, [
+        [lex("headache")],
+        [call("note", fact="same", source_key="docs:d1"),
+         call("note", fact="  same ", source_key="docs:d1"),
+         call("note", fact="same", source_key="docs:d4"), lex("fever")]])
+    assert [(f.text, f.source_key) for f in s.notebook] == [("same", "docs:d1"), ("same", "docs:d4")]
+    assert [e.data["reason"] for e in s.trace.of_type("workspace_dropped")] == ["duplicate fact"]
+
+
+async def test_facts_are_capped_per_turn_and_in_total(docs_backend):
+    n = MAX_FACTS_PER_TURN + 3
+    _, _, s = await run(docs_backend, [
+        [lex("headache")],
+        [*[call("note", fact=f"f{i}", source_key="docs:d1") for i in range(n)], lex("fever")]])
+    assert len(s.notebook) == MAX_FACTS_PER_TURN
+    reasons = [e.data["reason"] for e in s.trace.of_type("workspace_dropped")]
+    assert reasons == ["too many facts this turn"] * 3
+
+    from agentic_search.models.base import Fact
+    from agentic_search.roles.workspace import apply_workspace
+    s.notebook = [Fact(text=f"x{i}", source_key="docs:d1", turn=0) for i in range(MAX_NOTEBOOK)]
+    before = len(s.trace.of_type("workspace_dropped"))
+    apply_workspace(s, [call("note", fact="new", source_key="docs:d1")])
+    assert len(s.notebook) == MAX_NOTEBOOK
+    assert s.trace.of_type("workspace_dropped")[before].data["reason"] == "notebook full"
