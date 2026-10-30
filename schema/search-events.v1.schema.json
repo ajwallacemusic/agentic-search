@@ -52,6 +52,55 @@
       "title": "Budget",
       "type": "object"
     },
+    "FactNoted": {
+      "properties": {
+        "at_ms": {
+          "title": "At Ms",
+          "type": "number"
+        },
+        "fact": {
+          "title": "Fact",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "search_id": {
+          "title": "Search Id",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "source_key": {
+          "title": "Source Key",
+          "type": "string"
+        },
+        "turn": {
+          "title": "Turn",
+          "type": "integer"
+        },
+        "type": {
+          "const": "fact_noted",
+          "default": "fact_noted",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id",
+        "seq",
+        "turn",
+        "at_ms",
+        "fact",
+        "source_key"
+      ],
+      "title": "FactNoted",
+      "type": "object"
+    },
     "Hit": {
       "properties": {
         "content": {
@@ -895,6 +944,84 @@
       "title": "SearchStarted",
       "type": "object"
     },
+    "Step": {
+      "properties": {
+        "done": {
+          "default": false,
+          "title": "Done",
+          "type": "boolean"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "Step",
+      "type": "object"
+    },
+    "StepsUpdated": {
+      "description": "The step plan was set or a step was marked done; `current` is the 0-based index of the\nfirst unfinished step, or None when all are done.",
+      "properties": {
+        "at_ms": {
+          "title": "At Ms",
+          "type": "number"
+        },
+        "current": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Current"
+        },
+        "schema_version": {
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "search_id": {
+          "title": "Search Id",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/Step"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "turn": {
+          "title": "Turn",
+          "type": "integer"
+        },
+        "type": {
+          "const": "steps_updated",
+          "default": "steps_updated",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id",
+        "seq",
+        "turn",
+        "at_ms",
+        "steps",
+        "current"
+      ],
+      "title": "StepsUpdated",
+      "type": "object"
+    },
     "StopReason": {
       "enum": [
         "controller_stop",
@@ -1248,12 +1375,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "discriminator": {
     "mapping": {
+      "fact_noted": "#/$defs/FactNoted",
       "phase_finished": "#/$defs/PhaseFinished",
       "phase_started": "#/$defs/PhaseStarted",
       "results_updated": "#/$defs/ResultsUpdated",
       "search_failed": "#/$defs/SearchFailed",
       "search_finished": "#/$defs/SearchFinished",
       "search_started": "#/$defs/SearchStarted",
+      "steps_updated": "#/$defs/StepsUpdated",
       "tool_call_finished": "#/$defs/ToolCallFinished",
       "tool_call_started": "#/$defs/ToolCallStarted",
       "usage_updated": "#/$defs/UsageUpdated"
@@ -1287,6 +1416,12 @@
     },
     {
       "$ref": "#/$defs/SearchFailed"
+    },
+    {
+      "$ref": "#/$defs/StepsUpdated"
+    },
+    {
+      "$ref": "#/$defs/FactNoted"
     }
   ],
   "title": "SearchEvent v1"

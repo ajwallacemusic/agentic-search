@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentic_search.core.state import SearchState
+from agentic_search.events import FactNoted, StepsUpdated
 from agentic_search.models.base import Fact, Step, ToolCall, ToolSpec
 
 MAX_STEPS = 6
@@ -47,6 +48,7 @@ def apply_workspace(state: SearchState,
                     calls: list[ToolCall]) -> tuple[list[ToolCall], WorkspaceUpdate]:
     """Apply workspace calls to `state`; return the other calls unchanged and in order."""
     update = WorkspaceUpdate()
+    steps_changed = False
     rest: list[ToolCall] = []
 
     def drop(c: ToolCall, reason: str) -> None:
@@ -66,7 +68,7 @@ def apply_workspace(state: SearchState,
                 drop(c, "no usable steps")
                 continue
             state.steps = [Step(text=t) for t in texts[:MAX_STEPS]]
-            update.changed = True
+            update.changed = steps_changed = True
         elif c.name == "note":
             text, key = c.arguments.get("fact"), c.arguments.get("source_key")
             if not isinstance(text, str) or not text.strip():
@@ -78,6 +80,8 @@ def apply_workspace(state: SearchState,
                                            turn=state.turn))
                 update.n_facts += 1
                 update.changed = True
+                state.emitter.emit(FactNoted, turn=state.turn, fact=state.notebook[-1].text,
+                                   source_key=key)
         else:  # step_done
             n: Any = c.arguments.get("step")
             if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= len(state.steps):
@@ -87,5 +91,9 @@ def apply_workspace(state: SearchState,
             else:
                 state.steps[n - 1].done = True
                 update.n_steps_done += 1
-                update.changed = True
+                update.changed = steps_changed = True
+    if steps_changed:
+        state.emitter.emit(StepsUpdated, turn=state.turn,
+                           steps=[st.model_copy() for st in state.steps],
+                           current=state.current_step())
     return rest, update

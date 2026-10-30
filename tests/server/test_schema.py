@@ -18,7 +18,8 @@ def test_schema_covers_every_event_type():
     mapping = schema["discriminator"]["mapping"]
     assert set(mapping) == {"search_started", "phase_started", "phase_finished",
                             "tool_call_started", "tool_call_finished", "results_updated",
-                            "usage_updated", "search_finished", "search_failed"}
+                            "usage_updated", "search_finished", "search_failed",
+                            "steps_updated", "fact_noted"}
 
 
 def test_cli_export_schema(tmp_path, capsys):

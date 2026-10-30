@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from agentic_search.core.result import SearchResult
 from agentic_search.core.state import Usage
 from agentic_search.core.types import Budget, Content, Query, StopReason
+from agentic_search.models.base import Step
 
 SCHEMA_VERSION = 1
 Phase = Literal["plan", "query", "judge", "decide", "delegate"]
@@ -131,9 +132,24 @@ class SearchFailed(_Event):
     message: str
 
 
+class StepsUpdated(_Event):
+    """The step plan was set or a step was marked done; `current` is the 0-based index of the
+    first unfinished step, or None when all are done."""
+
+    type: Literal["steps_updated"] = "steps_updated"
+    steps: list[Step]
+    current: int | None
+
+
+class FactNoted(_Event):
+    type: Literal["fact_noted"] = "fact_noted"
+    fact: str
+    source_key: str
+
+
 SearchEvent = Annotated[
     Union[SearchStarted, PhaseStarted, PhaseFinished, ToolCallStarted, ToolCallFinished,
-          ResultsUpdated, UsageUpdated, SearchFinished, SearchFailed],
+          ResultsUpdated, UsageUpdated, SearchFinished, SearchFailed, StepsUpdated, FactNoted],
     Field(discriminator="type"),
 ]
 TERMINAL_EVENTS = (SearchFinished, SearchFailed)
