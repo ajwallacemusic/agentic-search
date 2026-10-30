@@ -28,7 +28,8 @@ class Analyzer:
     def __init__(self, decider: Decider | None, *, hooks: Hooks | None = None,
                  policy: SourcePolicy | None = None, relevant_threshold: float = 0.5,
                  judge_weight: float = 0.9, batch_size: int = 16, timeout: float = 60.0,
-                 digest_hits: int = 8, snippet_chars: int = 240):
+                 digest_hits: int = 8, snippet_chars: int = 240, show_opened: bool = False,
+                 fetch_chars: int = 1500):
         self.decider = decider
         self.hooks = hooks or Hooks()
         self.policy = policy or SourcePolicy()
@@ -38,6 +39,8 @@ class Analyzer:
         self.timeout = timeout
         self.digest_hits = digest_hits
         self.snippet_chars = snippet_chars
+        self.show_opened = show_opened
+        self.fetch_chars = fetch_chars
         self._can_judge = decider is not None
 
     def is_relevant(self, cand: Candidate) -> bool:
@@ -151,10 +154,23 @@ class Analyzer:
         if new and not relevant and not irrelevant:
             lines.append("New candidates (not judged):")
             lines.extend(self._line(c, model_id) for c in new[: self.digest_hits])
+        if self.show_opened:
+            opened = list(dict.fromkeys(
+                k for c in calls if c.name == "fetch" and c.id not in errors
+                for k in result.hits_per_call.get(c.id, ())))
+            if opened:
+                lines.append("Opened documents:")
+                lines.extend(self._opened_line(pool[k], model_id) for k in opened)
         top = pool.ranked(self.judge_weight)[:5]
         if top:
             lines.append("Current top results: " + ", ".join(f"{c.hit.key} ({s:.2f})" for c, s in top))
         return "\n".join(lines)
+
+    def _opened_line(self, cand: Candidate, model_id: str) -> str:
+        h = cand.hit
+        allowed = self.policy.allows(h.source, model_id)
+        body = h.snippet(self.fetch_chars) if allowed else "(content withheld by source policy)"
+        return f"- {h.key}: {body}"
 
     def _line(self, cand: Candidate, model_id: str) -> str:
         h = cand.hit

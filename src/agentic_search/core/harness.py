@@ -339,7 +339,8 @@ class Harness:
         analyzer = Analyzer(self.analyzer_decider, hooks=self.hooks, policy=self.policy,
                             relevant_threshold=s.relevant_threshold, judge_weight=s.judge_weight,
                             batch_size=s.judge_batch_size, timeout=s.decider_timeout,
-                            snippet_chars=s.snippet_chars)
+                            snippet_chars=s.snippet_chars, show_opened=s.steps,
+                            fetch_chars=s.fetch_chars)
         controller = Controller(self.controller_decider, hooks=self.hooks,
                                 relevant_threshold=s.relevant_threshold,
                                 min_new_relevant=s.min_new_relevant, timeout=s.decider_timeout)
