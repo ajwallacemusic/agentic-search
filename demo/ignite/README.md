@@ -40,7 +40,7 @@ the question's own words does not find them.
 ```bash
 uv sync --extra server --extra local --extra openai --extra gcp
 gcloud auth application-default login
-export IGNITE_GCP_PROJECT=<your project>        # rehearsals used gen-ai-accel-dev
+export IGNITE_GCP_PROJECT=ajw-sandbox-497707     # all demo runs use this project (Gemini 4 Argon works here; gen-ai-accel-dev refuses it)
 ```
 
 The first run downloads MuSiQue (about 30 MB) into `public/.cache/` (git-ignored) and checks it
