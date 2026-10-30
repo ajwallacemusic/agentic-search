@@ -8,3 +8,4 @@ eval-results/
 
 # Public eval datasets, downloaded on demand (demo/ignite/public/fetch.py).
 demo/ignite/public/.cache/
+.DS_Store
