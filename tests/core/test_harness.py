@@ -2,10 +2,12 @@ import pytest
 
 from agentic_search import Budget, Harness, Query
 from agentic_search.backends.files import FilesBackend
-from agentic_search.core.harness import HarnessError
+from agentic_search.core.harness import HarnessError, HarnessSettings
 from agentic_search.core.hooks import Hooks
-from agentic_search.core.types import StopReason
-from agentic_search.models.base import Action, DelegateRequest
+from agentic_search.core.state import SearchState
+from agentic_search.core.types import Document, StopReason, TextPart
+from agentic_search.embedders.local import HashEmbedder
+from agentic_search.models.base import Action, DelegateRequest, Step
 from agentic_search.testing import (
     FailingDecider,
     KeywordJudge,
@@ -325,3 +327,30 @@ async def test_close_closes_embedders_deciders_and_driver_client(docs_backend):
                 analyzer=shared, controller=shared)
     await h.close()
     assert sorted(log) == ["decider", "driver-client", "e1", "e2-inner"]
+
+
+def test_step_settings_default_off():
+    s = HarnessSettings()
+    assert s.steps is False and s.snippet_chars == 240 and s.fetch_chars == 1500
+
+
+async def test_snippet_chars_comes_from_settings():
+    doc = Document(doc_id="long", content=[TextPart(text="fever " + "word " * 100)])
+    backend = FilesBackend.from_documents("docs", [doc], embedder=HashEmbedder())
+    driver = ScriptedDriver([[lex("fever")]])
+    h = Harness([backend], driver, embedders=[backend.embedder], analyzer=KeywordJudge(["fever"]),
+                settings=HarnessSettings(snippet_chars=80))
+    await h.search("q")
+    lines = [ln for ln in driver.views[-1].digest.splitlines() if ln.startswith("- docs:long")]
+    assert lines
+    body = lines[0].split(": ", 1)[1].rsplit(" (", 1)[0]  # drop the rationale
+    assert len(body) <= 80
+
+
+def test_current_step_is_first_open():
+    s = SearchState(question=Query.of("q"), manifests={}, budget=Budget())
+    assert s.current_step() is None
+    s.steps = [Step(text="a", done=True), Step(text="b"), Step(text="c")]
+    assert s.current_step() == 1
+    s.steps = [Step(text="a", done=True)]
+    assert s.current_step() is None
