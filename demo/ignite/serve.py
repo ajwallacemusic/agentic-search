@@ -20,6 +20,7 @@ from demo.ignite.build import build_demo_harness, load_config
 from demo.ignite.corpus import Question, load_demo
 
 VIEWER_DIR = Path(__file__).parent / "viewer"
+PROFILE_OF = {"musique": "ignite", "wands": "ignite-wands"}  # corpus -> harness profile
 HOST = "127.0.0.1"  # localhost only: the service has no auth
 
 
@@ -30,7 +31,8 @@ def create_demo_app(profiles: dict[str, Harness], questions: dict[str, Question]
 
     @app.get("/ignite/questions")
     async def list_questions() -> list[dict[str, str]]:
-        return [{"id": q.id, "text": q.text, "kind": q.kind} for q in questions.values()]
+        return [{"id": q.id, "text": q.text, "kind": q.kind, "set": q.set,
+                 "profile": PROFILE_OF[q.corpus]} for q in questions.values()]
 
     app.mount("/", StaticFiles(directory=viewer_dir, html=True), name="viewer")
     return app
@@ -47,13 +49,17 @@ def main() -> None:
 
     args = build_parser().parse_args()
     cfg = load_config()
-    data = load_demo(corpora={"musique"})["musique"]
-    profiles = {"ignite": build_demo_harness(cfg, data=data)}
-    if os.environ.get("TYPESAFE_API_KEY"):
-        profiles["ignite-typesafe"] = build_demo_harness(cfg, data=data, controller="typesafe")
+    data = load_demo()
+    profiles: dict[str, Harness] = {}
+    for corpus, corpus_data in data.items():
+        profiles[PROFILE_OF[corpus]] = build_demo_harness(cfg, data=corpus_data)
+        if os.environ.get("TYPESAFE_API_KEY"):
+            profiles[f"{PROFILE_OF[corpus]}-typesafe"] = build_demo_harness(
+                cfg, data=corpus_data, controller="typesafe")
+    questions = {qid: q for d in data.values() for qid, q in d.questions.items()}
     logging.basicConfig(level=logging.INFO)
     print(f"Ignite demo: http://{HOST}:{args.port}/  (profiles: {', '.join(profiles)})")
-    uvicorn.run(create_demo_app(profiles, data.questions), host=HOST, port=args.port)
+    uvicorn.run(create_demo_app(profiles, questions), host=HOST, port=args.port)
 
 
 if __name__ == "__main__":

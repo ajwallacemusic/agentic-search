@@ -9,11 +9,33 @@ const html = readFileSync(new URL("../viewer/index.html", import.meta.url), "utf
 const core = html.split("/* <core> */")[1].split("/* </core> */")[0];
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(core + "\n;globalThis.core = { TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable };", ctx);
-const { TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable } = ctx.core;
+vm.runInContext(core + "\n;globalThis.core = { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable };", ctx);
+const { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable } = ctx.core;
 
 const ev = (type, extra = {}) => ({ type, search_id: "s", seq: 0, turn: 0, at_ms: 0, ...extra });
 const frame = (e) => `id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
+
+test("optionsHtml groups questions by set, in SETS order", () => {
+  const html = optionsHtml([
+    { id: "m1", text: "Match <it>", set: "wands-match" },
+    { id: "hero", text: "Who?", set: "musique" },
+    { id: "w1", text: "gray sofa", set: "wands" },
+  ]);
+  assert.deepEqual([...SETS.map((s) => s.id)], ["musique", "wands", "wands-match"]);
+  const groups = [...html.matchAll(/<optgroup label="([^"]+)">/g)].map((m) => m[1]);
+  assert.deepEqual(groups, ["MuSiQue (multi-hop Wikipedia)", "WANDS (product search)", "WANDS match (our questions)"]);
+  assert.ok(html.indexOf('value="hero"') < html.indexOf('value="w1"') && html.indexOf('value="w1"') < html.indexOf('value="m1"'));
+  assert.ok(html.includes("Match &lt;it&gt;"));
+});
+
+test("optionsHtml leaves out empty sets", () => {
+  assert.ok(!optionsHtml([{ id: "hero", text: "Q", set: "musique" }]).includes("WANDS"));
+});
+
+test("a live run posts the question's profile", () => {
+  const body = JSON.parse(requestBody({ id: "w1", text: "gray sofa", profile: "ignite-wands" }, "harness"));
+  assert.deepEqual(body, { profile: "ignite-wands", question: "gray sofa", mode: "harness", snapshot_k: 10, include_trace: true });
+});
 
 test("lanes are the known tools in order, then any other tool seen", () => {
   assert.deepEqual([...TOOLS], ["lexical_search", "vector_search", "filter_search", "fetch"]);

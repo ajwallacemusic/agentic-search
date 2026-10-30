@@ -272,13 +272,34 @@ function questionText(meta, events) {
 function replayable(got) {
   return Boolean(got && (got.retrieval || got.harness));
 }
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const SETS = [
+  { id: "musique", label: "MuSiQue (multi-hop Wikipedia)" },
+  { id: "wands", label: "WANDS (product search)" },
+  { id: "wands-match", label: "WANDS match (our questions)" },
+];
+
+/** The question picker's options: one <optgroup> per question set, in SETS order. */
+function optionsHtml(questions) {
+  return SETS.map((set) => {
+    const qs = questions.filter((q) => q.set === set.id);
+    if (!qs.length) return "";
+    const opts = qs.map((q) => `<option value="${esc(q.id)}">${esc(q.id)} — ${esc(q.text)}</option>`).join("");
+    return `<optgroup label="${esc(set.label)}">${opts}</optgroup>`;
+  }).join("");
+}
+
+/** The POST body for one live run: each question runs on its own corpus's profile. */
+function requestBody(q, mode) {
+  return JSON.stringify({ profile: q.profile, question: q.text, mode, snapshot_k: 10, include_trace: true });
+}
 /* </core> */
 
 const MODES = ["retrieval", "harness"];
 const TITLES = { retrieval: "Retrieval mode (one pass)", harness: "Harness mode (full loop)" };
 const view = { states: {}, started: {}, gold: new Set(), replay: false, timer: null };
 
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const $ = (id) => document.getElementById(id);
 
 function shortArgs(args) {
@@ -376,18 +397,18 @@ async function loadQuestions() {
   try {
     const r = await fetch("/ignite/questions");
     live.questions = await r.json();
-    $("q-select").innerHTML = live.questions.map((q) => `<option value="${esc(q.id)}">${esc(q.id)} — ${esc(q.text)}</option>`).join("");
+    $("q-select").innerHTML = optionsHtml(live.questions);
   } catch (e) {
     banner("Live server not reachable. Use Switch to replay.");
   }
 }
 
-async function streamMode(mode, question, signal) {
+async function streamMode(mode, q, signal) {
   view.started[mode] = performance.now();
   try {
     const resp = await fetch("/v1/search/stream", {
       method: "POST", signal, headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ profile: "ignite", question, mode, snapshot_k: 10, include_trace: true }),
+      body: requestBody(q, mode),
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
     const reader = resp.body.getReader();
@@ -418,7 +439,7 @@ function runLive() {
   reset();
   startClock();
   live.aborts = MODES.map(() => new AbortController());
-  MODES.forEach((mode, i) => streamMode(mode, q.text, live.aborts[i].signal));
+  MODES.forEach((mode, i) => streamMode(mode, q, live.aborts[i].signal));
 }
 
 function stopLive() {

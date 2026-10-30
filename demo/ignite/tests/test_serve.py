@@ -21,6 +21,16 @@ async def test_questions_endpoint_hides_gold(client):
     assert all("gold" not in r for r in rows)
 
 
+async def test_questions_endpoint_gives_set_and_profile(client):
+    rows = (await client.get("/ignite/questions")).json()
+    assert rows[0]["set"] == "musique" and rows[0]["profile"] == "ignite"
+
+
+def test_each_corpus_has_its_own_profile():
+    from demo.ignite.serve import PROFILE_OF
+    assert PROFILE_OF == {"musique": "ignite", "wands": "ignite-wands"}
+
+
 async def test_stream_returns_sse_for_both_modes(client):
     for mode in ("retrieval", "harness"):
         r = await client.post("/v1/search/stream",
