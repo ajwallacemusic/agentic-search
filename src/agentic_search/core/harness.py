@@ -47,6 +47,7 @@ from agentic_search.roles.controller import Controller
 from agentic_search.roles.executor import Executor
 from agentic_search.roles.planner import Planner, render_manifests
 from agentic_search.roles.tools import build_tool_specs
+from agentic_search.roles.workspace import WorkspaceUpdate
 
 Mode = Literal["retrieval", "harness", "model"]
 _MODES = ("retrieval", "harness", "model")
@@ -389,14 +390,25 @@ class Harness:
                         controller: Controller, tools: list[ToolSpec],
                         progress: Callable[[], None], *, single_pass: bool) -> StopReason:
         planner = Planner(self.driver, hooks=self.hooks,
-                          max_calls_per_turn=self.settings.max_calls_per_turn)
+                          max_calls_per_turn=self.settings.max_calls_per_turn,
+                          steps=self.settings.steps)
         while True:
             reason = controller.budget_stop(state)
             if reason is not None:
                 state.trace.add("budget", state.turn, reason=reason.value)
                 return reason
-            plan = await planner.plan(state, tools)
-            state.usage.add_model(plan.usage)
+            if self.settings.steps:
+                plan, update = await planner.plan_with_workspace(state, tools)
+                state.usage.add_model(plan.usage)
+                if not plan.calls and update.changed and state.current_step() is not None:
+                    plan, more = await planner.plan_with_workspace(state, tools)
+                    state.usage.add_model(plan.usage)
+                    update = WorkspaceUpdate(update.n_facts + more.n_facts,
+                                             update.n_steps_done + more.n_steps_done,
+                                             update.changed or more.changed)
+            else:
+                plan, update = await planner.plan(state, tools), WorkspaceUpdate()
+                state.usage.add_model(plan.usage)
             calls = plan.calls[: state.budget.max_tool_calls - state.usage.tool_calls]
             if not calls:
                 state.emitter.emit(UsageUpdated, turn=state.turn, usage=state.usage.model_copy())
@@ -421,7 +433,8 @@ class Harness:
             top = [c.hit.key for c, _ in state.pool.ranked(self.settings.judge_weight)[:20]]
             state.history.append(TurnSummary(
                 turn=state.turn, n_calls=len(calls), n_errors=len(result.errors),
-                n_new=analysis.n_new, n_new_relevant=analysis.n_new_relevant, top_keys=top))
+                n_new=analysis.n_new, n_new_relevant=analysis.n_new_relevant, top_keys=top,
+                n_facts=update.n_facts, n_steps_done=update.n_steps_done))
             if single_pass:
                 return StopReason.SINGLE_PASS
             reason = controller.budget_stop(state)
