@@ -57,11 +57,15 @@ class CachedEmbedder:
         self._dirty = False
         self._saved_at = float("-inf")
         atexit.register(self.flush)
-        if self.path.exists():
-            import numpy as np
+        self._vectors = self._on_disk()
 
-            with np.load(self.path) as f:
-                self._vectors = dict(zip(f["keys"].tolist(), f["vectors"]))
+    def _on_disk(self) -> dict[str, Any]:
+        if not self.path.exists():
+            return {}
+        import numpy as np
+
+        with np.load(self.path) as f:
+            return dict(zip(f["keys"].tolist(), f["vectors"]))
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.inner, name)
@@ -85,13 +89,15 @@ class CachedEmbedder:
 
     def flush(self) -> None:
         """Write new vectors to disk. Saves are throttled (a corpus is embedded in small batches,
-        and each save rewrites the file); this also runs at exit."""
+        and each save rewrites the file); this also runs at exit. Vectors another cache on the same
+        file saved meanwhile (one per corpus in `serve`) are kept."""
         import numpy as np
 
         if not self._dirty:
             return
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._vectors = {**self._on_disk(), **self._vectors}
         keys = list(self._vectors)
         tmp = self.path.with_suffix(".tmp.npz")
         np.savez(tmp, keys=np.array(keys),

@@ -183,7 +183,7 @@ question, seed 7, 2026-10-30.
 - **MuSiQue:** 4-hop recall@10 0.800 vs 0.637. 2 of 60 harness runs ended on a planner time-out.
 - **WANDS:** +0.03 nDCG@10 for about 4× the cost and about 4× the time (39 s vs 10 s). One run of
   60 queries; treat the gain as small.
-- **WANDS match:** wood tone 0.271 vs 0.000, style 0.267 vs 0.050, color 0.157 vs 0.000 (P@10).
+- **WANDS match:** wood tone 0.271 vs 0.014, style 0.267 vs 0.050, color 0.157 vs 0.000 (P@10).
   The harness gets 0 on 11 of 20 questions; quote the average, not only the hero.
 - The harness is slow: about 30–40 s per question, against about 10 s for retrieval.
 

@@ -221,3 +221,14 @@ async def test_saves_are_throttled_and_flush_writes_the_rest(tmp_path):
     inner = _Counting()
     await CachedEmbedder(inner, tmp_path / "c.npz").embed(_texts("a", "bb"), "document")
     assert inner.seen == 0
+
+
+async def test_two_caches_on_one_file_keep_each_others_vectors(tmp_path):
+    from demo.ignite.build import CachedEmbedder
+    musique = CachedEmbedder(_Counting(), tmp_path / "c.npz")
+    wands = CachedEmbedder(_Counting(), tmp_path / "c.npz")
+    await wands.embed(_texts("sofa"), "document")
+    await musique.embed(_texts("paragraph"), "document")  # written last, from an empty start
+    inner = _Counting()
+    await CachedEmbedder(inner, tmp_path / "c.npz").embed(_texts("sofa", "paragraph"), "document")
+    assert inner.seen == 0
