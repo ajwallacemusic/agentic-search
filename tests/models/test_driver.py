@@ -162,3 +162,12 @@ async def test_delegate_stops_calling_model_once_budget_exhausted():
     assert len(client.requests) == 2 and len(rt.batches) == 1
     assert client.requests[1]["tool_choice"] == "finish"
     assert res.ranked_keys == ["k"]
+
+
+async def test_plan_limit_applies_to_searches_only():
+    calls = [tc(i) for i in range(8)] + [tc(9, "note", fact="f", source_key="s:d")]
+    client = FakeLLMClient([ChatResponse(tool_calls=calls)])
+    v = view().model_copy(update={"max_calls": 6})
+    tools = [*TOOLS, ToolSpec(name="note", description="d", parameters={})]
+    res = await ToolCallingDriver(client, max_calls_per_turn=8).plan(v, tools)
+    assert [c.name for c in res.calls] == ["lexical_search"] * 6 + ["note"]

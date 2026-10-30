@@ -6,6 +6,7 @@ from typing import Any
 
 from agentic_search.core.types import Budget, Content, ModelUsage, Query, TextPart
 from agentic_search.models.base import (
+    WORKSPACE_NAMES,
     DelegateResult,
     PlannerView,
     PlanResult,
@@ -116,7 +117,16 @@ class ToolCallingDriver:
         content = self._with_images(render_planner_view(view), view.question)
         resp = await self.client.chat(system, [ChatMessage(role="user", content=content)],
                                       tools=tools, max_tokens=self.max_tokens)
-        return PlanResult(calls=resp.tool_calls[:limit], usage=resp.usage, note=resp.text or None)
+        passthrough = WORKSPACE_NAMES & {t.name for t in tools}  # steps off: nothing
+        searches = 0
+        calls: list[ToolCall] = []
+        for c in resp.tool_calls:
+            if c.name in passthrough:
+                calls.append(c)
+            elif searches < limit:
+                calls.append(c)
+                searches += 1
+        return PlanResult(calls=calls, usage=resp.usage, note=resp.text or None)
 
     async def run_delegate(self, question: Query, tools: list[ToolSpec], runtime: ToolRuntime,
                            budget: Budget, context: str = "") -> DelegateResult:

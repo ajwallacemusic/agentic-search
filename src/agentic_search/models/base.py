@@ -54,6 +54,10 @@ class Fact(BaseModel):
     turn: int
 
 
+# Tool names the harness handles itself (see roles/workspace.py); drivers never truncate them.
+WORKSPACE_NAMES = frozenset({"plan_steps", "note", "step_done"})
+
+
 class TurnSummary(BaseModel):
     turn: int
     n_calls: int
@@ -63,6 +67,8 @@ class TurnSummary(BaseModel):
     top_keys: list[str] = Field(default_factory=list)
     n_facts: int = 0
     n_steps_done: int = 0
+    n_opened: int = 0
+    plan_set: bool = False
 
 
 class PlannerView(BaseModel):

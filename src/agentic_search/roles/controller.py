@@ -74,7 +74,10 @@ class Controller:
     @staticmethod
     def _idle(t: TurnSummary) -> bool:
         no_new = t.n_new == 0 if t.n_new_relevant is None else t.n_new_relevant == 0
-        return no_new and not t.n_facts and not t.n_steps_done
+        if t.n_calls and t.n_errors == t.n_calls:
+            return False  # all calls failed: let the base rule REFINE
+        return (no_new and not t.n_facts and not t.n_steps_done and not t.n_opened
+                and not t.plan_set)
 
     def _base_heuristic(self, state: SearchState) -> Decision:
         if not state.history:
