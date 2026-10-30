@@ -6,7 +6,10 @@ only file metadata (path, size, ...), and each paragraph needs its `title` as me
 from __future__ import annotations
 
 import asyncio
+import atexit
+import hashlib
 import logging
+import time
 from pathlib import Path
 from typing import Any, Literal
 
@@ -15,7 +18,7 @@ import yaml
 from agentic_search.backends.files import FilesBackend
 from agentic_search.config import BuildContext, build, resolve_env
 from agentic_search.core.harness import Harness, HarnessSettings
-from agentic_search.core.types import Budget, Document
+from agentic_search.core.types import Budget, Document, TextPart
 from agentic_search.embedders.base import Embedder
 from agentic_search.models.driver import ToolCallingDriver
 from agentic_search.models.llm_judge import LLMJudge
@@ -40,6 +43,61 @@ class SerialEmbedder:
     async def embed(self, items: list[Any], purpose: Any) -> list[Any]:
         async with self._lock:
             return await self.inner.embed(items, purpose)
+
+
+class CachedEmbedder:
+    """Keeps document embeddings in an .npz file, keyed by model id and text, so a restart does not
+    re-embed the corpus (WANDS: ~4 min on a laptop). Queries and non-text items pass through."""
+
+    def __init__(self, inner: Embedder, path: Path, *, save_every_s: float = 30.0):
+        self.inner = inner
+        self.path = Path(path)
+        self.save_every_s = save_every_s
+        self._vectors: dict[str, Any] = {}
+        self._dirty = False
+        self._saved_at = float("-inf")
+        atexit.register(self.flush)
+        if self.path.exists():
+            import numpy as np
+
+            with np.load(self.path) as f:
+                self._vectors = dict(zip(f["keys"].tolist(), f["vectors"]))
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.inner, name)
+
+    def _key(self, text: str) -> str:
+        return hashlib.sha1(f"{self.inner.id}\n{text}".encode()).hexdigest()
+
+    async def embed(self, items: list[Any], purpose: Any) -> list[Any]:
+        if purpose != "document" or not all(isinstance(i, TextPart) for i in items):
+            return await self.inner.embed(items, purpose)
+        keys = [self._key(i.text) for i in items]
+        missing = [i for i, k in enumerate(keys) if k not in self._vectors]
+        if missing:
+            fresh = await self.inner.embed([items[i] for i in missing], purpose)
+            for i, vector in zip(missing, fresh):
+                self._vectors[keys[i]] = vector
+            self._dirty = True
+            if time.monotonic() - self._saved_at >= self.save_every_s:
+                self.flush()
+        return [self._vectors[k] for k in keys]
+
+    def flush(self) -> None:
+        """Write new vectors to disk. Saves are throttled (a corpus is embedded in small batches,
+        and each save rewrites the file); this also runs at exit."""
+        import numpy as np
+
+        if not self._dirty:
+            return
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        keys = list(self._vectors)
+        tmp = self.path.with_suffix(".tmp.npz")
+        np.savez(tmp, keys=np.array(keys),
+                 vectors=np.array([self._vectors[k] for k in keys], dtype=np.float32))
+        tmp.replace(self.path)
+        self._dirty, self._saved_at = False, time.monotonic()
 
 
 class RequestDefaults:
@@ -115,7 +173,11 @@ def build_harness_for(cfg: dict[str, Any], docs: dict[str, list[Document]],
         judge_client = make_client(cfg["judge"]) if cfg.get("judge") else client
         analyzer = analyzer or LLMJudge(judge_client)
     decider = build("decider", cfg["typesafe"], ctx) if controller == "typesafe" else None
-    embedder = SerialEmbedder(embedder or _embedder(cfg, ctx))
+    if embedder is None:
+        embedder = _embedder(cfg, ctx)
+        if cfg.get("embedding_cache"):
+            embedder = CachedEmbedder(embedder, CONFIG_PATH.parent / cfg["embedding_cache"])
+    embedder = SerialEmbedder(embedder)
     backends = [FilesBackend.from_documents(source, source_docs, embedder=embedder,
                                             collection=source, description=descriptions[source])
                 for source, source_docs in docs.items()]

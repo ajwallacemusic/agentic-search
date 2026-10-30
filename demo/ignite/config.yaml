@@ -15,6 +15,8 @@ judge: {type: vertex, model: gemini-3.5-flash-lite, project_env: IGNITE_GCP_PROJ
 # driver: {type: anthropic, model: claude-sonnet-5-5, price_per_mtok: [3.0, 15.0]}
 embedder: {type: sentence_transformers, model: BAAI/bge-small-en-v1.5}
 fallback_embedder: {type: hash}
+# Document embeddings are kept here between runs (git-ignored); delete the file to rebuild.
+embedding_cache: public/.cache/embeddings/document-vectors.npz
 budget: {max_turns: 4, max_tool_calls: 24, max_seconds: 60, max_cost_usd: 0.50}
 typesafe: {type: typesafe, api_key_env: TYPESAFE_API_KEY}
 # Same settings for both modes. The judge runs its batches one after another, so a larger

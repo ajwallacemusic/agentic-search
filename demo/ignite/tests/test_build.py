@@ -127,3 +127,84 @@ def test_build_harness_for_one_source():
                           embedder=HashEmbedder())
     assert list(h.backends) == ["wiki"] and h.backends["wiki"].collection == "wiki"
     assert h.backends["wiki"].description == "Wikipedia paragraphs."
+
+
+class _Counting:
+    """An embedder that records how many items it embedded."""
+
+    dim, local = 2, True
+
+    def __init__(self, id="m1"):
+        from agentic_search.core.types import Modality
+        self.id, self.modalities, self.seen = id, {Modality.TEXT}, 0
+
+    async def embed(self, items, purpose):
+        self.seen += len(items)
+        return [[float(len(i.text)), 1.0] for i in items]
+
+
+def _texts(*words):
+    from agentic_search.core.types import TextPart
+    return [TextPart(text=w) for w in words]
+
+
+async def test_cache_hits_skip_the_inner_embedder(tmp_path):
+    from demo.ignite.build import CachedEmbedder
+    inner = _Counting()
+    e = CachedEmbedder(inner, tmp_path / "c.npz")
+    first = await e.embed(_texts("a", "bb"), "document")
+    again = await e.embed(_texts("bb", "a", "ccc"), "document")
+    assert inner.seen == 3
+    assert [list(v) for v in again] == [[2.0, 1.0], [1.0, 1.0], [3.0, 1.0]]
+    assert [list(v) for v in first] == [[1.0, 1.0], [2.0, 1.0]]
+
+
+async def test_cache_survives_a_new_instance(tmp_path):
+    from demo.ignite.build import CachedEmbedder
+    await CachedEmbedder(_Counting(), tmp_path / "c.npz").embed(_texts("a", "bb"), "document")
+    inner = _Counting()
+    await CachedEmbedder(inner, tmp_path / "c.npz").embed(_texts("a", "bb"), "document")
+    assert inner.seen == 0
+
+
+async def test_cache_is_keyed_by_model(tmp_path):
+    from demo.ignite.build import CachedEmbedder
+    await CachedEmbedder(_Counting("m1"), tmp_path / "c.npz").embed(_texts("a"), "document")
+    other = _Counting("m2")
+    await CachedEmbedder(other, tmp_path / "c.npz").embed(_texts("a"), "document")
+    assert other.seen == 1
+
+
+async def test_queries_are_never_cached(tmp_path):
+    from demo.ignite.build import CachedEmbedder
+    inner = _Counting()
+    e = CachedEmbedder(inner, tmp_path / "c.npz")
+    await e.embed(_texts("a"), "query")
+    await e.embed(_texts("a"), "query")
+    assert inner.seen == 2 and not (tmp_path / "c.npz").exists()
+
+
+def test_config_turns_on_the_embedding_cache(tmp_path):
+    from agentic_search.testing import KeywordJudge, ScriptedDriver
+    from demo.ignite.build import CachedEmbedder, build_harness_for, load_config
+
+    assert load_config()["embedding_cache"].startswith("public/.cache/")
+    cfg = {**load_config(), "embedder": {"type": "hash"}, "embedding_cache": str(tmp_path / "c.npz")}
+    h = build_harness_for(cfg, demo_data().documents, demo_data().descriptions,
+                          driver=ScriptedDriver(), analyzer=KeywordJudge(["x"]))
+    (embedder,) = [h.embedders.get(i) for i in h.embedders.ids()]
+    assert isinstance(embedder.inner, CachedEmbedder)
+
+
+async def test_saves_are_throttled_and_flush_writes_the_rest(tmp_path):
+    from demo.ignite.build import CachedEmbedder
+    e = CachedEmbedder(_Counting(), tmp_path / "c.npz", save_every_s=3600)
+    await e.embed(_texts("a"), "document")  # first save is immediate
+    await e.embed(_texts("bb"), "document")  # held back
+    inner = _Counting()
+    await CachedEmbedder(inner, tmp_path / "c.npz").embed(_texts("a", "bb"), "document")
+    assert inner.seen == 1
+    e.flush()
+    inner = _Counting()
+    await CachedEmbedder(inner, tmp_path / "c.npz").embed(_texts("a", "bb"), "document")
+    assert inner.seen == 0
