@@ -112,3 +112,46 @@ async def test_judge_question_passes_through_hook():
     judge = RecordingJudge()
     out = await Analyzer(judge, hooks=ReplaceQuestion()).analyze(s, calls, res, digest_model_id="d")
     assert judge.questions == ["REDACTED"] and out.n_new_relevant == 1
+
+
+def fetch_state(text: str = "high  fever\nand chills", *, source: str = "s"):
+    """A turn whose only call fetched a document already in the pool (0 new)."""
+    s = SearchState(question=Query.of("fever"), manifests={}, budget=Budget())
+    hit = Hit(doc_id="1", source=source, content=[TextPart(text=text)])
+    s.pool.add([hit], turn=0, call_id="earlier")
+    c = call("fetch", source=source, doc_id="1")
+    return s, [c], ExecResult(new_keys=[], hits_per_call={c.id: [hit.key]})
+
+
+def test_fetched_known_document_is_shown_in_full_when_steps_on():
+    s, calls, res = fetch_state()
+    digest = Analyzer(None, show_opened=True).render_digest(s, calls, res, "driver")
+    assert "1 hits, 0 new" in digest
+    assert "Opened documents:\n- s:1: high fever and chills" in digest
+
+
+def test_opened_section_absent_when_steps_off():
+    s, calls, res = fetch_state()
+    digest = Analyzer(None).render_digest(s, calls, res, "driver")
+    assert "Opened documents" not in digest
+
+
+def test_opened_section_ignores_non_fetch_calls():
+    s, calls, res = setup_state()
+    digest = Analyzer(None, show_opened=True).render_digest(s, calls, res, "driver")
+    assert "Opened documents" not in digest
+
+
+def test_opened_text_respects_source_policy():
+    s, calls, res = fetch_state(source="secret")
+    a = Analyzer(None, show_opened=True, policy=SourcePolicy({"secret": {"judge-only"}}))
+    digest = a.render_digest(s, calls, res, "driver")
+    assert "- secret:1: (content withheld by source policy)" in digest
+    assert "chills" not in digest
+
+
+def test_opened_text_is_cut_to_fetch_chars():
+    s, calls, res = fetch_state("word " * 100)
+    digest = Analyzer(None, show_opened=True, fetch_chars=20).render_digest(s, calls, res, "d")
+    line = next(ln for ln in digest.splitlines() if ln.startswith("- s:1:"))
+    assert line == "- s:1: word word word word…"
