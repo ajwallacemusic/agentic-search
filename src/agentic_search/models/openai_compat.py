@@ -35,11 +35,18 @@ class OpenAICompatClient:
                  client: Any = None, supports_images: bool = False,
                  price_per_mtok: tuple[float, float] | None = None, id: str | None = None,
                  max_tokens_param: str = "max_tokens", max_retries: int = 3,
-                 auth: Auth | None = None):
+                 auth: Auth | None = None, timeout: float | None = None,
+                 reasoning_effort: str | None = None):
+        """`timeout` (seconds) caps each request, so a stalled call is retried (`max_retries`)
+        instead of eating a search's time budget. `reasoning_effort` (e.g. "low") is sent with
+        every request when set; reasoning models such as Gemini think less and answer faster."""
+        self.timeout = float(timeout) if timeout is not None else None
+        self.reasoning_effort = reasoning_effort
         if client is None:
             from openai import AsyncOpenAI
             key = api_key or os.environ.get("OPENAI_API_KEY") or "unused"
-            client = AsyncOpenAI(base_url=base_url, api_key=key, max_retries=max_retries)
+            extra = {"timeout": self.timeout} if self.timeout is not None else {}
+            client = AsyncOpenAI(base_url=base_url, api_key=key, max_retries=max_retries, **extra)
         self.model = model
         self._client = client
         self.supports_images = supports_images
@@ -62,6 +69,11 @@ class OpenAICompatClient:
                 for t in tools]
         if tool_choice:
             kwargs["tool_choice"] = {"type": "function", "function": {"name": tool_choice}}
+        if self.reasoning_effort is not None:
+            kwargs["reasoning_effort"] = self.reasoning_effort
+        if self.timeout is not None:
+            # Per request as well, so the cap also holds for an injected client.
+            kwargs["timeout"] = self.timeout
         if self.auth is not None:
             # Headers per call, so a short-lived token is refreshed rather than frozen at startup.
             kwargs["extra_headers"] = await self.auth.headers()

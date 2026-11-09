@@ -92,3 +92,23 @@ async def test_no_auth_sends_no_extra_headers():
     c = OpenAICompatClient("m", client=fake)
     await c.chat("s", [ChatMessage(role="user", content="q")])
     assert "extra_headers" not in fake.chat.completions.kwargs
+
+
+async def test_sends_reasoning_effort_and_timeout_when_set():
+    fake = sdk()
+    c = OpenAICompatClient("m", client=fake, reasoning_effort="low", timeout=12)
+    await c.chat("s", [ChatMessage(role="user", content="q")])
+    kw = fake.chat.completions.kwargs
+    assert kw["reasoning_effort"] == "low" and kw["timeout"] == 12.0
+
+
+async def test_omits_reasoning_effort_and_timeout_by_default():
+    fake = sdk()
+    await OpenAICompatClient("m", client=fake).chat("s", [ChatMessage(role="user", content="q")])
+    kw = fake.chat.completions.kwargs
+    assert "reasoning_effort" not in kw and "timeout" not in kw
+
+
+def test_builds_its_own_sdk_client_with_timeout_and_retries():
+    c = OpenAICompatClient("m", base_url="http://x/v1", api_key="k", timeout=7, max_retries=1)
+    assert c._client.max_retries == 1 and c._client.timeout == 7.0

@@ -147,12 +147,25 @@ def _anthropic(cfg: dict[str, Any], ctx: BuildContext) -> Any:
                            supports_images=cfg.get("supports_images", True), price_per_mtok=_price(cfg))
 
 
+def _request_options(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Optional per-request settings shared by the OpenAI-compatible clients."""
+    out: dict[str, Any] = {}
+    if cfg.get("reasoning_effort") is not None:
+        out["reasoning_effort"] = str(cfg["reasoning_effort"])
+    if cfg.get("request_timeout_s") is not None:
+        out["timeout"] = float(cfg["request_timeout_s"])
+    if cfg.get("max_retries") is not None:
+        out["max_retries"] = int(cfg["max_retries"])
+    return out
+
+
 def _openai_compat(cfg: dict[str, Any], ctx: BuildContext) -> Any:
     from agentic_search.models.openai_compat import OpenAICompatClient
     return OpenAICompatClient(cfg["model"], base_url=cfg.get("base_url"), api_key=cfg.get("api_key"),
                               id=cfg.get("id"), supports_images=cfg.get("supports_images", False),
                               price_per_mtok=_price(cfg),
-                              max_tokens_param=cfg.get("max_tokens_param", "max_tokens"))
+                              max_tokens_param=cfg.get("max_tokens_param", "max_tokens"),
+                              **_request_options(cfg))
 
 
 def _vertex_llm(cfg: dict[str, Any], ctx: BuildContext) -> Any:
@@ -160,7 +173,8 @@ def _vertex_llm(cfg: dict[str, Any], ctx: BuildContext) -> Any:
     from agentic_search.models.vertex import vertex_client
     return vertex_client(cfg["model"], project=cfg["project"], location=cfg.get("location", "global"),
                          auth=build_auth(cfg["auth"]) if cfg.get("auth") else None, id=cfg.get("id"),
-                         supports_images=cfg.get("supports_images", True), price_per_mtok=_price(cfg))
+                         supports_images=cfg.get("supports_images", True), price_per_mtok=_price(cfg),
+                         **_request_options(cfg))
 
 
 def _neo4j(cfg: dict[str, Any], ctx: BuildContext) -> Any:

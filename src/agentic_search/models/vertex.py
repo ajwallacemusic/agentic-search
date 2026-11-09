@@ -31,7 +31,8 @@ def vertex_base_url(project: str, location: str = "global") -> str:
 def vertex_client(model: str, *, project: str, location: str = "global", auth: Auth | None = None,
                   client: Any = None, supports_images: bool = True,
                   price_per_mtok: tuple[float, float] | None = None, id: str | None = None,
-                  max_retries: int = 3) -> OpenAICompatClient:
+                  max_retries: int = 3, timeout: float | None = None,
+                  reasoning_effort: str | None = None) -> OpenAICompatClient:
     base_url = vertex_base_url(project, location)
     if price_per_mtok is None:
         logger.warning("vertex:%s has no price_per_mtok, so its cost will read 0 and a budget on "
@@ -42,4 +43,5 @@ def vertex_client(model: str, *, project: str, location: str = "global", auth: A
     return OpenAICompatClient(publisher_model, base_url=base_url, api_key="unused", client=client,
                               supports_images=supports_images, price_per_mtok=price_per_mtok,
                               id=id or f"vertex:{model}", max_retries=max_retries,
-                              auth=auth if auth is not None else GcpAdc())
+                              auth=auth if auth is not None else GcpAdc(), timeout=timeout,
+                              reasoning_effort=reasoning_effort)
