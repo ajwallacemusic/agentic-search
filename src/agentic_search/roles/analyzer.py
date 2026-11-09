@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from agentic_search.core.hooks import Hooks, SourcePolicy
 from agentic_search.core.secrets import scrub
 from agentic_search.core.state import Candidate, SearchState
-from agentic_search.core.types import ModelUsage
+from agentic_search.core.types import ModelUsage, Query, TextPart
 from agentic_search.events import PhaseFinished, PhaseStarted, PhaseSummary
 from agentic_search.models.base import Decider, JudgeRequest, ToolCall
 from agentic_search.roles.executor import ExecResult
@@ -22,6 +22,16 @@ class AnalysisResult:
     n_new_relevant: int | None
     digest: str
     usage: ModelUsage
+
+
+def _with_facts(state: SearchState) -> Query:
+    """The question plus the facts noted so far, so the judge can grade hits that depend on an
+    earlier hop (e.g. "same color as the bed I own" once the bed's color is noted)."""
+    if not state.notebook:
+        return state.question
+    facts = "\n".join(f"- {f.text}" for f in state.notebook)
+    return Query(content=[*state.question.content,
+                          TextPart(text=f"Facts found so far in this search:\n{facts}")])
 
 
 class Analyzer:
@@ -71,12 +81,13 @@ class Analyzer:
                 state.pool[k].unjudged_reason = "no judge configured"
             return usage, 0, 0, None
         decider = self.decider
+        question = _with_facts(state)
         for start in range(0, len(pending), self.batch_size):
             batch = pending[start:start + self.batch_size]
             try:
                 hits = self.policy.redact([state.pool[k].hit for k in batch], decider.id)
                 request = await self.hooks.before_model_call(
-                    decider.id, JudgeRequest(question=state.question, hits=hits))
+                    decider.id, JudgeRequest(question=question, hits=hits))
                 t0 = time.perf_counter()
                 result = await asyncio.wait_for(decider.judge(request.question, request.hits),
                                                 self.timeout)

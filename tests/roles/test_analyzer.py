@@ -155,3 +155,35 @@ def test_opened_text_is_cut_to_fetch_chars():
     digest = Analyzer(None, show_opened=True, fetch_chars=20).render_digest(s, calls, res, "d")
     line = next(ln for ln in digest.splitlines() if ln.startswith("- s:1:"))
     assert line == "- s:1: word word word word…"
+
+
+async def test_judge_sees_noted_facts():
+    """Facts the planner noted (e.g. the anchor product's color) reach the judge with the question,
+    so it can grade "same color as X" without having X in the batch."""
+    from agentic_search.models.base import Fact
+
+    seen: list[str] = []
+
+    class Recording(KeywordJudge):
+        async def judge(self, question, hits):
+            seen.append(question.as_text())
+            return await super().judge(question, hits)
+
+    s, calls, res = setup_state()
+    s.notebook.append(Fact(text="The anchor bed has color : gray.", source_key="s:9", turn=0))
+    await Analyzer(Recording(["fever"])).analyze(s, calls, res, digest_model_id="d")
+    assert seen and seen[0].startswith("fever")
+    assert "The anchor bed has color : gray." in seen[0]
+
+
+async def test_judge_question_unchanged_without_facts():
+    seen: list[str] = []
+
+    class Recording(KeywordJudge):
+        async def judge(self, question, hits):
+            seen.append(question.as_text())
+            return await super().judge(question, hits)
+
+    s, calls, res = setup_state()
+    await Analyzer(Recording(["fever"])).analyze(s, calls, res, digest_model_id="d")
+    assert seen == ["fever"]
