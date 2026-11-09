@@ -100,8 +100,11 @@ def sample_musique(path: Path, *, per_hop: int = 20, corpus_size: int = 5000,
 
 WANDS_GAIN = {"Exact": 2, "Partial": 1}
 WANDS_DESCRIPTION = ("Wayfair product catalogue, one product per item: name, class, category "
-                     "path, description, features. Fields: title, product_class, category, "
-                     "rating_count, average_rating.")
+                     "path, features, description. Fields: title, product_class, category, "
+                     "rating_count, average_rating. The features text is `key : value` pairs "
+                     "joined by `|`, for example `dswoodtone : light wood`, `color : gray`, "
+                     "`style : modern & contemporary`; regex_search on a pair finds exact "
+                     "attribute matches.")
 
 
 def _tsv(path: Path) -> list[dict[str, str]]:
@@ -124,9 +127,10 @@ def _product_doc(row: dict[str, str]) -> Document:
     name = (row.get("product_name") or "").strip()
     klass = (row.get("product_class") or "").strip()
     category = (row.get("category hierarchy") or "").strip()
+    # Features before the long description, so a judge reading a cut snippet still sees them.
     parts = [name, " · ".join(x for x in (klass, category) if x),
-             (row.get("product_description") or "").strip(),
-             (row.get("product_features") or "").strip()]
+             (row.get("product_features") or "").strip(),
+             (row.get("product_description") or "").strip()]
     metadata: dict[str, object] = {"title": name, "product_class": klass, "category": category}
     for key in ("rating_count", "average_rating"):
         n = _number(row.get(key))
