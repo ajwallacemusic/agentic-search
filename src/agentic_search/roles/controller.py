@@ -130,5 +130,7 @@ class Controller:
         state.emitter.emit(PhaseFinished, turn=state.turn, phase="decide",
                            duration_ms=(time.perf_counter() - t0) * 1000,
                            summary=PhaseSummary(action=decision.action.value,
-                                                confidence=decision.confidence, error=error))
+                                                confidence=decision.confidence,
+                                                note=scrub(decision.note) if decision.note else None,
+                                                error=error))
         return decision
