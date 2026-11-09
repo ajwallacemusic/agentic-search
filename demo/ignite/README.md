@@ -121,20 +121,17 @@ Each document needs its title as metadata, so `corpus.py` loads the samples, `bu
 one `FilesBackend.from_documents(...)` per corpus in Python, and `serve.py` passes those to the
 library's `create_app` (profile `ignite` for MuSiQue, `ignite-wands` for WANDS).
 
-**Step tracking** (`settings.steps: true` in `config.yaml`) is a library feature on branch
-`feat/step-tracking`, not yet on `main`. The planner keeps a short step plan and a notebook of
+**Step tracking** (`settings.steps: true` in `config.yaml`) is a library feature (library PR #3,
+merged). The planner keeps a short step plan and a notebook of
 facts it read in documents, with the document each fact came from. The loop does not stop while a
-step is open. The viewer shows the steps and facts as they happen. This demo branch sits on top of
-`feat/step-tracking`; the demo itself changes nothing under `src/`.
+step is open. The viewer shows the steps and facts as they happen. The demo itself changes nothing under
+`src/`.
 
-`build.py` also works around three library gaps (each worth its own library PR):
-
-- `SerialEmbedder`: `Harness.setup()` indexes all sources at once; the shared
-  sentence-transformers model segfaults when two threads load or run it.
-- `RequestDefaults` / `make_client`: the library's Vertex client cannot send `reasoning_effort`
-  or a per-request timeout.
-- The library's `decide` events leave out the controller's note. The viewer reads the notes from
-  the trace in the final event, so in live mode the notes appear when each run ends.
+The library fixes the demo once worked around are merged (library PRs #4, #5 and #6): the
+sentence-transformers embedder is thread-safe, `vertex` clients take `reasoning_effort`,
+`request_timeout_s` and `max_retries` from config, and `decide` events carry the controller's
+note. The viewer still reads notes from the final trace as a fallback, for replays saved before
+the fix.
 
 ## Commands
 
@@ -237,6 +234,8 @@ Backup runs in `runs/` (Argon):
 
 - `20261030-133739-hero-*`, `20261030-133833-hero-*`, `20261030-133927-hero-*`: MuSiQue hero,
   harness 4/4, retrieval 1/4.
+- `20261109-132250-hero-*` (retrieval 2/4), `20261109-132357-hero-*` (retrieval 1/4): MuSiQue hero,
+  harness 4/4, current code; decide events carry the controller's notes.
 - `20261109-121547-match-hero-*`, `20261109-121658-match-hero-*`, `20261109-121804-match-hero-*`:
   harness 10 gold in top 10, retrieval 0 (current code).
 - `20261030-*-match-hero-*`: older (judge without facts); harness 10, 10 and 8 gold.

@@ -168,8 +168,8 @@ function withUsage(metrics, usage, atMs) {
   return m;
 }
 
-/** turn -> controller note, from a final result's trace. The library's decide events carry no
- *  note, so notes come from the trace (sent with the final event when include_trace is set). */
+/** turn -> controller note, from a final result's trace. Decide events carry the note; this
+ *  fallback is for replays saved before they did (trace sent when include_trace is set). */
 function notesFromTrace(result) {
   const out = {};
   const events = (result && result.trace && result.trace.events) || [];

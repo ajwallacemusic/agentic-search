@@ -5,7 +5,6 @@ only file metadata (path, size, ...), and each paragraph needs its `title` as me
 
 from __future__ import annotations
 
-import asyncio
 import atexit
 import hashlib
 import logging
@@ -22,28 +21,11 @@ from agentic_search.core.types import Budget, Document, TextPart
 from agentic_search.embedders.base import Embedder
 from agentic_search.models.driver import ToolCallingDriver
 from agentic_search.models.llm_judge import LLMJudge
-from agentic_search.models.vertex import vertex_base_url, vertex_client
 from demo.ignite.corpus import DemoData
 
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
-
-class SerialEmbedder:
-    """Runs one `embed` call at a time. `Harness.setup()` indexes every source at once, and a
-    shared in-process sentence-transformers model segfaults when two threads load or run it."""
-
-    def __init__(self, inner: Embedder):
-        self.inner = inner
-        self._lock = asyncio.Lock()
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self.inner, name)
-
-    async def embed(self, items: list[Any], purpose: Any) -> list[Any]:
-        async with self._lock:
-            return await self.inner.embed(items, purpose)
-
 
 class CachedEmbedder:
     """Keeps document embeddings in an .npz file, keyed by model id and text, so a restart does not
@@ -106,38 +88,10 @@ class CachedEmbedder:
         self._dirty, self._saved_at = False, time.monotonic()
 
 
-class RequestDefaults:
-    """Wraps an AsyncOpenAI client so every `chat.completions.create` call also sends
-    `defaults` (e.g. reasoning_effort); the library's client has no setting for them."""
-
-    def __init__(self, inner: Any, **defaults: Any):
-        self.inner = inner
-        self.defaults = defaults
-        self.chat = self
-        self.completions = self
-
-    async def create(self, **kwargs: Any) -> Any:
-        return await self.inner.chat.completions.create(**kwargs, **self.defaults)
-
-
 def make_client(cfg: dict[str, Any]) -> Any:
-    """The library's client factory, except a Vertex driver also gets `reasoning_effort`, a
-    per-request timeout and a retry count: Gemini's default thinking makes judging slow, and a
-    stalled request should be retried rather than eat the demo's time budget."""
-    cfg = resolve_env(cfg)
-    if cfg["type"] != "vertex":
-        return build("client", cfg, BuildContext(base_dir=CONFIG_PATH.parent))
-    from openai import AsyncOpenAI
-
-    location = cfg.get("location", "global")
-    raw = AsyncOpenAI(base_url=vertex_base_url(cfg["project"], location), api_key="unused",
-                      timeout=float(cfg.get("request_timeout_s", 60)),
-                      max_retries=int(cfg.get("max_retries", 2)))
-    defaults = {"reasoning_effort": cfg["reasoning_effort"]} if "reasoning_effort" in cfg else {}
-    price = cfg.get("price_per_mtok")
-    return vertex_client(cfg["model"], project=cfg["project"], location=location,
-                         client=RequestDefaults(raw, **defaults),
-                         price_per_mtok=(float(price[0]), float(price[1])) if price else None)
+    """A model client from one `driver` / `judge` block of config.yaml (`*_env` keys resolved).
+    `reasoning_effort`, `request_timeout_s` and `max_retries` are library client settings."""
+    return build("client", resolve_env(cfg), BuildContext(base_dir=CONFIG_PATH.parent))
 
 
 def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
@@ -182,7 +136,6 @@ def build_harness_for(cfg: dict[str, Any], docs: dict[str, list[Document]],
         embedder = _embedder(cfg, ctx)
         if cfg.get("embedding_cache"):
             embedder = CachedEmbedder(embedder, CONFIG_PATH.parent / cfg["embedding_cache"])
-    embedder = SerialEmbedder(embedder)
     backends = [FilesBackend.from_documents(source, source_docs, embedder=embedder,
                                             collection=source, description=descriptions[source])
                 for source, source_docs in docs.items()]

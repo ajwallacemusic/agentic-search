@@ -25,29 +25,6 @@ def test_sources_are_described():
     assert all(b.description for b in offline_harness().backends.values())
 
 
-async def test_serial_embedder_never_runs_two_calls_at_once():
-    import asyncio
-
-    from agentic_search.core.types import Modality, TextPart
-    from demo.ignite.build import SerialEmbedder
-
-    class Tracking:
-        id, dim, local, modalities = "t", 3, True, {Modality.TEXT}
-        active = peak = 0
-
-        async def embed(self, items, purpose):
-            Tracking.active += 1
-            Tracking.peak = max(Tracking.peak, Tracking.active)
-            await asyncio.sleep(0.01)
-            Tracking.active -= 1
-            return [[1.0, 0.0, 0.0] for _ in items]
-
-    e = SerialEmbedder(Tracking())
-    await asyncio.gather(*(e.embed([TextPart(text="x")], "document") for _ in range(5)))
-    assert Tracking.peak == 1
-    assert e.id == "t" and e.local is True and e.dim == 3
-
-
 def test_harness_settings_come_from_config():
     from demo.ignite.build import load_config
 
@@ -65,33 +42,15 @@ def test_each_collection_is_named_after_its_source():
     assert all(b.collection == name for name, b in offline_harness().backends.items())
 
 
-async def test_request_defaults_are_added_to_every_completion_call():
-    from demo.ignite.build import RequestDefaults
-
-    seen = {}
-
-    class Inner:
-        class chat:
-            class completions:
-                @staticmethod
-                async def create(**kwargs):
-                    seen.update(kwargs)
-                    return "ok"
-
-    client = RequestDefaults(Inner(), reasoning_effort="low")
-    assert await client.chat.completions.create(model="m") == "ok"
-    assert seen == {"model": "m", "reasoning_effort": "low"}
-
-
-def test_vertex_driver_gets_request_defaults(monkeypatch):
-    from demo.ignite.build import RequestDefaults, make_client
+def test_vertex_client_gets_request_settings(monkeypatch):
+    from demo.ignite.build import make_client
 
     monkeypatch.setenv("IGNITE_GCP_PROJECT", "demo-project-1")
     client = make_client({"type": "vertex", "model": "gemini-3.8-flash",
                           "project_env": "IGNITE_GCP_PROJECT", "price_per_mtok": [0.75, 3.75],
                           "reasoning_effort": "low", "request_timeout_s": 30, "max_retries": 1})
-    assert isinstance(client._client, RequestDefaults)
-    assert client._client.defaults == {"reasoning_effort": "low"}
+    assert client.reasoning_effort == "low" and client.timeout == 30.0
+    assert client._client.max_retries == 1
     assert client.price == (0.75, 3.75) and client.id == "vertex:gemini-3.8-flash"
 
 
@@ -206,7 +165,7 @@ def test_config_turns_on_the_embedding_cache(tmp_path):
     h = build_harness_for(cfg, demo_data().documents, demo_data().descriptions,
                           driver=ScriptedDriver(), analyzer=KeywordJudge(["x"]))
     (embedder,) = [h.embedders.get(i) for i in h.embedders.ids()]
-    assert isinstance(embedder.inner, CachedEmbedder)
+    assert isinstance(embedder, CachedEmbedder)
 
 
 async def test_saves_are_throttled_and_flush_writes_the_rest(tmp_path):
