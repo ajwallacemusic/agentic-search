@@ -14,8 +14,9 @@ Talk: "Will the Real Agentic Search Please Stand Up?" (Egen Ignite). Specs:
 
 1. **MuSiQue: the loop wins on multi-hop questions.** Each hop needs a fact from the hop before
    it. One planned pass cannot know what to search for next.
-2. **WANDS: the loop barely helps plain product search.** Same models, same settings. Ranking
-   gets a little better for about 4× the cost. Use the least agentic setting that works.
+2. **WANDS: the loop does not help plain product search.** Same models, same settings. Ranking
+   is about the same (within noise) for about 3× the cost. Use the least agentic setting that
+   works.
 3. **WANDS match: the loop wins again when the question has steps.** Same WANDS catalogue, our own
    rule-labeled questions: "I have product X. Find a Y with the same wood tone." First find X and
    read its wood tone, then search for Y. One pass cannot do the second step.
@@ -172,29 +173,29 @@ is set (the viewer itself runs the `ignite` and `ignite-wands` profiles).
 ## Numbers for the slides
 
 All numbers: Argon planner, step tracking on, project `ajw-sandbox-497707`, one run per
-question, seed 7, 2026-10-30.
+question, seed 7, 2026-11-09 (judge sees noted facts; `max_limit: 20`; `tuning-log.md` round 11).
 
 | set | what it tests | sample | metric | bm25 | retrieval | harness | harness cost vs retrieval |
 |---|---|---|---|---|---|---|---|
-| MuSiQue (multi-hop Wikipedia) | does the loop chase hops? | 60 questions (20 each 2/3/4-hop), 5,000 paragraphs | recall@10 | 0.468 | 0.715 | **0.886** | ~3.4× |
-| WANDS (Wayfair product search) | does the loop help plain ranking? | 60 queries, 42,994 products | nDCG@10 | 0.715 | 0.772 | 0.803 | ~4.0× |
-| WANDS match (ours) | does the loop help when a step needs a fact read on the way? | 20 questions, same catalogue | P@10 | 0.015 | 0.020 | **0.230** | ~4.9× |
+| MuSiQue (multi-hop Wikipedia) | does the loop chase hops? | 60 questions (20 each 2/3/4-hop), 5,000 paragraphs | recall@10 | 0.468 | 0.697 | **0.875** | ~3.3× |
+| WANDS (Wayfair product search) | does the loop help plain ranking? | 60 queries, 42,994 products | nDCG@10 | 0.715 | 0.787 | 0.766 | ~3.1× |
+| WANDS match (ours) | does the loop help when a step needs a fact read on the way? | 20 questions, same catalogue | P@10 | 0.015 | 0.050 | **0.515** | ~4.6× |
 
-- **MuSiQue:** 4-hop recall@10 0.800 vs 0.637. 2 of 60 harness runs ended on a planner time-out.
-- **WANDS:** +0.03 nDCG@10 for about 4× the cost and about 4× the time (39 s vs 10 s). One run of
-  60 queries; treat the gain as small.
-- **WANDS match:** wood tone 0.271 vs 0.014, style 0.267 vs 0.050, color 0.157 vs 0.000 (P@10).
-  The harness gets 0 on 11 of 20 questions; quote the average, not only the hero.
-- The harness is slow: about 30–40 s per question, against about 10 s for retrieval.
+- **MuSiQue:** 4-hop recall@10 0.800 vs 0.575.
+- **WANDS:** -0.02 nDCG@10 for about 3× the cost and about 3× the time (47 s vs 15 s). The sign
+  has flipped between runs (+0.03 on 2026-10-30); call it a tie.
+- **WANDS match:** wood tone 0.714 vs 0.086, color 0.414 vs 0.014, style 0.400 vs 0.050 (P@10).
+  Quote the average, not only the hero.
+- The harness is slow: about 40–55 s per question, against about 10–15 s for retrieval.
 
 Hero runs (`tuning-log.md`, round 10):
 
 - MuSiQue `hero`: harness 4/4 gold in 3 of 3 runs, 31–35 s, about $0.043. Retrieval 1/4, about
   $0.010.
-- WANDS match `match-hero`: harness gold in top 10 was 10, 8, 2, 7 and 10 in 5 runs, 35–60 s,
-  about $0.052. Retrieval 0 in all 5.
+- WANDS match `match-hero` (2026-11-09): harness 10 of 10 gold in 3 of 3 runs, 46–47 s, about
+  $0.06. Retrieval 0 in all 3.
 
-Say on the slide: both modes run with `max_limit: 8` and `max_calls_per_turn: 6`
+Say on the slide: both modes run with `max_limit: 20` and `max_calls_per_turn: 6`
 (`config.yaml`), and a budget of 4 turns.
 
 ## Public datasets and re-runs
@@ -236,9 +237,9 @@ Backup runs in `runs/` (Argon):
 
 - `20261030-133739-hero-*`, `20261030-133833-hero-*`, `20261030-133927-hero-*`: MuSiQue hero,
   harness 4/4, retrieval 1/4.
-- `20261030-132807-match-hero-*`: harness 10 gold in top 10, retrieval 0.
-- `20261030-133338-match-hero-*`: harness 10 gold in top 10, retrieval 0.
-- `20261030-132917-match-hero-*`: harness 8 gold in top 10, retrieval 0.
+- `20261109-121547-match-hero-*`, `20261109-121658-match-hero-*`, `20261109-121804-match-hero-*`:
+  harness 10 gold in top 10, retrieval 0 (current code).
+- `20261030-*-match-hero-*`: older (judge without facts); harness 10, 10 and 8 gold.
 - `20261030-133448-trays-*`: WANDS, both modes 9 of 19 gold in top 10; harness 4× the cost.
 
 The `20261029-*-hero-*` runs are older, from the Flash planner.

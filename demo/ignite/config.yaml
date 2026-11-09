@@ -3,7 +3,7 @@
 # Planner gemini-4-argon (since 2026-10-30): $2.00 / $10.00 per 1M tokens, the introductory rate
 # from third-party price trackers (reported to rise to $4 / $20 on 2026-12-01; check Google's
 # pricing page). On the WANDS match questions it took harness P@10 from 0.055 (gemini-3.5-flash)
-# to 0.260. It plans slowly, so a request is cut at 45 s (15 s gave timeouts) and retried once.
+# to 0.260 (0.515 after round 11: judge sees noted facts, max_limit 20). It plans slowly, so a request is cut at 45 s (15 s gave timeouts) and retried once.
 # reasoning_effort low. Earlier planner: gemini-3.5-flash ($1.50 / $9.00), see tuning-log.md.
 driver: {type: vertex, model: gemini-4-argon, project_env: IGNITE_GCP_PROJECT, location: global,
          price_per_mtok: [2.00, 10.00], reasoning_effort: low, request_timeout_s: 45,

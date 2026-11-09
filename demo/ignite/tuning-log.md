@@ -97,3 +97,28 @@ Rehearsals:
 Kept as backups: match-hero runs 1, 2 and 5; all 3 hero runs; trays. Runs 3 and 4 of match-hero
 were deleted. Replay checked in a headless browser for one run per set: no page errors, steps and
 facts show.
+
+## Round 11: WANDS match to 0.515 (2026-11-09)
+
+Goal: WANDS match harness P@10 at least 0.30 (spec §6; round 10 had 0.230). Traces showed the
+harness running the right search (`style : modern & contemporary` in class Reception Benches)
+and the judge marking every hit not relevant: it saw only "same style as the Tenafly end table",
+not the table's style, which the planner had noted.
+
+| Test | Change (cumulative) | Harness P@10 | Note |
+|---|---|---|---|
+| 0 | round 10 | 0.230 | |
+| 1 | `max_limit` 8 → 20 | 0.260 | the model asked for 50–100 hits per call and got 8 |
+| 2 | source description gives the `key : value` feature format | 0.260 | wood tone 0.53, color and style down; runs hit the 60 s budget |
+| 3 | judge gets the noted facts with the question (library, `roles/analyzer.py`); WANDS documents put features before the description (17% of gold had the attribute past the judge's 1200-char snippet) | 0.495 | scratch run |
+| 4 | same, all modes | **0.515** | committed `results-wands-match.md`; retrieval 0.050 |
+
+Re-run of the other sets with the same code (committed results files), retrieval vs harness:
+MuSiQue recall@10 0.697 vs 0.875 (round 10: 0.715 vs 0.886); WANDS nDCG@10 0.787 vs 0.766
+(round 10: 0.772 vs 0.803; the WANDS documents changed order, and the gap is within noise both
+times). Harness cost per question: $0.043 (MuSiQue), $0.055 (WANDS), $0.064 (WANDS match). Harness
+time: 42–54 s on average, up from 39–40 s; WANDS match is close to the 60 s budget.
+
+Rehearsals, `match-hero`: harness 10/10 gold in 3 of 3 runs (46.6, 45.6, 46.8 s; $0.048–0.068),
+retrieval 0/10 in all 3. Saved as `20261109-121547-*`, `20261109-121658-*`, `20261109-121804-*`.
+
