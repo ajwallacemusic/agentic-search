@@ -9,8 +9,8 @@ const html = readFileSync(new URL("../viewer/index.html", import.meta.url), "utf
 const core = html.split("/* <core> */")[1].split("/* </core> */")[0];
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(core + "\n;globalThis.core = { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml };", ctx);
-const { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml } = ctx.core;
+vm.runInContext(core + "\n;globalThis.core = { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml, goldSummary, snippetText, answerHtml };", ctx);
+const { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml, goldSummary, snippetText, answerHtml } = ctx.core;
 
 const ev = (type, extra = {}) => ({ type, search_id: "s", seq: 0, turn: 0, at_ms: 0, ...extra });
 const frame = (e) => `id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
@@ -257,4 +257,40 @@ test("stepsHtml marks the current step", () => {
   const allDone = reduce(s, ev("steps_updated", { steps: s.steps.map((x) => ({ ...x, done: true })), current: null }));
   assert.ok(!stepsHtml(allDone).includes(">now<"));
   assert.equal(stepsHtml({ ...initialState("harness"), facts: [{ fact: "only", source_key: "k" }] }).includes("only"), true);
+});
+
+test("goldSummary counts gold documents in the top 10 only", () => {
+  const hits = Array.from({ length: 12 }, (_, i) => ({ doc_id: `d${i}` }));
+  assert.deepEqual({ ...goldSummary(hits, ["d0", "d3", "d11", "zz"]) }, { inTop: 2, total: 4 });
+  assert.deepEqual({ ...goldSummary([], []) }, { inTop: 0, total: 0 });
+});
+
+test("snippetText drops a repeated title and cuts long text at a word", () => {
+  assert.equal(snippetText({ title: "Andrew Deveaux", snippet: "Andrew Deveaux Andrew Deveaux (1758) was a Loyalist." }),
+               "Andrew Deveaux (1758) was a Loyalist.");
+  const long = snippetText({ title: "", snippet: "word ".repeat(100) }, 50);
+  assert.ok(long.endsWith(" …") && long.length <= 53);
+  assert.equal(snippetText({}), "");
+});
+
+test("answerHtml shows pending, right, wrong and unchecked answers", () => {
+  assert.equal(answerHtml(null), "");
+  assert.ok(answerHtml({ pending: true }).includes("…"));
+  const right = answerHtml({ answer: "Richland County.", correct: true, expected: "Richland County" });
+  assert.ok(right.includes('class="answer right"') && right.includes("✓ correct"));
+  const wrong = answerHtml({ answer: "Lexington <b>", correct: false, expected: "Richland County" });
+  assert.ok(wrong.includes("✗ wrong") && wrong.includes("Richland County") && wrong.includes("Lexington &lt;b&gt;"));
+  const plain = answerHtml({ answer: "Three teak sofas.", correct: null, expected: null });
+  assert.ok(!plain.includes("✓") && !plain.includes("✗"));
+  assert.ok(answerHtml({ error: "HTTP 500" }).includes("no answer"));
+});
+
+test("initialState has no answer yet", () => {
+  assert.equal(initialState("harness").answer, null);
+});
+
+test("the whole page script compiles (not only the core block)", () => {
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  assert.ok(scripts.length >= 1);
+  for (const src of scripts) new vm.Script(src); // throws SyntaxError, e.g. on a duplicate const
 });

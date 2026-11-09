@@ -161,6 +161,12 @@ is set (the viewer itself runs the `ignite` and `ignite-wands` profiles).
   column per turn. Each dot shows what that call searched for; hover for the full arguments.
 - **Steps:** under the harness lanes, the step plan with the current step marked **NOW**, and
   each fact the planner noted, with its document.
+- **Results and answer:** each lane lists its top 10 documents (title and first lines). When a
+  mode finishes, an answer box shows what a reader model (the judge model, `answer.py`) answers
+  from that mode's top 10 only; for MuSiQue it says ✓ correct or ✗ wrong against the dataset's
+  answer. The ★ gold marks and the "★ n of m gold in top 10" count appear only once that mode has
+  finished, so nothing is given away mid-run. Needs `serve`: a replay opened from Finder has no
+  answer box.
 - **Replay:** press **Switch to replay** (or open `viewer/index.html` straight from Finder; no
   server or internet needed). Pick the three files of one saved run:
   `<stamp>-<id>-retrieval.jsonl`, `<stamp>-<id>-harness.jsonl` and `<stamp>-<id>.meta.json`.

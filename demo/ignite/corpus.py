@@ -35,6 +35,7 @@ class Question(BaseModel):
     kind: str  # musique: hop group; wands: "query"; wands-match: the attribute
     gold: list[str]
     ref: str  # MuSiQue id, WANDS query id or WANDS match rule id
+    answers: list[str] = []  # MuSiQue: the true answer, then its aliases; empty for WANDS
 
 
 @dataclass
@@ -78,7 +79,8 @@ def _musique(path: Path | None, picks: list[dict]) -> DemoData:
             raise _missing(p)
         questions[p["id"]] = Question(id=p["id"], text=sample.queries[p["ref"]], set="musique",
                                       corpus="musique", kind=group_of[p["ref"]],
-                                      gold=sorted(sample.qrels[p["ref"]]), ref=p["ref"])
+                                      gold=sorted(sample.qrels[p["ref"]]), ref=p["ref"],
+                                      answers=sample.answers.get(p["ref"], []))
     return DemoData(documents={sample.source: sample.documents},
                     descriptions={sample.source: sample.description}, questions=questions)
 

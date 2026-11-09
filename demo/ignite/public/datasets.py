@@ -7,7 +7,7 @@ import hashlib
 import json
 import random
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from agentic_search.core.types import Document, TextPart, text_of
@@ -23,6 +23,8 @@ class PublicSample:
     queries: dict[str, str]
     qrels: dict[str, dict[str, int]]
     groups: dict[str, list[str]]
+    # query id -> the true answer and its aliases (MuSiQue only; shown in the demo, not scored)
+    answers: dict[str, list[str]] = field(default_factory=dict)
 
     def to_beir(self) -> BeirDataset:
         corpus = {d.doc_id: {"title": str(d.metadata.get("title", "")), "text": text_of(d.content)}
@@ -66,10 +68,12 @@ def sample_musique(path: Path, *, per_hop: int = 20, corpus_size: int = 5000,
     docs: dict[str, Document] = {}
     queries: dict[str, str] = {}
     qrels: dict[str, dict[str, int]] = {}
+    answers: dict[str, list[str]] = {}
     for r in rows:
         if r["id"] not in chosen:
             continue
         queries[r["id"]] = r["question"]
+        answers[r["id"]] = [a for a in [r.get("answer"), *(r.get("answer_aliases") or [])] if a]
         qrels[r["id"]] = {}
         for p in r["paragraphs"]:
             doc = _para_doc(p)
@@ -93,7 +97,8 @@ def sample_musique(path: Path, *, per_hop: int = 20, corpus_size: int = 5000,
     return PublicSample(
         name="musique", source="wiki",
         description="Wikipedia paragraphs, one per item: title and text. Field: title.",
-        documents=list(docs.values()), queries=queries, qrels=qrels, groups=groups)
+        documents=list(docs.values()), queries=queries, qrels=qrels, groups=groups,
+        answers=answers)
 
 
 # ---- WANDS --------------------------------------------------------------------------------

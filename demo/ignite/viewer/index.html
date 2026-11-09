@@ -77,6 +77,22 @@
   .hit-src { color: var(--muted); font-size: 18px; }
   .rel { font-weight: 700; }
   .gold { font-weight: 700; color: var(--good); }
+  .hits-head { display: flex; justify-content: space-between; gap: 12px; margin: 14px 0 0; font-size: 19px; }
+  .hits-head b { font-size: 21px; }
+  ol.hits li.is-gold { border-left: 6px solid var(--good); padding-left: 8px; margin-left: -14px; }
+  .hit-title { font-weight: 600; }
+  .snip { display: block; color: var(--muted); font-size: 17px; line-height: 1.3; }
+  .answer {
+    border: 2px solid var(--fg); border-radius: 8px; padding: 8px 12px; margin: 12px 0 4px;
+    background: var(--panel);
+  }
+  .answer .label { display: block; color: var(--muted); font-size: 17px; }
+  .answer .text { font-size: 24px; font-weight: 700; }
+  .answer.right { border-color: var(--good); border-left-width: 10px; }
+  .answer.wrong { border-color: var(--bad); border-left-width: 10px; }
+  .answer .verdict { display: block; font-size: 19px; font-weight: 700; margin-top: 2px; }
+  .answer.right .verdict { color: var(--good); }
+  .answer.wrong .verdict { color: var(--bad); }
   footer.metrics {
     display: grid; grid-template-columns: repeat(5, auto); gap: 4px 16px; border-top: 2px solid var(--fg);
     padding-top: 8px; font-variant-numeric: tabular-nums;
@@ -157,6 +173,7 @@ function parseSse(buffer) {
 function initialState(mode) {
   return {
     mode, phase: null, turn: 0, done: false, error: null, calls: [], decisions: [], hits: [], notes: {}, steps: [], current: null, facts: [],
+    answer: null, // null | {pending: true} | {answer, correct, expected, gold, error}
     metrics: { turns: 0, toolCalls: 0, seconds: 0, costUsd: 0, stopReason: null },
   };
 }
@@ -321,6 +338,38 @@ function optionsHtml(questions) {
   }).join("");
 }
 
+/** How many of the gold documents are in the top `k` hits. */
+function goldSummary(hits, gold, k = 10) {
+  const g = new Set(gold || []);
+  const inTop = (hits || []).slice(0, k).filter((h) => g.has(h.doc_id)).length;
+  return { inTop, total: g.size };
+}
+
+/** One line of a document's text for the results list, cut at a word near `max` characters. The
+ *  title is dropped when the text starts with it (MuSiQue paragraphs repeat their title). */
+function snippetText(hit, max = 170) {
+  let t = String((hit && hit.snippet) || "").replace(/\s+/g, " ").trim();
+  const title = String((hit && hit.title) || "").trim();
+  if (title && t.toLowerCase().startsWith(title.toLowerCase())) t = t.slice(title.length).trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const sp = cut.lastIndexOf(" ");
+  return (sp > max * 0.6 ? cut.slice(0, sp) : cut) + " …";
+}
+
+/** The answer box: what a reader model answered from this mode's top 10, and (for questions with
+ *  a known answer) whether it is right. */
+function answerHtml(a) {
+  if (!a) return "";
+  const label = `<span class="label">Answer, read from this mode's top 10</span>`;
+  if (a.pending) return `<div class="answer">${label}<span class="text">…</span></div>`;
+  if (a.error && !a.answer) return `<div class="answer">${label}<span class="text">(no answer: ${esc(a.error)})</span></div>`;
+  const cls = a.correct === true ? "right" : a.correct === false ? "wrong" : "";
+  const verdict = a.correct === true ? `<span class="verdict">✓ correct</span>`
+    : a.correct === false ? `<span class="verdict">✗ wrong — the answer is ${esc(a.expected)}</span>` : "";
+  return `<div class="answer ${cls}">${label}<span class="text">${esc(a.answer)}</span>${verdict}</div>`;
+}
+
 /** The POST body for one live run: each question runs on its own corpus's profile. */
 function requestBody(q, mode) {
   return JSON.stringify({ profile: q.profile, question: q.text, mode, snapshot_k: 10, include_trace: true });
@@ -329,7 +378,7 @@ function requestBody(q, mode) {
 
 const MODES = ["retrieval", "harness"];
 const TITLES = { retrieval: "Retrieval mode (one pass)", harness: "Harness mode (full loop)" };
-const view = { states: {}, started: {}, gold: new Set(), replay: false, timer: null };
+const view = { states: {}, started: {}, gold: new Set(), replay: false, timer: null, qid: null };
 
 const $ = (id) => document.getElementById(id);
 
@@ -362,11 +411,23 @@ function render(mode) {
   const head = turns.map((t) => `<th>turn ${t + 1}</th>`).join("");
   const decisions = s.decisions.map((d) =>
     `<div class="badge ${esc(d.action)}">after turn ${d.turn + 1}: <b>${esc(d.action.replace("_", " "))}</b>${d.note ? " — " + esc(d.note) : ""}</div>`).join("");
-  const hits = s.hits.slice(0, 10).map((h) => {
-    const rel = h.judged && h.p_relevant != null && h.p_relevant >= 0.5 ? ` <span class="rel">✓ relevant</span>` : "";
-    const gold = view.replay && view.gold.has(h.doc_id) ? ` <span class="gold">★ gold</span>` : "";
-    return `<li>${esc(h.doc_id)} <span class="hit-src">${esc(h.source)}${h.title ? " · " + esc(h.title) : ""}</span>${rel}${gold}</li>`;
+  // Gold is shown in replay, and live once this mode has finished (never mid-run: no giveaway).
+  const goldSet = view.replay ? view.gold
+    : s.done && s.answer && s.answer.gold ? new Set(s.answer.gold) : null;
+  const top = s.hits.slice(0, 10);
+  const hits = top.map((h) => {
+    const isGold = goldSet && goldSet.has(h.doc_id);
+    const rel = h.judged && h.p_relevant != null && h.p_relevant >= 0.5 ? ` <span class="rel">✓ judged relevant</span>` : "";
+    const gold = isGold ? ` <span class="gold">★ gold</span>` : "";
+    const name = h.title ? `<span class="hit-title">${esc(h.title)}</span>` : `<span class="hit-title">${esc(h.doc_id)}</span>`;
+    const snip = snippetText(h);
+    return `<li class="${isGold ? "is-gold" : ""}" title="${esc(h.doc_id)}">${name}${gold}${rel}${snip ? `<span class="snip">${esc(snip)}</span>` : ""}</li>`;
   }).join("");
+  let hitsHead = `<span>Top ${Math.min(10, top.length) || 10} documents${s.done ? "" : " so far"}</span>`;
+  if (goldSet && goldSet.size) {
+    const g = goldSummary(top, [...goldSet]);
+    hitsHead += `<b class="gold">★ ${g.inTop} of ${g.total} gold in top 10</b>`;
+  }
   const m = s.metrics;
   const missing = view.replay && player.runs && !player.runs[mode].length
     ? `<div class="empty">No saved file for this mode.</div>` : "";
@@ -379,6 +440,8 @@ function render(mode) {
     <div class="decisions">${decisions}</div>
     ${stepsHtml(s)}
     ${s.error ? `<div class="error">✗ Search failed: ${esc(s.error)}</div>` : ""}
+    ${answerHtml(s.answer)}
+    <div class="hits-head">${hitsHead}</div>
     <ol class="hits">${hits || `<li class="empty">no results yet</li>`}</ol>
     <footer class="metrics">
       <div><span>turns</span><strong>${m.turns}</strong></div>
@@ -413,7 +476,31 @@ function startClock() {
 }
 
 function apply(mode, ev) {
+  const wasDone = view.states[mode].done;
   view.states[mode] = reduce(view.states[mode], ev);
+  render(mode);
+  if (!wasDone && view.states[mode].done && !view.states[mode].error) fetchAnswer(mode);
+}
+
+/** When a mode finishes: ask the server for an answer read from its top 10 (and, live, the gold
+ *  list). Needs the server; a replay opened from disk has no answer line. */
+async function fetchAnswer(mode) {
+  if (location.protocol === "file:" || !view.qid) return;
+  const s = view.states[mode];
+  const keys = s.hits.slice(0, 10).map((h) => h.key || `${h.source}:${h.doc_id}`);
+  const runId = view.runId;
+  s.answer = { pending: true };
+  render(mode);
+  let a;
+  try {
+    const r = await fetch("/ignite/answer", { method: "POST", headers: { "Content-Type": "application/json" },
+                                              body: JSON.stringify({ id: view.qid, keys }) });
+    a = r.ok ? await r.json() : { error: `HTTP ${r.status}` };
+  } catch (e) {
+    a = { error: e.message };
+  }
+  if (view.runId !== runId) return; // a newer run started meanwhile
+  view.states[mode].answer = a;
   render(mode);
 }
 
@@ -466,6 +553,8 @@ function runLive() {
   if (!q) return;
   stopLive();
   view.replay = false;
+  view.qid = q.id;
+  view.runId = (view.runId || 0) + 1;
   banner("");
   $("question").textContent = q.text;
   reset();
@@ -507,6 +596,7 @@ async function loadFiles(fileList) {
     player.runs = { retrieval: got.retrieval ? parseJsonl(got.retrieval) : [],
                     harness: got.harness ? parseJsonl(got.harness) : [] };
     view.gold = new Set((got.meta && Array.isArray(got.meta.gold) && got.meta.gold) || []);
+    view.qid = (got.meta && got.meta.question_id) || null;
     $("question").textContent = questionText(got.meta, [...player.runs.harness, ...player.runs.retrieval]);
     banner(`Replay: a saved run, played back with its original timing.${view.gold.size ? " ★ marks the gold documents." : ""}`);
     rewind();
@@ -519,6 +609,7 @@ async function loadFiles(fileList) {
 
 function rewind() {
   pause();
+  view.runId = (view.runId || 0) + 1;
   reset();
   player.vt = 0;
   for (const mode of MODES) {
@@ -538,10 +629,12 @@ function tick() {
   for (const mode of MODES) {
     const offs = player.offsets[mode];
     const before = player.idx[mode];
+    const wasDone = view.states[mode].done;
     while (player.idx[mode] < offs.length && offs[player.idx[mode]].delayMs <= player.vt) {
       view.states[mode] = reduce(view.states[mode], offs[player.idx[mode]].ev);
       player.idx[mode] += 1;
     }
+    if (!wasDone && view.states[mode].done && !view.states[mode].error) fetchAnswer(mode);
     if (player.idx[mode] < offs.length) pending = true;
     if (player.idx[mode] !== before) render(mode); else renderClock(mode);
   }

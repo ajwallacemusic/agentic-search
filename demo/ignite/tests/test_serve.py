@@ -43,5 +43,49 @@ async def test_viewer_is_served_at_root(client):
     assert r.status_code == 200 and "viewer" in r.text
 
 
+def _answer_app(tmp_path, client):
+    from demo.ignite.serve import doc_texts
+    (tmp_path / "index.html").write_text("<!doctype html><title>viewer</title>")
+    data = demo_data()
+    app = create_demo_app({"ignite": offline_harness()}, data.questions, viewer_dir=tmp_path,
+                          docs=doc_texts(data.documents), answer_client=client)
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+async def test_answer_endpoint_reads_the_given_docs_and_reveals_gold(tmp_path):
+    from demo.ignite.tests.test_answer import FakeClient
+    assert HERO.answers, "the fixture's hero question should have an answer"
+    fake = FakeClient(f"It is {HERO.answers[0]}.")
+    gold_key = f"wiki:{HERO.gold[0]}"
+    async with _answer_app(tmp_path, fake) as c:
+        r = await c.post("/ignite/answer", json={"id": "hero", "keys": [gold_key, "wiki:nope"]})
+    body = r.json()
+    assert r.status_code == 200 and body["answer"] == f"It is {HERO.answers[0]}."
+    assert body["gold"] == HERO.gold
+    assert body["expected"] == HERO.answers[0] and body["correct"] is True
+    assert "[1]" in fake.seen[1] and "[2]" not in fake.seen[1]  # unknown keys are skipped
+
+
+async def test_answer_endpoint_unknown_question_is_404(tmp_path):
+    from demo.ignite.tests.test_answer import FakeClient
+    async with _answer_app(tmp_path, FakeClient()) as c:
+        r = await c.post("/ignite/answer", json={"id": "nope", "keys": []})
+    assert r.status_code == 404
+
+
+async def test_answer_endpoint_model_error_is_reported_not_raised(tmp_path):
+    class Broken:
+        id = "broken"
+        async def chat(self, *a, **k):
+            raise TimeoutError("slow")
+    async with _answer_app(tmp_path, Broken()) as c:
+        r = await c.post("/ignite/answer", json={"id": "hero", "keys": []})
+    assert r.status_code == 200 and r.json()["answer"] == "No documents to answer from."
+    async with _answer_app(tmp_path, Broken()) as c:
+        r = await c.post("/ignite/answer", json={"id": "hero", "keys": [f"wiki:{HERO.gold[0]}"]})
+    assert r.status_code == 200 and r.json()["error"].startswith("TimeoutError")
+    assert r.json()["gold"] == HERO.gold
+
+
 def test_cli_binds_localhost_only():
     assert "--host" not in build_parser().format_help()
