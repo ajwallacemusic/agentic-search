@@ -297,7 +297,7 @@
           "n_new": null,
           "n_ranked": null,
           "n_relevant": null,
-          "note": null
+          "note": "new results found; keep exploring"
         },
         "turn": 0,
         "type": "phase_finished"

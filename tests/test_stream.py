@@ -512,3 +512,13 @@ async def test_final_result_rationale_is_scrubbed_in_search_and_stream(docs_back
     finished = events[-1].result
     assert finished.hits and all(r.rationale for r in finished.hits)
     assert all("sk-final-6262" not in r.rationale for r in finished.hits)
+
+
+async def test_decide_event_carries_the_controller_note(docs_backend):
+    """The decide phase reports why the loop continued or stopped, not only the action."""
+    driver = ScriptedDriver([[lex("headache")], [lex("fever")]])
+    h = make(docs_backend, driver, analyzer=KeywordJudge(["headache", "fever"]))
+    events = await collect(h.stream("q"))
+    decides = [e for e in events if isinstance(e, PhaseFinished) and e.phase == "decide"]
+    assert decides and all(d.summary.note for d in decides)
+    assert decides[0].summary.note == "new results found; keep exploring"
