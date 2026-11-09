@@ -80,3 +80,13 @@ def test_a_price_means_no_warning(caplog):
         vertex_client("gemini-3.8-flash", project="my-project-1", auth=FixedAuth(), client=fake,
                       price_per_mtok=(0.3, 2.5))
     assert not [r for r in caplog.records if r.name == "agentic_search.models.vertex"]
+
+
+async def test_client_passes_reasoning_effort_and_timeout():
+    completions = FakeCompletions()
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    c = vertex_client("gemini-4-argon", project="my-project-1", auth=FixedAuth(), client=fake,
+                      reasoning_effort="low", timeout=45)
+    await c.chat("s", [ChatMessage(role="user", content="q")])
+    assert completions.kwargs["reasoning_effort"] == "low"
+    assert completions.kwargs["timeout"] == 45.0

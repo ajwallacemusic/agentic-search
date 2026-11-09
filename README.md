@@ -111,6 +111,11 @@ Pass `price_per_mtok` (input and output USD per million tokens) for a Vertex mod
 ships no Vertex price table, and the prices above are placeholders. Without a price, cost reads
 0, so a `max_cost_usd` budget never binds, and `vertex_client` logs a warning saying so.
 
+`vertex` and `openai_compat` clients also take `reasoning_effort` (e.g. `low`, sent with every
+request; Gemini thinks less and answers faster), `request_timeout_s` (caps each request) and
+`max_retries` (retries after a time-out or error). A stalled request is then retried instead of
+using up the search's time budget.
+
 ```bash
 SEARCH_API_KEYS=key1,key2 agentic-search serve --config service.yaml --port 8080
 ```

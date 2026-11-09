@@ -236,6 +236,19 @@ def test_vertex_client_from_config(tmp_path):
     assert isinstance(c.auth, Bearer)
 
 
+def test_llm_request_options_from_config(tmp_path):
+    from agentic_search.config import BuildContext, build
+
+    ctx = BuildContext(base_dir=tmp_path)
+    v = build("client", {"type": "vertex", "model": "gemini-4-argon", "project": "my-project-1",
+                         "auth": {"type": "bearer", "token": "t0k"}, "reasoning_effort": "low",
+                         "request_timeout_s": 45, "max_retries": 1}, ctx)
+    assert v.reasoning_effort == "low" and v.timeout == 45.0 and v._client.max_retries == 1
+    o = build("client", {"type": "openai_compat", "model": "m", "base_url": "http://x/v1",
+                         "reasoning_effort": "high", "request_timeout_s": 10, "max_retries": 0}, ctx)
+    assert o.reasoning_effort == "high" and o.timeout == 10.0 and o._client.max_retries == 0
+
+
 def test_sql_backend_columns_from_config(tmp_path):
     from agentic_search.config import BuildContext, build
 
