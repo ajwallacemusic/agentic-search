@@ -6,6 +6,7 @@ from typing import Any
 
 from agentic_search.core.types import Budget, Content, ModelUsage, Query, TextPart
 from agentic_search.models.base import (
+    WORKSPACE_NAMES,
     DelegateResult,
     PlannerView,
     PlanResult,
@@ -47,6 +48,11 @@ finish immediately.
 # Data sources
 {context}"""
 
+STEPS_GUIDE = """Some questions need steps: first find one thing, read it, then search using what you \
+read. For those, call plan_steps first, note each fact you read that a later step needs (with its \
+document key), and mark steps done. Search for the current step; facts in the notebook are not \
+answers unless they also answer the question. Documents you open with fetch are shown to you in full."""
+
 FINISH_TOOL = ToolSpec(
     name="finish",
     description="End the search and return the relevant document keys, most relevant first.",
@@ -62,7 +68,19 @@ def render_planner_view(view: PlannerView) -> str:
     if images:
         parts.append(f"(The question includes {len(images)} image(s).)")
     parts.append(f"# Data sources\n{view.manifest_summary}")
-    parts.append(f"# Turn {view.turn}\n## Results so far\n{view.digest}")
+    sections = []
+    if view.steps:
+        current = next((i for i, st in enumerate(view.steps) if not st.done), None)
+        sections.append("## Steps\n" + "\n".join(
+            f"{i}. [done] {st.text}" if st.done
+            else f"{i}. [current] {st.text}" if i - 1 == current
+            else f"{i}. {st.text}"
+            for i, st in enumerate(view.steps, 1)))
+    if view.notebook:
+        sections.append("## Notebook\n" + "\n".join(
+            f"- {f.text} (from {f.source_key})" for f in view.notebook))
+    sections.append(f"## Results so far\n{view.digest}")
+    parts.append(f"# Turn {view.turn}\n" + "\n\n".join(sections))
     if view.directive is not None:
         note = f": {view.directive.note}" if view.directive.note else ""
         parts.append(f"## Controller directive: {view.directive.action.value.upper()}{note}")
@@ -94,10 +112,21 @@ class ToolCallingDriver:
     async def plan(self, view: PlannerView, tools: list[ToolSpec]) -> PlanResult:
         limit = min(view.max_calls, self.max_calls)
         system = self.planner_prompt.format(max_calls=limit)
+        if any(t.name == "plan_steps" for t in tools):
+            system = f"{system}\n\n{STEPS_GUIDE}"
         content = self._with_images(render_planner_view(view), view.question)
         resp = await self.client.chat(system, [ChatMessage(role="user", content=content)],
                                       tools=tools, max_tokens=self.max_tokens)
-        return PlanResult(calls=resp.tool_calls[:limit], usage=resp.usage, note=resp.text or None)
+        passthrough = WORKSPACE_NAMES & {t.name for t in tools}  # steps off: nothing
+        searches = 0
+        calls: list[ToolCall] = []
+        for c in resp.tool_calls:
+            if c.name in passthrough:
+                calls.append(c)
+            elif searches < limit:
+                calls.append(c)
+                searches += 1
+        return PlanResult(calls=calls, usage=resp.usage, note=resp.text or None)
 
     async def run_delegate(self, question: Query, tools: list[ToolSpec], runtime: ToolRuntime,
                            budget: Budget, context: str = "") -> DelegateResult:

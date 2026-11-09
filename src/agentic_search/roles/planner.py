@@ -9,6 +9,7 @@ from agentic_search.core.state import SearchState
 from agentic_search.core.types import Manifest
 from agentic_search.events import PhaseFinished, PhaseStarted, PhaseSummary
 from agentic_search.models.base import Driver, PlannerView, PlanResult, ToolSpec
+from agentic_search.roles.workspace import WORKSPACE_TOOLS, WorkspaceUpdate, apply_workspace
 
 
 def render_manifests(manifests: dict[str, Manifest]) -> str:
@@ -16,27 +17,47 @@ def render_manifests(manifests: dict[str, Manifest]) -> str:
 
 
 class Planner:
-    def __init__(self, driver: Driver, *, hooks: Hooks | None = None, max_calls_per_turn: int = 8):
+    def __init__(self, driver: Driver, *, hooks: Hooks | None = None, max_calls_per_turn: int = 8,
+                 steps: bool = False):
         self.driver = driver
         self.hooks = hooks or Hooks()
         self.max_calls = max_calls_per_turn
+        self.steps = steps
 
     async def plan(self, state: SearchState, tools: list[ToolSpec]) -> PlanResult:
+        result, _ = await self._plan(state, tools, workspace=False)
+        return result
+
+    async def plan_with_workspace(self, state: SearchState,
+                                  tools: list[ToolSpec]) -> tuple[PlanResult, WorkspaceUpdate]:
+        """Like `plan`, but offers the workspace tools (when steps are on) and applies them to
+        `state`. The result holds search calls only."""
+        return await self._plan(state, tools, workspace=self.steps)
+
+    async def _plan(self, state: SearchState, tools: list[ToolSpec],
+                    *, workspace: bool) -> tuple[PlanResult, WorkspaceUpdate]:
         view = PlannerView(question=state.question, turn=state.turn,
                            manifest_summary=render_manifests(state.manifests), digest=state.digest,
                            directive=state.last_decision, errors=state.last_errors,
                            max_calls=self.max_calls)
+        if workspace:
+            view = view.model_copy(update={"steps": [st.model_copy() for st in state.steps],
+                                           "notebook": list(state.notebook)})
+            tools = [*tools, *WORKSPACE_TOOLS]
         state.emitter.emit(PhaseStarted, turn=state.turn, phase="plan")
         t_phase = time.perf_counter()
         view = await self.hooks.before_model_call(self.driver.id, view)
         t0 = time.perf_counter()
         result = await self.driver.plan(view, tools)
+        raw, update = result.calls, WorkspaceUpdate()
+        if workspace:
+            raw, update = apply_workspace(state, raw)
         calls = [c.model_copy(update={"id": f"t{state.turn}.c{i}"})
-                 for i, c in enumerate(result.calls[: self.max_calls])]
+                 for i, c in enumerate(raw[: self.max_calls])]
         state.trace.add("plan", state.turn, duration_ms=(time.perf_counter() - t0) * 1000,
                         driver=self.driver.id, n_calls=len(calls),
-                        dropped=max(0, len(result.calls) - self.max_calls), note=result.note)
+                        dropped=max(0, len(raw) - self.max_calls), note=result.note)
         state.emitter.emit(PhaseFinished, turn=state.turn, phase="plan",
                            duration_ms=(time.perf_counter() - t_phase) * 1000,
                            summary=PhaseSummary(n_calls=len(calls)))
-        return result.model_copy(update={"calls": calls})
+        return result.model_copy(update={"calls": calls}), update

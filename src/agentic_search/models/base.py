@@ -43,6 +43,21 @@ class Decision(BaseModel):
     usage: ModelUsage = Field(default_factory=ModelUsage)
 
 
+class Step(BaseModel):
+    text: str
+    done: bool = False
+
+
+class Fact(BaseModel):
+    text: str
+    source_key: str
+    turn: int
+
+
+# Tool names the harness handles itself (see roles/workspace.py); drivers never truncate them.
+WORKSPACE_NAMES = frozenset({"plan_steps", "note", "step_done"})
+
+
 class TurnSummary(BaseModel):
     turn: int
     n_calls: int
@@ -50,6 +65,10 @@ class TurnSummary(BaseModel):
     n_new: int
     n_new_relevant: int | None
     top_keys: list[str] = Field(default_factory=list)
+    n_facts: int = 0
+    n_steps_done: int = 0
+    n_opened: int = 0
+    plan_set: bool = False
 
 
 class PlannerView(BaseModel):
@@ -60,6 +79,8 @@ class PlannerView(BaseModel):
     directive: Decision | None = None
     errors: list[ToolError] = Field(default_factory=list)
     max_calls: int = 8
+    steps: list[Step] = Field(default_factory=list)
+    notebook: list[Fact] = Field(default_factory=list)
 
 
 class ControllerView(BaseModel):
@@ -69,6 +90,8 @@ class ControllerView(BaseModel):
     digest: str
     total_relevant: int | None
     budget_remaining: dict[str, float | int | None]
+    steps: list[Step] = Field(default_factory=list)
+    notebook: list[Fact] = Field(default_factory=list)
 
 
 class PlanResult(BaseModel):

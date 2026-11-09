@@ -1,6 +1,20 @@
 from agentic_search.core.types import Budget, ImagePart, Query, TextPart
-from agentic_search.models.base import Action, Decision, Driver, PlannerView, ToolCall, ToolSpec
-from agentic_search.models.driver import FINISH_TOOL, ToolCallingDriver, render_planner_view
+from agentic_search.models.base import (
+    Action,
+    Decision,
+    Driver,
+    Fact,
+    PlannerView,
+    Step,
+    ToolCall,
+    ToolSpec,
+)
+from agentic_search.models.driver import (
+    FINISH_TOOL,
+    STEPS_GUIDE,
+    ToolCallingDriver,
+    render_planner_view,
+)
 from agentic_search.models.llm import ChatResponse
 from agentic_search.testing import FakeLLMClient
 
@@ -41,6 +55,41 @@ async def test_plan_includes_question_images_when_supported():
     await ToolCallingDriver(client).plan(view(q), TOOLS)
     content = client.requests[0]["messages"][0].content
     assert isinstance(content, list) and isinstance(content[1], ImagePart)
+
+
+def test_view_renders_steps_and_notebook():
+    v = view().model_copy(update={
+        "steps": [Step(text="find the film", done=True), Step(text="read its cast"),
+                  Step(text="search the director")],
+        "notebook": [Fact(text="directed by X", source_key="docs:d1", turn=1)]})
+    text = render_planner_view(v)
+    assert "## Steps\n1. [done] find the film\n2. [current] read its cast\n3. search the director" in text
+    assert "## Notebook\n- directed by X (from docs:d1)" in text
+    assert text.index("## Steps") < text.index("## Notebook") < text.index("## Results so far")
+
+
+def test_view_without_steps_is_unchanged():
+    expected = (
+        "# Question\nwhat treats headache?\n\n# Data sources\n## source `docs`\n\n"
+        "# Turn 1\n## Results so far\nTurn 0: stuff\n\n"
+        "## Controller directive: REFINE: be precise\n\n"
+        "Issue up to 2 tool calls now, or none if the search is complete.")
+    assert render_planner_view(view()) == expected
+
+
+async def test_steps_guide_only_with_workspace_tools():
+    plan_tool = ToolSpec(name="plan_steps", description="d", parameters={})
+    client = FakeLLMClient([ChatResponse(), ChatResponse()])
+    d = ToolCallingDriver(client)
+    await d.plan(view(), TOOLS)
+    await d.plan(view(), [*TOOLS, plan_tool])
+    assert STEPS_GUIDE not in client.requests[0]["system"]
+    assert client.requests[1]["system"].endswith(STEPS_GUIDE)
+
+
+def test_steps_guide_names_no_dataset():
+    for word in ("wands", "wood", "feature", "musique"):
+        assert word not in STEPS_GUIDE.lower()
 
 
 class Runtime:
@@ -113,3 +162,12 @@ async def test_delegate_stops_calling_model_once_budget_exhausted():
     assert len(client.requests) == 2 and len(rt.batches) == 1
     assert client.requests[1]["tool_choice"] == "finish"
     assert res.ranked_keys == ["k"]
+
+
+async def test_plan_limit_applies_to_searches_only():
+    calls = [tc(i) for i in range(8)] + [tc(9, "note", fact="f", source_key="s:d")]
+    client = FakeLLMClient([ChatResponse(tool_calls=calls)])
+    v = view().model_copy(update={"max_calls": 6})
+    tools = [*TOOLS, ToolSpec(name="note", description="d", parameters={})]
+    res = await ToolCallingDriver(client, max_calls_per_turn=8).plan(v, tools)
+    assert [c.name for c in res.calls] == ["lexical_search"] * 6 + ["note"]

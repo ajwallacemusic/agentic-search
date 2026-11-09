@@ -21,6 +21,11 @@ export type StopReason =
   | "budget_cost"
   | "budget_time";
 
+export interface Step {
+  text: string;
+  done: boolean;
+}
+
 export interface TextPart {
   kind: "text";
   text: string;
@@ -215,6 +220,19 @@ export interface SearchFailed extends EventBase {
   message: string;
 }
 
+export interface StepsUpdated extends EventBase {
+  type: "steps_updated";
+  steps: Step[];
+  /** 0-based index of the first unfinished step; null when all are done. */
+  current: number | null;
+}
+
+export interface FactNoted extends EventBase {
+  type: "fact_noted";
+  fact: string;
+  source_key: string;
+}
+
 export type SearchEvent =
   | SearchStarted
   | PhaseStarted
@@ -224,7 +242,9 @@ export type SearchEvent =
   | ResultsUpdated
   | UsageUpdated
   | SearchFinished
-  | SearchFailed;
+  | SearchFailed
+  | StepsUpdated
+  | FactNoted;
 
 export type SearchEventType = SearchEvent["type"];
 
@@ -238,6 +258,8 @@ export const EVENT_TYPES: readonly SearchEventType[] = [
   "usage_updated",
   "search_finished",
   "search_failed",
+  "steps_updated",
+  "fact_noted",
 ];
 
 const KNOWN = new Set<string>(EVENT_TYPES);

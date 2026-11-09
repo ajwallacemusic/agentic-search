@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 from agentic_search.core.emitter import EventEmitter, NullEmitter
 from agentic_search.core.secrets import scrub_data
 from agentic_search.core.types import Budget, Hit, Manifest, ModelUsage, OpRef, Query, ToolError
-from agentic_search.models.base import Decision, TurnSummary
+from agentic_search.models.base import Decision, Fact, Step, TurnSummary
 
 
 class TraceEvent(BaseModel):
@@ -139,6 +139,12 @@ class SearchState:
     last_errors: list[ToolError] = field(default_factory=list)
     started: float = field(default_factory=time.monotonic)
     emitter: EventEmitter = field(default_factory=NullEmitter)
+    steps: list[Step] = field(default_factory=list)
+    notebook: list[Fact] = field(default_factory=list)
+
+    def current_step(self) -> int | None:
+        """Index of the first step not yet done, or None."""
+        return next((i for i, st in enumerate(self.steps) if not st.done), None)
 
     def elapsed(self) -> float:
         return time.monotonic() - self.started

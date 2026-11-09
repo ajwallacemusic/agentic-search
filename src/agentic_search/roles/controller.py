@@ -11,7 +11,7 @@ from agentic_search.core.secrets import scrub
 from agentic_search.core.state import SearchState
 from agentic_search.core.types import StopReason
 from agentic_search.events import PhaseFinished, PhaseStarted, PhaseSummary
-from agentic_search.models.base import Action, ControllerView, Decider, Decision
+from agentic_search.models.base import Action, ControllerView, Decider, Decision, TurnSummary
 
 
 class Controller:
@@ -57,6 +57,29 @@ class Controller:
         return sum(c.p_relevant >= self.relevant_threshold for c in judged)  # type: ignore[operator]
 
     def heuristic(self, state: SearchState) -> Decision:
+        k = state.current_step()
+        if k is None or not state.history:
+            return self._base_heuristic(state)
+        step_note = f"step {k + 1}: {state.steps[k].text}"
+        last = state.history[-1]
+        if last.n_facts or last.n_steps_done:
+            return Decision(action=Action.CONTINUE, note=step_note)
+        if len(state.history) >= 2 and all(self._idle(t) for t in state.history[-2:]):
+            return Decision(action=Action.STOP, note=f"stuck on step {k + 1}")
+        decision = self._base_heuristic(state)
+        if decision.action in (Action.STOP, Action.BROADEN):
+            return Decision(action=Action.CONTINUE, note=step_note)
+        return decision
+
+    @staticmethod
+    def _idle(t: TurnSummary) -> bool:
+        no_new = t.n_new == 0 if t.n_new_relevant is None else t.n_new_relevant == 0
+        if t.n_calls and t.n_errors == t.n_calls:
+            return False  # all calls failed: let the base rule REFINE
+        return (no_new and not t.n_facts and not t.n_steps_done and not t.n_opened
+                and not t.plan_set)
+
+    def _base_heuristic(self, state: SearchState) -> Decision:
         if not state.history:
             return Decision(action=Action.CONTINUE, note="no turns yet")
         last = state.history[-1]
@@ -89,7 +112,8 @@ class Controller:
             view = ControllerView(question=state.question, turn=state.turn, history=state.history,
                                   digest=state.digest if digest is None else digest,
                                   total_relevant=self.total_relevant(state),
-                                  budget_remaining=self.budget_remaining(state))
+                                  budget_remaining=self.budget_remaining(state),
+                                  steps=state.steps, notebook=state.notebook)
             try:
                 view = await self.hooks.before_model_call(decider.id, view)
                 decision = await asyncio.wait_for(decider.decide(view), self.timeout)
