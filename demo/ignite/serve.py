@@ -32,6 +32,7 @@ HOST = "127.0.0.1"  # localhost only: the service has no auth
 class AnswerRequest(BaseModel):
     id: str  # question id
     keys: list[str]  # a mode's top hits, best first ("source:doc_id")
+    notes: list[str] = []  # facts the mode noted while searching (harness only)
 
 
 def doc_texts(documents: dict[str, list[Document]]) -> dict[str, tuple[str, str]]:
@@ -60,13 +61,14 @@ def create_demo_app(profiles: dict[str, Harness], questions: dict[str, Question]
         if q is None:
             raise HTTPException(404, f"unknown question {req.id!r}")
         out: dict[str, Any] = {"gold": q.gold, "expected": q.answers[0] if q.answers else None,
-                               "answer": None, "correct": None, "error": None}
+                               "answer": None, "steps": [], "correct": None, "error": None}
         picked = [texts[k] for k in req.keys[:10] if k in texts]
         if answer_client is None:
             out["error"] = "no answer model configured"
             return out
         try:
-            out["answer"] = await answer_from(answer_client, q.text, picked)
+            out["answer"], out["steps"] = await answer_from(answer_client, q.text, picked,
+                                                            [n[:500] for n in req.notes])
             out["correct"] = is_correct(out["answer"], q.answers)
         except Exception as exc:  # the answer line is extra; never fail the page over it
             out["error"] = scrub(f"{type(exc).__name__}: {exc}")[:200]
@@ -98,8 +100,9 @@ def main() -> None:
     docs = {k: v for d in data.values() for k, v in doc_texts(d.documents).items()}
     logging.basicConfig(level=logging.INFO)
     print(f"Ignite demo: http://{HOST}:{args.port}/  (profiles: {', '.join(profiles)})")
-    # The answer line uses the judge model: fast, and the same for both modes.
-    app = create_demo_app(profiles, questions, docs=docs, answer_client=make_client(cfg["judge"]))
+    # The answer box: one reader model, the same for both modes (config `answer`, else the judge).
+    reader = make_client(cfg.get("answer") or cfg["judge"])
+    app = create_demo_app(profiles, questions, docs=docs, answer_client=reader)
     uvicorn.run(app, host=HOST, port=args.port)
 
 

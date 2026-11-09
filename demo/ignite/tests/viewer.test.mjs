@@ -294,3 +294,10 @@ test("the whole page script compiles (not only the core block)", () => {
   assert.ok(scripts.length >= 1);
   for (const src of scripts) new vm.Script(src); // throws SyntaxError, e.g. on a duplicate const
 });
+
+test("answerHtml lists the reader's steps without their own numbering", () => {
+  const html = answerHtml({ answer: "Richland County", correct: true, expected: "Richland County",
+                            steps: ["Step 1: from South Carolina [2]", "2. Columbia is the capital [3]"] });
+  assert.ok(html.includes('<ol class="why">'));
+  assert.ok(html.includes("<li>from South Carolina [2]</li>") && html.includes("<li>Columbia is the capital [3]</li>"));
+});

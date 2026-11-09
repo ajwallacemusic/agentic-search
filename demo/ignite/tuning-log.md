@@ -122,3 +122,28 @@ time: 42–54 s on average, up from 39–40 s; WANDS match is close to the 60 s 
 Rehearsals, `match-hero`: harness 10/10 gold in 3 of 3 runs (46.6, 45.6, 46.8 s; $0.048–0.068),
 retrieval 0/10 in all 3. Saved as `20261109-121547-*`, `20261109-121658-*`, `20261109-121804-*`.
 
+
+## Round 12: the viewer's answer box (2026-11-09)
+
+The viewer shows an answer read from each mode's top 10 (`answer.py`, `POST /ignite/answer`). A
+live hero run showed "not found" for a harness run that had all 4 gold paragraphs. Cause: the
+reader, not the search. MuSiQue states two hero hops loosely: Deveaux was "from" South Carolina
+(not "born in"), and Forest Acres is "part of the Columbia metro area" (not "shares a border with
+Columbia"). A strict reader rejects the chain.
+
+Answer step on saved hero runs (each harness run had 4/4 gold), 3 tries per run:
+
+| Reader | Prompt | Harness right | Retrieval (1/4 gold) |
+|---|---|---|---|
+| 3.5 Flash-Lite (judge) | answer in one sentence | 9 of 12 runs-tries (2 runs mostly "not found") | not found |
+| 3.5 Flash-Lite | steps, then `Answer:` | 12 of 18 (some replies cut before `Answer:`) | not found |
+| 3.5 Flash | steps, then `Answer:` | 16 of 18 | not found |
+| Argon | steps, then `Answer:` | 4 of 18 ("no document says it shares a border") | not found |
+| 3.5 Flash | steps; accept loosely stated hops | **18 of 18** | not found |
+
+`match-hero`: the anchor chair is rarely in the harness's top 10, so the reader could not check
+its wood tone and said "not found". The viewer now also sends the mode's noted facts (the
+harness notebook; retrieval has none). Result: harness names 3 matching products in 9 of 9 tries;
+retrieval "not found" in 9 of 9. Hero with notes: harness 18 of 18.
+
+Config: `answer` block (gemini-3.5-flash, ~4 s per answer). Not used by search or the evals.

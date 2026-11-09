@@ -55,15 +55,18 @@ def _answer_app(tmp_path, client):
 async def test_answer_endpoint_reads_the_given_docs_and_reveals_gold(tmp_path):
     from demo.ignite.tests.test_answer import FakeClient
     assert HERO.answers, "the fixture's hero question should have an answer"
-    fake = FakeClient(f"It is {HERO.answers[0]}.")
+    fake = FakeClient(f"[1] a fact\nAnswer: {HERO.answers[0]}")
     gold_key = f"wiki:{HERO.gold[0]}"
     async with _answer_app(tmp_path, fake) as c:
-        r = await c.post("/ignite/answer", json={"id": "hero", "keys": [gold_key, "wiki:nope"]})
+        r = await c.post("/ignite/answer", json={"id": "hero", "keys": [gold_key, "wiki:nope"],
+                                                 "notes": ["X was born in Y."]})
     body = r.json()
-    assert r.status_code == 200 and body["answer"] == f"It is {HERO.answers[0]}."
+    assert r.status_code == 200 and body["answer"] == HERO.answers[0]
+    assert body["steps"] == ["[1] a fact"]
     assert body["gold"] == HERO.gold
     assert body["expected"] == HERO.answers[0] and body["correct"] is True
     assert "[1]" in fake.seen[1] and "[2]" not in fake.seen[1]  # unknown keys are skipped
+    assert "- X was born in Y." in fake.seen[1]
 
 
 async def test_answer_endpoint_unknown_question_is_404(tmp_path):
