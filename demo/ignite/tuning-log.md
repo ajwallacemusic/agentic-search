@@ -147,3 +147,15 @@ harness notebook; retrieval has none). Result: harness names 3 matching products
 retrieval "not found" in 9 of 9. Hero with notes: harness 18 of 18.
 
 Config: `answer` block (gemini-3.5-flash, ~4 s per answer). Not used by search or the evals.
+
+## Round 13: more match examples (2026-11-09)
+
+Scan of all 20 WANDS match rules, one run each, P@10 retrieval / harness: 01 0.0/0.3, 02 0.0/0.4,
+03 0.0/0.2, 04 0.0/1.0 (harness 704 s: an API stall), 05 0.4/0.0, 06 0.3/0.8, 07 0.0/1.0,
+08 0.5/0.7, 09 0.0/0.0, 10 0.0/1.0, 11 0.0/0.0, 12 0.0/0.5, 13 0.0/1.0, 14 0.0/0.5, 15 0.0/0.5,
+16 0.1/0.9, 17 0.0/1.0, 18 0.0/0.4, 19 0.0/0.8, 20 0.0/0.0.
+
+Added one per attribute: `match-bookcase` (07, wood tone), `match-vase` (17, color),
+`match-faucet` (06, style). Rehearsals, 2 runs each, gold in top 10: harness 10 and 8, 8 and 7,
+9 and 8; retrieval 0 in all 6. Harness 38–51 s. Kept as backups.
+

@@ -69,6 +69,18 @@ that wood tone. The question never says "light wood", so a single pass searches 
 for "patio sofa" and finds no gold. The harness makes a 2-step plan, opens the chair, notes "wood
 tone: light wood" in its notebook, then searches patio sofas and tables for it.
 
+More match examples, one per attribute (picked from a scan of all 20 rules on 2026-11-09, then
+rehearsed twice each; gold in top 10, retrieval / harness):
+
+| id | rule | question | retrieval | harness |
+|---|---|---|---|---|
+| `match-bookcase` | `match-07` | Schatzi rainbow wave coffee table → bookcase, same wood tone | 0, 0 | 10, 8 |
+| `match-vase` | `match-17` | Bruster metal rock climber decor → fountain or vase, same color | 0, 0 | 8, 7 |
+| `match-faucet` | `match-06` | Nuala toilet paper holder → sink faucet and towel bar, same style | 0, 0 | 9, 8 |
+
+Harness time 38–51 s. The answer box names matching products for the harness and says "not found"
+for retrieval.
+
 How the questions are made (`public/wands_match.py`):
 
 - The anchor product has exactly one value for the attribute (`wood_tone` from `dswoodtone`,
@@ -244,6 +256,8 @@ Backup runs in `runs/` (Argon):
   harness 4/4, current code; decide events carry the controller's notes.
 - `20261109-121547-match-hero-*`, `20261109-121658-match-hero-*`, `20261109-121804-match-hero-*`:
   harness 10 gold in top 10, retrieval 0 (current code).
+- `20261109-163827-*` and `20261109-1639*-*` (`match-bookcase`, `match-vase`, `match-faucet`):
+  2 runs each, harness 7–10 gold in top 10, retrieval 0.
 - `20261030-*-match-hero-*`: older (judge without facts); harness 10, 10 and 8 gold.
 - `20261030-133448-trays-*`: WANDS, both modes 9 of 19 gold in top 10; harness 4× the cost.
 

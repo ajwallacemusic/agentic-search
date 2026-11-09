@@ -1,0 +1,23 @@
+{
+ "question_id": "match-vase",
+ "set": "wands-match",
+ "ref": "match-17",
+ "text": "I have the Bruster metal rock climber decor. Find a fountain or a vase in the same color.",
+ "gold": [
+  "wands-16786",
+  "wands-16788",
+  "wands-17969",
+  "wands-18728",
+  "wands-24433",
+  "wands-2781",
+  "wands-27915",
+  "wands-27930",
+  "wands-27943",
+  "wands-30621",
+  "wands-42605",
+  "wands-6160",
+  "wands-8272",
+  "wands-8276",
+  "wands-8722"
+ ]
+}

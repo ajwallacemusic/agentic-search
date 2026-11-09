@@ -20,6 +20,19 @@
 - id: match-hero
   set: wands-match
   ref: match-19
+# More match examples, one per attribute, from the 2026-11-09 scan (one run each, P@10):
+# match-bookcase: wood tone, harness 1.0 vs retrieval 0.0.
+- id: match-bookcase
+  set: wands-match
+  ref: match-07
+# match-vase: color, harness 1.0 vs retrieval 0.0.
+- id: match-vase
+  set: wands-match
+  ref: match-17
+# match-faucet: style, harness 0.8 vs retrieval 0.3.
+- id: match-faucet
+  set: wands-match
+  ref: match-06
 # awning: a tie. Both modes nDCG 1.0; harness costs ~4x more.
 - id: awning
   set: wands
