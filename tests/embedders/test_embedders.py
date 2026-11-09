@@ -197,3 +197,60 @@ async def test_sentence_transformer_embedder():
     e = SentenceTransformerEmbedder("sentence-transformers/all-MiniLM-L6-v2")
     [v] = await e.embed([TextPart(text="hello")], "query")
     assert len(v) == e.dim == 384
+
+
+class _OverlapModel:
+    """A stand-in model that records how many threads are inside encode() at once."""
+
+    def __init__(self):
+        import threading
+        self.lock = threading.Lock()
+        self.active = self.peak = self.calls = 0
+
+    def encode(self, inputs, **_):
+        import time
+        with self.lock:
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+        time.sleep(0.02)
+        with self.lock:
+            self.active -= 1
+            self.calls += 1
+        return np.ones((len(inputs), 3), dtype=np.float32)
+
+    def get_sentence_embedding_dimension(self):
+        return 3
+
+
+async def test_sentence_transformer_runs_one_encode_at_a_time():
+    """A shared in-process model segfaults when two threads run it (seen with bge-small while
+    several sources index at once), so the embedder serializes encode calls."""
+    from agentic_search.embedders.local import SentenceTransformerEmbedder
+    e = SentenceTransformerEmbedder("fake")
+    e._model = model = _OverlapModel()
+    out = await asyncio.gather(*(e.embed([TextPart(text=f"t{i}")], "document") for i in range(8)))
+    assert model.calls == 8 and model.peak == 1
+    assert all(len(v) == 1 and len(v[0]) == 3 for v in out)
+
+
+async def test_sentence_transformer_loads_the_model_once(monkeypatch):
+    import sys
+    import threading
+    import time
+    import types
+    from agentic_search.embedders.local import SentenceTransformerEmbedder
+
+    loads: list[str] = []
+    guard = threading.Lock()
+
+    def fake_cls(name, device=None):
+        time.sleep(0.02)
+        with guard:
+            loads.append(name)
+        return _OverlapModel()
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers",
+                        types.SimpleNamespace(SentenceTransformer=fake_cls))
+    e = SentenceTransformerEmbedder("fake")
+    await asyncio.gather(*(e.embed([TextPart(text="x")], "query") for _ in range(6)))
+    assert loads == ["fake"]

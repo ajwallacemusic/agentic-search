@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import io
 import re
+import threading
 from typing import Any
 
 import numpy as np
@@ -43,7 +44,10 @@ class HashEmbedder:
 
 
 class SentenceTransformerEmbedder:
-    """sentence-transformers model; set image=True for CLIP-style models. Needs the `local` extra."""
+    """sentence-transformers model; set image=True for CLIP-style models. Needs the `local` extra.
+
+    Loading and encoding hold a lock: the model is shared in-process, and two threads loading
+    or running it at once can segfault (e.g. while several sources index in parallel)."""
 
     local = True  # runs in-process: document content never leaves the machine
 
@@ -57,20 +61,23 @@ class SentenceTransformerEmbedder:
         self.device = device
         self._model: Any = None
         self._dim: int | None = None
+        self._lock = threading.RLock()
 
     @property
     def model(self) -> Any:
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(self.model_name, device=self.device)
-        return self._model
+        with self._lock:
+            if self._model is None:
+                from sentence_transformers import SentenceTransformer
+                self._model = SentenceTransformer(self.model_name, device=self.device)
+            return self._model
 
     @property
     def dim(self) -> int:
-        if self._dim is None:
-            d = self.model.get_sentence_embedding_dimension()
-            self._dim = int(d) if d else len(self.model.encode(["x"])[0])
-        return self._dim
+        with self._lock:
+            if self._dim is None:
+                d = self.model.get_sentence_embedding_dimension()
+                self._dim = int(d) if d else len(self.model.encode(["x"])[0])
+            return self._dim
 
     async def embed(self, items: list[Content], purpose: Purpose) -> list[Embedding]:
         return await asyncio.to_thread(self._encode, items, purpose)
@@ -86,5 +93,6 @@ class SentenceTransformerEmbedder:
                 inputs.append(Image.open(io.BytesIO(image_bytes(item))).convert("RGB"))
             else:
                 inputs.append(prefix + text_of([item]))
-        vectors = self.model.encode(inputs, normalize_embeddings=True, convert_to_numpy=True)
+        with self._lock:
+            vectors = self.model.encode(inputs, normalize_embeddings=True, convert_to_numpy=True)
         return [v.tolist() for v in vectors]
