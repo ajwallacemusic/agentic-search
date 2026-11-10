@@ -52,8 +52,9 @@ the question's own words does not find them.
 
 ### WANDS picks
 
-- `awning` (query 260, "retractable side awning"): a tie. Both modes nDCG@10 1.0; the harness
-  costs about 4× more.
+- `awning` (query 260, "retractable side awning"): a tie. Both modes nDCG@10 1.0. Since the
+  stop-when-done rule (round 14) the harness stops after 1 turn: same cost as one pass (live
+  2026-11-10: 1 turn, 10 s, $0.015 vs retrieval $0.015, 10 of 10 right in both).
 - `trays` (query 346, "nesting tray set"): the harness costs about 4.5× more and scores a little
   lower (nDCG@10 0.93 vs 0.96).
 

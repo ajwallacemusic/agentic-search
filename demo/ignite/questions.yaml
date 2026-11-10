@@ -33,7 +33,7 @@
 - id: match-faucet
   set: wands-match
   ref: match-06
-# awning: a tie. Both modes nDCG 1.0; harness costs ~4x more.
+# awning: a tie. Both modes nDCG 1.0; since round 14 the harness stops after 1 turn (same cost).
 - id: awning
   set: wands
   ref: '260'
