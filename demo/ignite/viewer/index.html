@@ -193,15 +193,19 @@
 <div class="explain">
   <div class="card">
     <div class="eyebrow">Retrieval · one pass</div>
-    <h3>Search once. Return what it got.</h3>
-    <svg class="flow" viewBox="0 0 520 92" role="img" aria-label="Question, then search, then top 10">
+    <h3>Plan once, search once, check once. Done.</h3>
+    <svg class="flow" viewBox="0 0 520 92" role="img" aria-label="Question, plan, search, check, top 10, once">
       <defs><marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#00368c"/></marker></defs>
-      <rect class="box" x="4" y="10" width="96" height="36" rx="8"/><text class="t" x="52" y="28">Question</text>
-      <line class="ln" x1="104" y1="28" x2="176" y2="28" marker-end="url(#ar1)"/>
-      <rect class="box" x="180" y="10" width="96" height="36" rx="8"/><text class="t" x="228" y="28">Search</text>
-      <line class="ln" x1="280" y1="28" x2="352" y2="28" marker-end="url(#ar1)"/>
-      <rect class="box end" x="356" y="10" width="96" height="36" rx="8"/><text class="t end" x="404" y="28">Top 10</text>
-      <text class="note" x="228" y="76">no plan · no check · no second try</text>
+      <rect class="box" x="4" y="10" width="84" height="36" rx="8"/><text class="t" x="46" y="28">Question</text>
+      <line class="ln" x1="92" y1="28" x2="110" y2="28" marker-end="url(#ar1)"/>
+      <rect class="box" x="114" y="10" width="72" height="36" rx="8"/><text class="t" x="150" y="28">Plan</text>
+      <line class="ln" x1="190" y1="28" x2="208" y2="28" marker-end="url(#ar1)"/>
+      <rect class="box" x="212" y="10" width="80" height="36" rx="8"/><text class="t" x="252" y="28">Search</text>
+      <line class="ln" x1="296" y1="28" x2="314" y2="28" marker-end="url(#ar1)"/>
+      <rect class="box" x="318" y="10" width="76" height="36" rx="8"/><text class="t" x="356" y="28">Check</text>
+      <line class="ln" x1="398" y1="28" x2="416" y2="28" marker-end="url(#ar1)"/>
+      <rect class="box end" x="420" y="10" width="96" height="36" rx="8"/><text class="t end" x="468" y="28">Top 10</text>
+      <text class="note" x="260" y="80">same model, same tools, one turn · no second try</text>
     </svg>
   </div>
   <div class="card">
@@ -545,7 +549,7 @@ function requestBody(q, mode) {
 const MODES = ["retrieval", "harness"];
 const TITLES = { retrieval: "Retrieval · one pass", harness: "Harness · agent loop" };
 const ICONS = { retrieval: "→", harness: "↻" };
-const TAGS = { retrieval: "One search with the question. No plan, no check.",
+const TAGS = { retrieval: "Plans its searches, runs them, checks the results. One turn, no second try.",
                harness: "Makes a plan, searches, checks the results, notes facts, goes again." };
 
 /** The gold set a column may show: in replay always; live only once that mode has finished
@@ -583,7 +587,8 @@ function render(mode) {
   const maxTurn = Math.max(0, s.turn, ...s.calls.map((c) => c.turn));
   const turns = [...Array(maxTurn + 1).keys()];
   const phaseIdx = PHASES.indexOf(s.phase);
-  const phases = PHASES.map((p, i) => {
+  // Retrieval stops after judge: it never reaches decide, so it gets no decide pill.
+  const phases = PHASES.filter((p) => mode === "harness" || p !== "decide").map((p, i) => {
     const cls = p === s.phase ? "on" : (s.done || (phaseIdx >= 0 && i < phaseIdx)) ? "done" : "";
     return `<span class="phase ${cls}">${p}</span>`;
   }).join(" → ") + (mode === "harness" ? `<span class="loopmark">↺ until done</span>` : "");
