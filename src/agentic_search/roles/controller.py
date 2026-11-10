@@ -17,13 +17,16 @@ from agentic_search.models.base import Action, ControllerView, Decider, Decision
 class Controller:
     def __init__(self, decider: Decider | None, *, hooks: Hooks | None = None,
                  relevant_threshold: float = 0.5, min_new_relevant: int = 1,
-                 stable_top_k: int = 10, timeout: float = 60.0):
+                 stable_top_k: int = 10, timeout: float = 60.0, stop_when_done: bool = False,
+                 done_min_relevant: int = 8):
         self.decider = decider
         self.hooks = hooks or Hooks()
         self.relevant_threshold = relevant_threshold
         self.min_new_relevant = min_new_relevant
         self.stable_top_k = stable_top_k
         self.timeout = timeout
+        self.stop_when_done = stop_when_done
+        self.done_min_relevant = done_min_relevant
         self._can_decide = decider is not None
 
     def budget_stop(self, state: SearchState) -> StopReason | None:
@@ -56,7 +59,27 @@ class Controller:
             return None
         return sum(c.p_relevant >= self.relevant_threshold for c in judged)  # type: ignore[operator]
 
+    def _done_stop(self, state: SearchState) -> Decision | None:
+        """No step open (no plan, or every step done): stop when the top 10 is good enough or
+        stopped improving. More turns rarely help then (tuning-log round 14)."""
+        if not self.stop_when_done or not state.history or state.current_step() is not None:
+            return None
+        last = state.history[-1]
+        if last.n_top_relevant is None:
+            return None
+        if last.n_top_relevant >= self.done_min_relevant:
+            return Decision(action=Action.STOP,
+                            note=f"no step open; {last.n_top_relevant} of the top 10 judged relevant")
+        if len(state.history) >= 2:
+            prev = state.history[-2].n_top_relevant
+            if prev is not None and last.n_top_relevant <= prev:
+                return Decision(action=Action.STOP, note="no step open; top 10 stopped improving")
+        return None
+
     def heuristic(self, state: SearchState) -> Decision:
+        done = self._done_stop(state)
+        if done is not None:
+            return done
         k = state.current_step()
         if k is None or not state.history:
             return self._base_heuristic(state)

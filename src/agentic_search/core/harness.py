@@ -78,6 +78,11 @@ class HarnessSettings(BaseModel):
     min_new_relevant: int = 1
     discover_timeout: float | None = 300.0
     steps: bool = False
+    # With steps on: stop once no step is open (no plan, or all done) and the top 10 is good
+    # (at least done_min_relevant judged relevant) or did not gain a relevant result this turn.
+    # Tested offline on the Ignite public sets (demo/ignite/tuning-log.md, round 14).
+    stop_when_done: bool = True
+    done_min_relevant: int = Field(8, ge=1)
     snippet_chars: int = Field(240, ge=40)
     fetch_chars: int = Field(1500, ge=100)
 
@@ -343,7 +348,9 @@ class Harness:
                             fetch_chars=s.fetch_chars)
         controller = Controller(self.controller_decider, hooks=self.hooks,
                                 relevant_threshold=s.relevant_threshold,
-                                min_new_relevant=s.min_new_relevant, timeout=s.decider_timeout)
+                                min_new_relevant=s.min_new_relevant, timeout=s.decider_timeout,
+                                stop_when_done=s.steps and s.stop_when_done,
+                                done_min_relevant=s.done_min_relevant)
         tools = build_tool_specs(manifests)
 
         def progress() -> None:
@@ -432,14 +439,18 @@ class Harness:
             state.usage.add_model(analysis.usage)
             progress()
             state.digest, state.last_errors = analysis.digest, result.errors
-            top = [c.hit.key for c, _ in state.pool.ranked(self.settings.judge_weight)[:20]]
+            ranked = state.pool.ranked(self.settings.judge_weight)
+            top = [c.hit.key for c, _ in ranked[:20]]
+            judged10 = [c for c, _ in ranked[:10] if c.judged and c.p_relevant is not None]
+            n_top_relevant = (sum(c.p_relevant >= self.settings.relevant_threshold  # type: ignore[operator]
+                                  for c in judged10) if judged10 else None)
             state.history.append(TurnSummary(
                 turn=state.turn, n_calls=len(calls), n_errors=len(result.errors),
                 n_new=analysis.n_new, n_new_relevant=analysis.n_new_relevant, top_keys=top,
                 n_facts=update.n_facts, n_steps_done=update.n_steps_done,
                 n_opened=sum(1 for c in calls if c.name == "fetch"
                              and result.hits_per_call.get(c.id)),
-                plan_set=update.plan_set))
+                plan_set=update.plan_set, n_top_relevant=n_top_relevant))
             if single_pass:
                 return StopReason.SINGLE_PASS
             reason = controller.budget_stop(state)

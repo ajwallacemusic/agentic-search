@@ -186,3 +186,50 @@ def test_all_error_turns_refine_instead_of_stuck():
     err = lambda: TurnSummary(turn=0, n_calls=2, n_errors=2, n_new=0, n_new_relevant=0)  # noqa: E731
     s = with_steps(state(history=[err(), err()]), ("find a", False))
     assert Controller(None).heuristic(s).action is Action.REFINE
+
+
+_tops = iter(range(10**6))
+
+
+def top(n, **kw):
+    t = turn(top=(f"s:{next(_tops)}",), **kw)  # a new top list each turn: not "stable"
+    t.n_top_relevant = n
+    return t
+
+
+def test_done_stop_needs_no_open_step_and_a_good_or_flat_top10():
+    c = Controller(None, stop_when_done=True, done_min_relevant=8)
+    good = with_steps(state(history=[top(8)]), ("a", True))
+    d = c.heuristic(good)
+    assert d.action is Action.STOP and "8 of the top 10" in d.note
+    flat = state(history=[top(3), top(3)])  # no plan at all counts as no open step
+    d = c.heuristic(flat)
+    assert d.action is Action.STOP and "stopped improving" in d.note
+    rising = state(history=[top(2), top(5)])
+    assert c.heuristic(rising).action is Action.CONTINUE
+    first = state(history=[top(5)])  # one turn: no trend yet
+    assert c.heuristic(first).action is Action.CONTINUE
+    unjudged = state(history=[top(None), top(None)])
+    assert c.heuristic(unjudged).action is Action.CONTINUE
+
+
+def test_done_stop_waits_for_open_steps_and_is_off_by_default():
+    open_step = with_steps(state(history=[top(9), top(9)]), ("a", True), ("find b", False))
+    assert Controller(None, stop_when_done=True).heuristic(open_step).action is Action.CONTINUE
+    assert Controller(None).heuristic(state(history=[top(2), top(5)])).action is Action.CONTINUE
+    assert "stopped improving" not in (Controller(None).heuristic(state(history=[top(3), top(3)])).note or "")
+
+
+async def test_harness_stops_when_done_with_a_good_top_10(docs_backend):
+    async def go(**settings):
+        driver = ScriptedDriver([[call("lexical_search", source="docs", text="headache")],
+                                 [call("lexical_search", source="docs", text="fever")],
+                                 [call("lexical_search", source="docs", text="cough")]])
+        h = Harness([docs_backend], driver, embedders=[docs_backend.embedder],
+                    analyzer=KeywordJudge(["headache", "fever", "cough"]),
+                    settings=HarnessSettings(steps=True, **settings))
+        return await h.search("q", budget=Budget(max_turns=3))
+    on = await go(done_min_relevant=1)  # no plan, a relevant hit in the top 10: done
+    assert on.stop_reason is StopReason.CONTROLLER_STOP and on.usage.turns == 1
+    off = await go(done_min_relevant=1, stop_when_done=False)
+    assert off.usage.turns > 1
