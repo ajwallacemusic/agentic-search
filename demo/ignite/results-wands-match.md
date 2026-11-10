@@ -12,7 +12,7 @@ Source files (SHA-256): `product.csv` d993926254572e6eba96c8fd87cc549a17fb91ad37
 |---|---|---|---|---|---|---|---|---|---|---|
 | bm25 | 0.032 | 0.043 | 0.002 | 0.040 | 1.0 | 1.0 | $0.0000 | 0.3 | 7 | 0 |
 | retrieval | 0.143 | 0.086 | 0.105 | 0.214 | 1.0 | 3.7 | $0.0132 | 14.4 | 7 | 0 |
-| harness | 0.673 | 0.714 | 0.230 | 0.652 | 3.9 | 18.6 | $0.0663 | 57.2 | 7 | 0 |
+| harness | 0.695 | 0.714 | 0.226 | 0.650 | 3.6 | 17.0 | $0.0599 | 64.0 | 7 | 0 |
 
 ## color questions
 
@@ -20,7 +20,7 @@ Source files (SHA-256): `product.csv` d993926254572e6eba96c8fd87cc549a17fb91ad37
 |---|---|---|---|---|---|---|---|---|---|---|
 | bm25 | 0.000 | 0.000 | 0.000 | 0.000 | 1.0 | 1.0 | $0.0000 | 0.3 | 7 | 0 |
 | retrieval | 0.021 | 0.014 | 0.016 | 0.071 | 1.0 | 3.7 | $0.0139 | 9.7 | 7 | 0 |
-| harness | 0.490 | 0.414 | 0.353 | 0.718 | 4.0 | 19.4 | $0.0636 | 50.3 | 7 | 0 |
+| harness | 0.472 | 0.429 | 0.409 | 0.632 | 3.6 | 17.6 | $0.0581 | 57.1 | 7 | 0 |
 
 ## style questions
 
@@ -28,7 +28,7 @@ Source files (SHA-256): `product.csv` d993926254572e6eba96c8fd87cc549a17fb91ad37
 |---|---|---|---|---|---|---|---|---|---|---|
 | bm25 | 0.000 | 0.000 | 0.000 | 0.022 | 1.0 | 1.0 | $0.0000 | 0.3 | 6 | 0 |
 | retrieval | 0.048 | 0.050 | 0.051 | 0.067 | 1.0 | 4.0 | $0.0154 | 11.2 | 6 | 0 |
-| harness | 0.409 | 0.400 | 0.156 | 0.556 | 3.8 | 17.2 | $0.0627 | 55.5 | 6 | 0 |
+| harness | 0.453 | 0.417 | 0.259 | 0.562 | 3.3 | 14.8 | $0.0515 | 68.6 | 6 | 0 |
 
 ## All questions
 
@@ -36,8 +36,8 @@ Source files (SHA-256): `product.csv` d993926254572e6eba96c8fd87cc549a17fb91ad37
 |---|---|---|---|---|---|---|---|---|---|---|
 | bm25 | 0.011 | 0.015 | 0.001 | 0.021 | 1.0 | 1.0 | $0.0000 | 0.3 | 20 | 0 |
 | retrieval | 0.072 | 0.050 | 0.058 | 0.120 | 1.0 | 3.8 | $0.0141 | 11.8 | 20 | 0 |
-| harness | 0.530 | 0.515 | 0.251 | 0.646 | 3.9 | 18.4 | $0.0643 | 54.3 | 20 | 0 |
+| harness | 0.544 | 0.525 | 0.300 | 0.617 | 3.5 | 16.6 | $0.0567 | 63.0 | 20 | 0 |
 
 `bm25`: one BM25 search with the question text, no model. `retrieval` and `harness` use the same planner, judge and settings as the Ignite demo (`config.yaml`).
 
-One run per query. Model runs vary, so treat differences of a few points as noise.
+Harness rows: 2026-11-10, with the stop-when-done rule (tuning-log round 14); bm25 and retrieval rows: 2026-11-09 (the rule does not touch them: retrieval never asks the controller). One run per query. Model runs vary, so treat differences of a few points as noise.

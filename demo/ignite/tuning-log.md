@@ -159,3 +159,48 @@ Added one per attribute: `match-bookcase` (07, wood tone), `match-vase` (17, col
 `match-faucet` (06, style). Rehearsals, 2 runs each, gold in top 10: harness 10 and 8, 8 and 7,
 9 and 8; retrieval 0 in all 6. Harness 38–51 s. Kept as backups.
 
+
+## Round 14: stop when done (2026-11-10)
+
+Problem: on simple questions the harness ran to the 4-turn cap. WANDS: 3.2 turns, 47 s, $0.055
+per question, for the same P@10 as one pass (0.845 vs 0.842). The heuristic controller had no
+rule for "nothing left to do, results good": with step tracking on it kept going while results
+changed.
+
+Method (no live tuning): run the harness once with a raised cap (6 turns, 100 s) on all 140
+public questions and save every event (`public/turnscan.py`). A later turn never changes an
+earlier one, so the top 10 after each turn is exactly what any stop rule would have returned.
+`public/turnsim.py` replays candidate rules on those runs, on all questions and on two fixed
+halves.
+
+Simulated, 4-turn cap (P@10 / avg turns / avg s):
+
+| Rule | MuSiQue | WANDS | WANDS match |
+|---|---|---|---|
+| none (today) | 0.262 / 3.33 / 42.7 | 0.850 / 3.36 / 54.5 | 0.521 / 4.00 / 55.4 |
+| top 10 unchanged | 0.265 / 3.48* | 0.850 / 3.19 / 51.9 | 0.495* |
+| ≥ 8 of top 10 judged relevant (ignore steps) | 0.262 / 3.30 | 0.857 / 1.47 / 23.7 | 0.505 / 2.95 |
+| **no step open + (≥ 8 judged relevant or no gain)** | **0.262 / 3.33** | **0.859 / 1.41 / 23.0** | **0.521 / 3.95** |
+
+(* 6-turn cap.) The step gate matters: without it the rule stops match questions before their
+second step (P@10 0.505). The simple WANDS questions never set a plan (60 of 60), so "no step
+open" is true from turn 1. Both halves agree for the chosen rule. Raising the cap to 6 helps only
+WANDS match (P@10 0.521 → 0.563, at 87 s); not taken.
+
+Rule, in the library (`Controller._done_stop`; settings `stop_when_done`, `done_min_relevant`
+= 8; only with `steps: true`): after a turn, stop if no step is open and either at least 8 of the
+top 10 are judged relevant or the turn added no judged-relevant result to the top 10.
+
+Live re-run with the rule (harness rows of the results files):
+
+| Set | Before | After |
+|---|---|---|
+| WANDS | nDCG 0.766, P@10 0.845, 3.2 turns, 46.9 s, $0.055 | nDCG 0.788, P@10 0.855, 1.5 turns, 26.6 s, $0.026 |
+| WANDS match | P@10 0.515, 3.9 turns, 54.3 s, $0.064 | P@10 0.525, 3.5 turns, 63.0 s, $0.057 |
+| MuSiQue | recall 0.875, 3.3 turns, 42.5 s | recall 0.865, 3.2 turns, 45.2 s |
+
+A first live run of all three sets at once scored lower (WANDS P@10 0.818, match 0.490): the
+shared model was slower, match runs hit the 60 s budget, and retrieval dropped as well (MuSiQue
+recall 0.697 → 0.661). WANDS and match were re-run one at a time (rows above). MuSiQue's row is
+from the shared run; the rule almost never fires there (simulation: same turns), so its change is
+noise.

@@ -12,8 +12,8 @@ Source files (SHA-256): `product.csv` d993926254572e6eba96c8fd87cc549a17fb91ad37
 |---|---|---|---|---|---|---|---|---|---|---|
 | bm25 | 0.715 | 0.780 | 0.058 | 0.879 | 1.0 | 1.0 | $0.0000 | 0.1 | 60 | 0 |
 | retrieval | 0.787 | 0.842 | 0.059 | 0.943 | 1.0 | 5.9 | $0.0178 | 14.9 | 60 | 0 |
-| harness | 0.766 | 0.845 | 0.060 | 0.924 | 3.2 | 19.1 | $0.0551 | 46.9 | 60 | 0 |
+| harness | 0.788 | 0.855 | 0.061 | 0.933 | 1.5 | 8.8 | $0.0261 | 26.6 | 60 | 0 |
 
 `bm25`: one BM25 search with the question text, no model. `retrieval` and `harness` use the same planner, judge and settings as the Ignite demo (`config.yaml`).
 
-One run per query. Model runs vary, so treat differences of a few points as noise.
+Harness rows: 2026-11-10, with the stop-when-done rule (tuning-log round 14); bm25 and retrieval rows: 2026-11-09 (the rule does not touch them: retrieval never asks the controller). One run per query. Model runs vary, so treat differences of a few points as noise.

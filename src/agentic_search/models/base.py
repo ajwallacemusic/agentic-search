@@ -69,6 +69,7 @@ class TurnSummary(BaseModel):
     n_steps_done: int = 0
     n_opened: int = 0
     plan_set: bool = False
+    n_top_relevant: int | None = None  # judged relevant in the top 10 after this turn; None = none judged
 
 
 class PlannerView(BaseModel):
