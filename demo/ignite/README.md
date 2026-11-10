@@ -136,7 +136,10 @@ library's `create_app` (profile `ignite` for MuSiQue, `ignite-wands` for WANDS).
 **Step tracking** (`settings.steps: true` in `config.yaml`) is a library feature (library PR #3,
 merged). The planner keeps a short step plan and a notebook of
 facts it read in documents, with the document each fact came from. The loop does not stop while a
-step is open. The viewer shows the steps and facts as they happen. The demo itself changes nothing under
+step is open. Once no step is open (no plan, or every step done), it stops when at least 8 of
+the top 10 are judged relevant or a turn adds no judged-relevant result (library setting
+`stop_when_done`, tuning-log round 14). Simple WANDS questions now take 1.5 turns and about
+27 s instead of 3.2 turns and 47 s, at the same quality. The viewer shows the steps and facts as they happen. The demo itself changes nothing under
 `src/`.
 
 The library fixes the demo once worked around are merged (library PRs #4, #5 and #6): the
