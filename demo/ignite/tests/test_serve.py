@@ -44,11 +44,13 @@ async def test_viewer_is_served_at_root(client):
 
 
 def _answer_app(tmp_path, client):
+    from demo.ignite.check import load_proofs
     from demo.ignite.serve import doc_texts
     (tmp_path / "index.html").write_text("<!doctype html><title>viewer</title>")
     data = demo_data()
     app = create_demo_app({"ignite": offline_harness()}, data.questions, viewer_dir=tmp_path,
-                          docs=doc_texts(data.documents), answer_client=client)
+                          docs=doc_texts(data.documents), answer_client=client,
+                          proofs=load_proofs(data.questions))
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 
@@ -67,6 +69,19 @@ async def test_answer_endpoint_reads_the_given_docs_and_reveals_gold(tmp_path):
     assert body["expected"] == HERO.answers[0] and body["correct"] is True
     assert "[1]" in fake.seen[1] and "[2]" not in fake.seen[1]  # unknown keys are skipped
     assert "- X was born in Y." in fake.seen[1]
+
+
+async def test_answer_endpoint_explains_each_mark(tmp_path):
+    from demo.ignite.tests.test_answer import FakeClient
+    gold_key = f"wiki:{HERO.gold[0]}"
+    async with _answer_app(tmp_path, FakeClient("Answer: x")) as c:
+        r = await c.post("/ignite/answer", json={"id": "hero", "keys": [gold_key, "wiki:nope"]})
+    body = r.json()
+    assert body["rule"].startswith("★ right = one of the")
+    assert body["checks"][gold_key]["verdict"] == "right" and body["checks"][gold_key]["text"]
+    assert body["checks"]["wiki:nope"]["verdict"] == "wrong"
+    assert "not a document" in body["checks"]["wiki:nope"]["why"]
+    assert body["coverage"] is None
 
 
 async def test_answer_endpoint_unknown_question_is_404(tmp_path):

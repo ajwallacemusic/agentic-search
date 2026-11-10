@@ -183,6 +183,11 @@ is set (the viewer itself runs the `ignite` and `ignite-wands` profiles).
   answer. The ★ gold marks and the "★ n of m gold in top 10" count appear only once that mode has
   finished, so nothing is given away mid-run. Needs `serve`: a replay opened from Finder has no
   answer box.
+- **Check it yourself** (`check.py`): once a mode finishes, a box under the question states the
+  rule behind ★ (MuSiQue: the paragraphs its authors list as needed; WANDS: Wayfair raters' Exact
+  label; WANDS match: product type plus one catalogue field, no model). Click any result to open
+  its full text, with the deciding field highlighted, and the reason it counts or not. WANDS match
+  also shows right results per target type, so "9 faucets, 0 towel bars" is visible. Needs `serve`.
 - **Replay:** press **Switch to replay** (or open `viewer/index.html` straight from Finder; no
   server or internet needed). Pick the three files of one saved run:
   `<stamp>-<id>-retrieval.jsonl`, `<stamp>-<id>-harness.jsonl` and `<stamp>-<id>.meta.json`.
