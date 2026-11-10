@@ -5,114 +5,183 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Retrieval vs Harness</title>
 <link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
+  /* Egen brand tokens (design-deck skill, references/egen-brand.md). Light identity; navy is the
+     header accent only. Green/red are kept for right/wrong, where meaning beats brand. */
   :root {
-    --bg: #ffffff; --fg: #111111; --muted: #4a4a4a; --line: #c8c8c8; --panel: #f4f4f4;
-    --accent: #0b4f9c; --good: #0a6b2d; --bad: #a3141b; --warn: #7a4b00;
+    --bg: #ffffff; --tint: #eaf1ff; --tint-2: #f1f6ff;
+    --ink: #0b1b33; --heading: #00368c; --muted: #5a6a85; --line: #d5e0f2;
+    --accent: #2f6be0; --accent-soft: #e6f0ff; --navy: #001433; --navy-2: #062a6b;
+    --good: #0f7a4f; --good-soft: #e3f5ec; --bad: #b3261e; --bad-soft: #fbeaea; --warn: #8a5a00;
+    --shadow: 0 10px 30px rgba(0, 20, 51, 0.07);
+    --fg: var(--ink); --panel: var(--tint-2);
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; background: var(--bg); color: var(--fg);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    font-size: 20px; line-height: 1.35;
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 19px; line-height: 1.38;
   }
-  header {
-    display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center;
-    padding: 14px 20px; border-bottom: 2px solid var(--fg);
-  }
-  header h1 { font-size: 26px; margin: 0 12px 0 0; }
   select, button, input[type=file] { font: inherit; }
-  select { padding: 6px 8px; max-width: 46ch; }
+
+  /* ---- header (navy) ---- */
+  header {
+    display: flex; flex-wrap: wrap; gap: 12px 22px; align-items: center;
+    padding: 14px 24px; background: var(--navy); color: #eaf1ff;
+    background-image: repeating-linear-gradient(90deg, rgba(255,255,255,.035) 0 1px, transparent 1px 14px);
+  }
+  .brand { display: flex; align-items: center; gap: 16px; margin-right: 8px; }
+  .brand img { height: 30px; display: block; }
+  .brand .sep { width: 1px; height: 30px; background: #27497f; }
+  .brand h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; color: #fff; }
+  .brand h1 small { display: block; font-size: 12px; font-weight: 500; letter-spacing: .15em; text-transform: uppercase; color: #9db6da; }
+  header label { color: #9db6da; font-size: 16px; }
+  header select {
+    padding: 7px 10px; max-width: 46ch; border-radius: 8px; border: 1px solid #27497f;
+    background: var(--navy-2); color: #fff;
+  }
   button {
-    padding: 6px 16px; border: 2px solid var(--fg); background: var(--bg); color: var(--fg);
-    border-radius: 6px; cursor: pointer; font-weight: 600;
+    padding: 7px 18px; border: 1px solid #27497f; background: transparent; color: #eaf1ff;
+    border-radius: 999px; cursor: pointer; font-weight: 600;
   }
-  button.primary { background: var(--fg); color: var(--bg); }
-  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #3381ff; border-color: #3381ff; color: #fff; }
+  button:disabled { opacity: .4; cursor: default; }
+  header input[type=file] { color: #9db6da; font-size: 15px; }
   .spacer { flex: 1; }
-  #question { padding: 10px 20px; font-size: 24px; font-weight: 600; border-bottom: 1px solid var(--line); }
-  #banner { display: none; padding: 8px 20px; background: var(--fg); color: var(--bg); font-weight: 600; }
-  #replay-bar { display: none; gap: 12px; align-items: center; flex-wrap: wrap; }
-  main { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  #live-bar, #replay-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  #replay-bar { display: none; }
+  #banner { display: none; padding: 8px 24px; background: var(--accent-soft); color: var(--heading); font-weight: 500; font-size: 17px; border-bottom: 1px solid var(--line); }
+
+  /* ---- how it works + why we care ---- */
+  .explain { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; padding: 16px 24px; background: var(--tint); }
+  @media (max-width: 1100px) { .explain { grid-template-columns: 1fr; } }
+  .card { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; box-shadow: var(--shadow); }
+  .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .15em; text-transform: uppercase; color: var(--accent); }
+  .card h3 { margin: 2px 0 6px; font-size: 19px; color: var(--heading); font-weight: 600; }
+  .card p { margin: 6px 0 0; font-size: 16px; color: var(--muted); }
+  .card p b { color: var(--ink); font-weight: 600; }
+  .flow { width: 100%; height: auto; display: block; }
+  .flow .box { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+  .flow .box.end { fill: var(--heading); stroke: var(--heading); }
+  .flow .t { font: 600 15px "Space Grotesk", system-ui, sans-serif; fill: var(--heading); text-anchor: middle; dominant-baseline: central; }
+  .flow .t.end { fill: #fff; }
+  .flow .ln { stroke: var(--heading); stroke-width: 1.8; fill: none; }
+  .flow .loop { stroke: var(--accent); stroke-width: 2; fill: none; stroke-dasharray: 5 4; }
+  .flow .note { font: 500 13px "Space Grotesk", system-ui, sans-serif; fill: var(--muted); text-anchor: middle; }
+  .flow .note.go { fill: var(--accent); font-weight: 600; }
+  .why-card { border-left: 4px solid var(--accent); }
+
+  /* ---- question + verdict ---- */
+  #question-box { padding: 16px 24px 14px; border-bottom: 1px solid var(--line); }
+  #question { font-size: 26px; font-weight: 600; color: var(--heading); letter-spacing: -0.01em; margin-top: 2px; }
+  #verdict { display: none; margin: 0 24px; padding: 14px 20px; border-radius: 12px; background: var(--navy); color: #fff; box-shadow: var(--shadow); }
+  #verdict.show { display: block; margin-top: 16px; }
+  #verdict .big { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+  #verdict .big .h { color: #66a1ff; }
+  #verdict .small { font-size: 17px; color: #9db6da; margin-top: 2px; }
+
+  /* ---- columns ---- */
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 16px 24px 24px; }
   @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
-  section.col { padding: 14px 20px 20px; border-right: 1px solid var(--line); min-width: 0; }
-  section.col:last-child { border-right: 0; }
-  .col h2 { margin: 0 0 8px; font-size: 24px; display: flex; justify-content: space-between; gap: 12px; }
-  .clock { font-variant-numeric: tabular-nums; font-weight: 700; }
-  .phases { display: flex; gap: 6px; margin: 6px 0 12px; flex-wrap: wrap; }
-  .phase {
-    padding: 2px 12px; border: 2px solid var(--line); border-radius: 999px; color: var(--muted);
-  }
-  .phase.on { border-color: var(--fg); color: var(--fg); font-weight: 700; }
+  section.col { padding: 16px 18px 18px; border: 1px solid var(--line); border-radius: 14px; min-width: 0; box-shadow: var(--shadow); background: var(--bg); }
+  section.col#col-harness { border-top: 4px solid var(--accent); }
+  section.col#col-retrieval { border-top: 4px solid #99c0ff; }
+  .col h2 { margin: 0; font-size: 24px; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; color: var(--heading); font-weight: 600; letter-spacing: -0.01em; }
+  .col h2 .ico { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); margin-right: 8px; font-size: 20px; vertical-align: -4px; }
+  .col .tag { color: var(--muted); font-size: 16px; margin: 2px 0 10px 42px; }
+  .clock { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ink); }
+
+  /* score tiles: one square per top-10 slot */
+  .score { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 12px; margin: 4px 0 12px; border-radius: 10px; background: var(--tint-2); }
+  .tiles { display: grid; grid-template-columns: repeat(10, 22px); gap: 5px; }
+  .tile { width: 22px; height: 22px; border-radius: 5px; border: 1.5px dashed var(--line); background: transparent; transition: background .3s, border-color .3s; }
+  .tile.found { border: 1.5px solid #99c0ff; background: var(--accent-soft); }
+  .tile.hit { border: 1.5px solid var(--good); background: var(--good); }
+  .tile.miss { border: 1.5px solid #e2b4b1; background: var(--bad-soft); }
+  .score .what { font-size: 18px; font-weight: 600; }
+  .score .what.good { color: var(--good); }
+  .score .what.bad { color: var(--bad); }
+  .score .what.wait { color: var(--muted); font-weight: 500; }
+
+  .phases { display: flex; gap: 6px; margin: 6px 0 12px; flex-wrap: wrap; align-items: center; color: var(--muted); }
+  .phase { padding: 2px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 17px; }
+  .phase.on { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 600; }
   .phase.on::before { content: "▶ "; }
-  .phase.done { color: var(--fg); }
-  table.lanes { width: 100%; border-collapse: collapse; table-layout: fixed; }
-  .lanes th, .lanes td { border: 1px solid var(--line); padding: 4px 6px; vertical-align: top; }
-  .lanes th { background: var(--panel); text-align: left; font-size: 18px; }
-  .lanes th.src { width: 9.5em; }
-  .chip { display: block; font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .phase.done { color: var(--heading); border-color: #99c0ff; }
+  .loopmark { color: var(--accent); font-weight: 600; font-size: 16px; margin-left: 4px; }
+  table.lanes { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .lanes th, .lanes td { border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); padding: 4px 8px; vertical-align: top; }
+  .lanes tr > :last-child { border-right: 0; }
+  .lanes tbody tr:last-child > * { border-bottom: 0; }
+  .lanes th { background: var(--tint-2); text-align: left; font-size: 15px; font-weight: 600; color: var(--muted); }
+  .lanes th.src { width: 8.5em; }
+  .chip { display: block; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .chip::before { content: "● "; color: var(--accent); }
   .chip.err { color: var(--bad); }
   .chip.err::before { content: "✗ "; color: var(--bad); }
   .chip .n { color: var(--muted); }
   .decisions { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; min-height: 1em; }
-  .badge {
-    border: 2px solid var(--fg); border-left-width: 8px; border-radius: 6px; padding: 4px 10px;
-    font-size: 19px;
-  }
-  .badge b { text-transform: uppercase; letter-spacing: .03em; }
-  .badge.stop { border-color: var(--good); }
-  .badge.refine, .badge.broaden, .badge.switch_source { border-color: var(--warn); }
+  .badge { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 5px 12px; font-size: 17px; background: var(--bg); }
+  .badge b { text-transform: uppercase; letter-spacing: .06em; font-size: 15px; color: var(--accent); }
+  .badge.stop { border-left-color: var(--good); }
+  .badge.stop b { color: var(--good); }
+  .badge.refine, .badge.broaden, .badge.switch_source { border-left-color: var(--warn); }
   .stepsbox { margin: 8px 0 12px; }
-  ol.steps { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-  li.step { border: 2px solid var(--line); border-radius: 6px; padding: 2px 10px; color: var(--muted); }
-  li.step.done { color: var(--fg); }
-  li.step.current { border-color: var(--fg); color: var(--fg); font-weight: 700; }
-  li.step .now { text-transform: uppercase; font-size: 18px; margin-left: 4px; }
-  ul.facts { margin: 0; padding-left: 1.4em; list-style: none; }
+  ol.steps { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  li.step { border: 1px solid var(--line); border-radius: 8px; padding: 3px 12px; color: var(--muted); background: var(--bg); }
+  li.step.done { color: var(--good); border-color: #a9d8c1; background: var(--good-soft); }
+  li.step.current { border-color: var(--accent); color: var(--heading); font-weight: 600; background: var(--accent-soft); }
+  li.step .now { text-transform: uppercase; font-size: 13px; letter-spacing: .1em; margin-left: 6px; color: var(--accent); }
+  ul.facts { margin: 0; padding: 8px 12px; list-style: none; background: #fffbea; border: 1px solid #f0e2a8; border-radius: 8px; }
   ul.facts li { margin: 2px 0; }
-  .error { color: var(--bad); font-weight: 700; margin: 8px 0; }
-  ol.hits { margin: 6px 0 12px; padding-left: 1.6em; }
-  ol.hits li { margin: 3px 0; }
-  .hit-src { color: var(--muted); font-size: 18px; }
-  .rel { font-weight: 700; }
-  .gold { font-weight: 700; color: var(--good); }
-  .hits-head { display: flex; justify-content: space-between; gap: 12px; margin: 14px 0 0; font-size: 19px; }
-  .hits-head b { font-size: 21px; }
-  ol.hits li.is-gold { border-left: 6px solid var(--good); padding-left: 8px; margin-left: -14px; }
+  .error { color: var(--bad); font-weight: 600; margin: 8px 0; }
+  ol.hits { margin: 6px 0 12px; padding-left: 1.7em; }
+  ol.hits li { margin: 4px 0; }
+  ol.hits li::marker { color: var(--muted); }
+  .hit-src { color: var(--muted); font-size: 16px; }
+  .rel { font-weight: 500; font-size: 14px; color: var(--accent); margin-left: 6px; }
+  .gold { font-weight: 600; color: var(--good); font-size: 15px; margin-left: 6px; }
+  .hits-head { display: flex; justify-content: space-between; gap: 12px; margin: 16px 0 0; font-size: 15px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .hits-head b { letter-spacing: normal; text-transform: none; font-size: 17px; }
+  ol.hits li.is-gold { border-left: 4px solid var(--good); padding-left: 8px; margin-left: -12px; background: linear-gradient(90deg, var(--good-soft), transparent 60%); border-radius: 0 6px 6px 0; }
   .hit-title { font-weight: 600; }
-  .snip { display: block; color: var(--muted); font-size: 17px; line-height: 1.3; }
-  .answer {
-    border: 2px solid var(--fg); border-radius: 8px; padding: 8px 12px; margin: 12px 0 4px;
-    background: var(--panel);
-  }
-  .answer .label { display: block; color: var(--muted); font-size: 17px; }
-  .answer .text { font-size: 24px; font-weight: 700; }
-  .answer.right { border-color: var(--good); border-left-width: 10px; }
-  .answer.wrong { border-color: var(--bad); border-left-width: 10px; }
-  .answer .verdict { display: block; font-size: 19px; font-weight: 700; margin-top: 2px; }
-  .answer ol.why { margin: 6px 0 0; padding-left: 1.2em; color: var(--muted); font-size: 16px; line-height: 1.3; }
+  .snip { display: block; color: var(--muted); font-size: 15px; line-height: 1.3; }
+  .answer { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; margin: 12px 0 4px; background: var(--tint-2); }
+  .answer .label { display: block; font-size: 12px; font-weight: 600; letter-spacing: .15em; text-transform: uppercase; color: var(--accent); }
+  .answer .text { font-size: 23px; font-weight: 600; color: var(--ink); }
+  .answer.right { border-color: var(--good); background: var(--good-soft); border-left-width: 6px; }
+  .answer.wrong { border-color: var(--bad); background: var(--bad-soft); border-left-width: 6px; }
+  .answer .verdict { display: block; font-size: 17px; font-weight: 600; margin-top: 2px; }
+  .answer ol.why { margin: 6px 0 0; padding-left: 1.2em; color: var(--muted); font-size: 15px; line-height: 1.3; }
   .answer.right .verdict { color: var(--good); }
   .answer.wrong .verdict { color: var(--bad); }
   footer.metrics {
-    display: grid; grid-template-columns: repeat(5, auto); gap: 4px 16px; border-top: 2px solid var(--fg);
-    padding-top: 8px; font-variant-numeric: tabular-nums;
+    display: grid; grid-template-columns: repeat(5, auto); gap: 4px 16px; border-top: 1px solid var(--line);
+    padding-top: 10px; font-variant-numeric: tabular-nums;
   }
-  footer.metrics span { color: var(--muted); font-size: 18px; display: block; }
-  footer.metrics strong { font-size: 24px; }
+  footer.metrics span { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .15em; text-transform: uppercase; display: block; }
+  footer.metrics strong { font-size: 22px; font-weight: 600; color: var(--heading); }
   .empty { color: var(--muted); }
+  .pagefoot { padding: 8px 24px 16px; font-size: 13px; color: var(--muted); }
 </style>
 </head>
 <body>
 <header>
-  <h1>Retrieval vs Harness</h1>
+  <div class="brand">
+    <img src="egen-logo.png" alt="egen">
+    <span class="sep"></span>
+    <h1><small>Agentic search</small>One pass vs agent loop</h1>
+  </div>
   <div id="live-bar">
     <label>Question <select id="q-select"></select></label>
     <button id="run" class="primary">Run</button>
   </div>
   <div id="replay-bar">
     <input type="file" id="files" multiple accept=".jsonl,.json">
-    <button id="play" disabled>Play</button>
+    <button id="play" class="primary" disabled>Play</button>
     <button id="pause" disabled>Pause</button>
     <label>Speed <select id="speed"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option></select></label>
   </div>
@@ -120,11 +189,57 @@
   <button id="switch">Switch to replay</button>
 </header>
 <div id="banner"></div>
-<div id="question">Pick a question and press Run.</div>
+<div class="explain">
+  <div class="card">
+    <div class="eyebrow">Retrieval · one pass</div>
+    <h3>Search once. Return what it got.</h3>
+    <svg class="flow" viewBox="0 0 520 92" role="img" aria-label="Question, then search, then top 10">
+      <defs><marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#00368c"/></marker></defs>
+      <rect class="box" x="4" y="10" width="96" height="36" rx="8"/><text class="t" x="52" y="28">Question</text>
+      <line class="ln" x1="104" y1="28" x2="176" y2="28" marker-end="url(#ar1)"/>
+      <rect class="box" x="180" y="10" width="96" height="36" rx="8"/><text class="t" x="228" y="28">Search</text>
+      <line class="ln" x1="280" y1="28" x2="352" y2="28" marker-end="url(#ar1)"/>
+      <rect class="box end" x="356" y="10" width="96" height="36" rx="8"/><text class="t end" x="404" y="28">Top 10</text>
+      <text class="note" x="228" y="76">no plan · no check · no second try</text>
+    </svg>
+  </div>
+  <div class="card">
+    <div class="eyebrow">Harness · agent loop</div>
+    <h3>Plan, search, check, go again.</h3>
+    <svg class="flow" viewBox="0 0 520 92" role="img" aria-label="Question, plan, search, check, top 10; check loops back to plan">
+      <defs>
+        <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#00368c"/></marker>
+        <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#2f6be0"/></marker>
+      </defs>
+      <rect class="box" x="4" y="10" width="84" height="36" rx="8"/><text class="t" x="46" y="28">Question</text>
+      <line class="ln" x1="92" y1="28" x2="110" y2="28" marker-end="url(#ar2)"/>
+      <rect class="box" x="114" y="10" width="72" height="36" rx="8"/><text class="t" x="150" y="28">Plan</text>
+      <line class="ln" x1="190" y1="28" x2="208" y2="28" marker-end="url(#ar2)"/>
+      <rect class="box" x="212" y="10" width="80" height="36" rx="8"/><text class="t" x="252" y="28">Search</text>
+      <line class="ln" x1="296" y1="28" x2="314" y2="28" marker-end="url(#ar2)"/>
+      <rect class="box" x="318" y="10" width="76" height="36" rx="8"/><text class="t" x="356" y="28">Check</text>
+      <line class="ln" x1="398" y1="28" x2="416" y2="28" marker-end="url(#ar2)"/>
+      <rect class="box end" x="420" y="10" width="96" height="36" rx="8"/><text class="t end" x="468" y="28">Top 10</text>
+      <path class="loop" d="M356 48 V66 H150 V54" marker-end="url(#ar3)"/>
+      <text class="note go" x="253" y="84">not done yet? note what it learned, go again</text>
+    </svg>
+  </div>
+  <div class="card why-card">
+    <div class="eyebrow">Why we care</div>
+    <h3>Real questions take more than one step.</h3>
+    <p>Find a thing, <b>read a fact from it</b>, then search again <b>with that fact</b>. One pass never sees the fact, so it misses everything after step 1. The loop costs more time and money. It earns it when the question has steps.</p>
+  </div>
+</div>
+<div id="question-box">
+  <div class="eyebrow">The question</div>
+  <div id="question">Pick a question and press Run.</div>
+</div>
+<div id="verdict"></div>
 <main>
   <section class="col" id="col-retrieval"></section>
   <section class="col" id="col-harness"></section>
 </main>
+<div class="pagefoot">© 2026 Egen, Inc. · Public data: MuSiQue (CC BY 4.0), WANDS by Wayfair (MIT)</div>
 <script>
 /* <core> */
 // One source (wiki), so the swimlane rows are the tools: what the agent chose to use, per turn.
@@ -373,6 +488,50 @@ function answerHtml(a) {
   return `<div class="answer ${cls}">${label}<span class="text">${esc(a.answer)}</span>${verdict}${why}</div>`;
 }
 
+/** How a mode scored, in words: "4 of 4 needed docs found" when there are 10 or fewer gold
+ *  documents (MuSiQue), else "8 of 10 results right" (WANDS: more gold than fits in a top 10). */
+function goldLabel(g) {
+  return g.total <= 10 ? `${g.inTop} of ${g.total} needed docs found` : `${g.inTop} of 10 results right`;
+}
+
+/** Share of the best possible score: inTop / min(total, 10). */
+function goldShare(g) {
+  const best = Math.min(g.total, 10);
+  return best ? g.inTop / best : 0;
+}
+
+/** One square per top-10 slot. Empty = no result yet; "found" = a result, not yet scored (live,
+ *  before the mode finishes); "hit" / "miss" once gold is known. */
+function tilesHtml(hits, goldSet, k = 10) {
+  const top = (hits || []).slice(0, k);
+  let out = "";
+  for (let i = 0; i < k; i++) {
+    const h = top[i];
+    const cls = !h ? "tile" : !goldSet ? "tile found" : goldSet.has(h.doc_id) ? "tile hit" : "tile miss";
+    out += `<span class="${cls}"></span>`;
+  }
+  return `<span class="tiles">${out}</span>`;
+}
+
+/** "2.7×" style ratio, or "" when it can't be computed. */
+function times(a, b) {
+  if (!(a > 0) || !(b > 0)) return "";
+  const r = a / b;
+  return `${r >= 10 ? r.toFixed(0) : r.toFixed(1)}×`;
+}
+
+/** The verdict banner once both modes have a score: who found more, and what the loop cost.
+ *  r and h: {g: goldSummary, seconds, costUsd}. Empty string when either is missing. */
+function verdictHtml(r, h) {
+  if (!r || !h || !r.g || !h.g || !r.g.total) return "";
+  const rs = goldShare(r.g), hs = goldShare(h.g);
+  const lead = hs > rs ? "The agent loop found more." : hs < rs ? "One pass found more." : "A tie on the results.";
+  const t = times(h.seconds, r.seconds), c = times(h.costUsd, r.costUsd);
+  const cost = t && c ? `The loop took ${t} the time and ${c} the cost.` : "";
+  return `<div class="big">${esc(lead)} <span class="h">Harness: ${esc(goldLabel(h.g))}.</span> One pass: ${esc(goldLabel(r.g))}.</div>`
+    + (cost ? `<div class="small">${esc(cost)}</div>` : "");
+}
+
 /** The POST body for one live run: each question runs on its own corpus's profile. */
 function requestBody(q, mode) {
   return JSON.stringify({ profile: q.profile, question: q.text, mode, snapshot_k: 10, include_trace: true });
@@ -380,7 +539,31 @@ function requestBody(q, mode) {
 /* </core> */
 
 const MODES = ["retrieval", "harness"];
-const TITLES = { retrieval: "Retrieval mode (one pass)", harness: "Harness mode (full loop)" };
+const TITLES = { retrieval: "Retrieval · one pass", harness: "Harness · agent loop" };
+const ICONS = { retrieval: "→", harness: "↻" };
+const TAGS = { retrieval: "One search with the question. No plan, no check.",
+               harness: "Makes a plan, searches, checks the results, notes facts, goes again." };
+
+/** The gold set a column may show: in replay always; live only once that mode has finished
+ *  (never mid-run: no giveaway). */
+function goldFor(s) {
+  return view.replay ? (view.gold.size ? view.gold : null)
+    : s.done && s.answer && s.answer.gold ? new Set(s.answer.gold) : null;
+}
+
+/** Fill the verdict banner when both modes are done and scored. */
+function renderVerdict() {
+  const parts = MODES.map((mode) => {
+    const s = view.states[mode];
+    if (!s) return null;
+    const gs = goldFor(s);
+    if (!s.done || s.error || !gs) return null;
+    return { g: goldSummary(s.hits, [...gs]), seconds: s.metrics.seconds, costUsd: s.metrics.costUsd };
+  });
+  const html = verdictHtml(parts[0], parts[1]);
+  $("verdict").innerHTML = html;
+  $("verdict").classList.toggle("show", Boolean(html));
+}
 const view = { states: {}, started: {}, gold: new Set(), replay: false, timer: null, qid: null };
 
 const $ = (id) => document.getElementById(id);
@@ -399,7 +582,7 @@ function render(mode) {
   const phases = PHASES.map((p, i) => {
     const cls = p === s.phase ? "on" : (s.done || (phaseIdx >= 0 && i < phaseIdx)) ? "done" : "";
     return `<span class="phase ${cls}">${p}</span>`;
-  }).join(" → ");
+  }).join(" → ") + (mode === "harness" ? `<span class="loopmark">↺ until done</span>` : "");
   const rows = laneNames(s.calls).map((tool) => {
     const cells = turns.map((t) => {
       const chips = s.calls.filter((c) => c.name === tool && c.turn === t).map((c) => {
@@ -414,30 +597,36 @@ function render(mode) {
   const head = turns.map((t) => `<th>turn ${t + 1}</th>`).join("");
   const decisions = s.decisions.map((d) =>
     `<div class="badge ${esc(d.action)}">after turn ${d.turn + 1}: <b>${esc(d.action.replace("_", " "))}</b>${d.note ? " — " + esc(d.note) : ""}</div>`).join("");
-  // Gold is shown in replay, and live once this mode has finished (never mid-run: no giveaway).
-  const goldSet = view.replay ? view.gold
-    : s.done && s.answer && s.answer.gold ? new Set(s.answer.gold) : null;
+  const goldSet = goldFor(s);
   const top = s.hits.slice(0, 10);
   const hits = top.map((h) => {
     const isGold = goldSet && goldSet.has(h.doc_id);
     const rel = h.judged && h.p_relevant != null && h.p_relevant >= 0.5 ? ` <span class="rel">✓ judged relevant</span>` : "";
-    const gold = isGold ? ` <span class="gold">★ gold</span>` : "";
+    const gold = isGold ? ` <span class="gold">★ right</span>` : "";
     const name = h.title ? `<span class="hit-title">${esc(h.title)}</span>` : `<span class="hit-title">${esc(h.doc_id)}</span>`;
     const snip = snippetText(h);
     return `<li class="${isGold ? "is-gold" : ""}" title="${esc(h.doc_id)}">${name}${gold}${rel}${snip ? `<span class="snip">${esc(snip)}</span>` : ""}</li>`;
   }).join("");
-  let hitsHead = `<span>Top ${Math.min(10, top.length) || 10} documents${s.done ? "" : " so far"}</span>`;
+  let hitsHead = `<span>Top ${Math.min(10, top.length) || 10} results${s.done ? "" : " so far"}</span>`;
+  let scoreWhat = s.done ? "" : top.length ? "searching…" : "waiting…";
+  let scoreCls = "wait";
   if (goldSet && goldSet.size) {
     const g = goldSummary(top, [...goldSet]);
-    hitsHead += `<b class="gold">★ ${g.inTop} of ${g.total} gold in top 10</b>`;
+    hitsHead += `<b class="gold">★ ${esc(goldLabel(g))}</b>`;
+    scoreWhat = goldLabel(g);
+    scoreCls = goldShare(g) >= 0.5 ? "good" : "bad";
+  } else if (s.done) {
+    scoreWhat = "scoring…";
   }
   const m = s.metrics;
   const missing = view.replay && player.runs && !player.runs[mode].length
     ? `<div class="empty">No saved file for this mode.</div>` : "";
   el.innerHTML = `
-    <h2><span>${TITLES[mode]}</span><span class="clock" id="clock-${mode}"></span></h2>
+    <h2><span><span class="ico">${ICONS[mode]}</span>${TITLES[mode]}</span><span class="clock" id="clock-${mode}"></span></h2>
+    <div class="tag">${TAGS[mode]}</div>
     <div class="error" id="overtime-${mode}" hidden>⚠ Past 60 s. Switch to replay?</div>
     ${missing}
+    <div class="score">${tilesHtml(top, goldSet)}<span class="what ${scoreCls}">${esc(scoreWhat)}</span></div>
     <div class="phases">${phases}</div>
     <table class="lanes"><thead><tr><th class="src">tool</th>${head}</tr></thead><tbody>${rows}</tbody></table>
     <div class="decisions">${decisions}</div>
@@ -454,6 +643,7 @@ function render(mode) {
       <div><span>stop</span><strong>${esc(m.stopReason || (s.done ? "" : "running"))}</strong></div>
     </footer>`;
   renderClock(mode);
+  renderVerdict();
 }
 
 /** Update only the clock and the overtime cue, so ticks don't rebuild the column (and its
@@ -601,7 +791,7 @@ async function loadFiles(fileList) {
     view.gold = new Set((got.meta && Array.isArray(got.meta.gold) && got.meta.gold) || []);
     view.qid = (got.meta && got.meta.question_id) || null;
     $("question").textContent = questionText(got.meta, [...player.runs.harness, ...player.runs.retrieval]);
-    banner(`Replay: a saved run, played back with its original timing.${view.gold.size ? " ★ marks the gold documents." : ""}`);
+    banner(`Replay: a saved run, played back with its original timing.${view.gold.size ? " ★ marks the right results." : ""}`);
     rewind();
     $("play").textContent = "Play";
     $("play").disabled = false;

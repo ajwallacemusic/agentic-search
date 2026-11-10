@@ -9,8 +9,8 @@ const html = readFileSync(new URL("../viewer/index.html", import.meta.url), "utf
 const core = html.split("/* <core> */")[1].split("/* </core> */")[0];
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(core + "\n;globalThis.core = { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml, goldSummary, snippetText, answerHtml };", ctx);
-const { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml, goldSummary, snippetText, answerHtml } = ctx.core;
+vm.runInContext(core + "\n;globalThis.core = { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml, goldSummary, snippetText, answerHtml, goldLabel, goldShare, tilesHtml, verdictHtml };", ctx);
+const { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml, goldSummary, snippetText, answerHtml, goldLabel, goldShare, tilesHtml, verdictHtml } = ctx.core;
 
 const ev = (type, extra = {}) => ({ type, search_id: "s", seq: 0, turn: 0, at_ms: 0, ...extra });
 const frame = (e) => `id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
@@ -300,4 +300,33 @@ test("answerHtml lists the reader's steps without their own numbering", () => {
                             steps: ["Step 1: from South Carolina [2]", "2. Columbia is the capital [3]"] });
   assert.ok(html.includes('<ol class="why">'));
   assert.ok(html.includes("<li>from South Carolina [2]</li>") && html.includes("<li>Columbia is the capital [3]</li>"));
+});
+
+test("goldLabel counts needed docs for small gold sets and right results for big ones", () => {
+  assert.equal(goldLabel({ inTop: 4, total: 4 }), "4 of 4 needed docs found");
+  assert.equal(goldLabel({ inTop: 8, total: 34 }), "8 of 10 results right");
+  assert.equal(goldShare({ inTop: 2, total: 4 }), 0.5);
+  assert.equal(goldShare({ inTop: 7, total: 34 }), 0.7);
+  assert.equal(goldShare({ inTop: 0, total: 0 }), 0);
+});
+
+test("tilesHtml: empty, unscored, hit and miss squares", () => {
+  const hits = [{ doc_id: "a" }, { doc_id: "b" }];
+  const unscored = tilesHtml(hits, null);
+  assert.equal((unscored.match(/tile found/g) || []).length, 2);
+  assert.equal((unscored.match(/class="tile"/g) || []).length, 8);
+  const scored = tilesHtml(hits, new Set(["b"]));
+  assert.equal((scored.match(/tile hit/g) || []).length, 1);
+  assert.equal((scored.match(/tile miss/g) || []).length, 1);
+});
+
+test("verdictHtml names the winner and the cost, and waits for both modes", () => {
+  const r = { g: { inTop: 0, total: 34 }, seconds: 16, costUsd: 0.02 };
+  const h = { g: { inTop: 10, total: 34 }, seconds: 44, costUsd: 0.06 };
+  const html = verdictHtml(r, h);
+  assert.ok(html.includes("The agent loop found more."));
+  assert.ok(html.includes("Harness: 10 of 10 results right.") && html.includes("One pass: 0 of 10 results right."));
+  assert.ok(html.includes("2.8× the time") && html.includes("3.0× the cost"));
+  assert.equal(verdictHtml(null, h), "");
+  assert.ok(verdictHtml(h, h).includes("A tie"));
 });
