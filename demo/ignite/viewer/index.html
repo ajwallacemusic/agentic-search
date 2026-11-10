@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Retrieval vs Harness</title>
 <link rel="icon" href="data:,">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
+  /* Space Grotesk (SIL Open Font License), bundled so the demo needs no internet. */
+  @font-face { font-family: "Space Grotesk"; src: url("space-grotesk.woff2") format("woff2");
+               font-weight: 300 700; font-display: swap; }
   /* Egen brand tokens (design-deck skill, references/egen-brand.md). Light identity; navy is the
      header accent only. Green/red are kept for right/wrong, where meaning beats brand. */
   :root {
@@ -100,6 +100,7 @@
   .tile { width: 22px; height: 22px; border-radius: 5px; border: 1.5px dashed var(--line); background: transparent; transition: background .3s, border-color .3s; }
   .tile.found { border: 1.5px solid #99c0ff; background: var(--accent-soft); }
   .tile.hit { border: 1.5px solid var(--good); background: var(--good); }
+  .tile.other { border: 1.5px solid var(--line); background: #f3f5f9; }
   .tile.miss { border: 1.5px solid #e2b4b1; background: var(--bad-soft); }
   .score .what { font-size: 18px; font-weight: 600; }
   .score .what.good { color: var(--good); }
@@ -501,13 +502,16 @@ function goldShare(g) {
 }
 
 /** One square per top-10 slot. Empty = no result yet; "found" = a result, not yet scored (live,
- *  before the mode finishes); "hit" / "miss" once gold is known. */
+ *  before the mode finishes); "hit" / "miss" (or "other", when fewer than k are gold) once gold
+ *  is known. */
 function tilesHtml(hits, goldSet, k = 10) {
   const top = (hits || []).slice(0, k);
   let out = "";
   for (let i = 0; i < k; i++) {
     const h = top[i];
-    const cls = !h ? "tile" : !goldSet ? "tile found" : goldSet.has(h.doc_id) ? "tile hit" : "tile miss";
+    // Fewer right answers than slots (MuSiQue: 2-4): the other slots are not failures, so grey.
+    const miss = goldSet && goldSet.size < k ? "tile other" : "tile miss";
+    const cls = !h ? "tile" : !goldSet ? "tile found" : goldSet.has(h.doc_id) ? "tile hit" : miss;
     out += `<span class="${cls}"></span>`;
   }
   return `<span class="tiles">${out}</span>`;

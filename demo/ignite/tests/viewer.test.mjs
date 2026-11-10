@@ -315,9 +315,13 @@ test("tilesHtml: empty, unscored, hit and miss squares", () => {
   const unscored = tilesHtml(hits, null);
   assert.equal((unscored.match(/tile found/g) || []).length, 2);
   assert.equal((unscored.match(/class="tile"/g) || []).length, 8);
-  const scored = tilesHtml(hits, new Set(["b"]));
+  const many = new Set(["b", ...Array.from({ length: 12 }, (_, i) => `g${i}`)]);
+  const scored = tilesHtml(hits, many);
   assert.equal((scored.match(/tile hit/g) || []).length, 1);
   assert.equal((scored.match(/tile miss/g) || []).length, 1);
+  const few = tilesHtml(hits, new Set(["b", "c"]));
+  assert.equal((few.match(/tile other/g) || []).length, 1);
+  assert.ok(!few.includes("tile miss"));
 });
 
 test("verdictHtml names the winner and the cost, and waits for both modes", () => {
