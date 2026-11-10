@@ -149,6 +149,23 @@
   .hits-head b { letter-spacing: normal; text-transform: none; font-size: 17px; }
   ol.hits li.is-gold { border-left: 4px solid var(--good); padding-left: 8px; margin-left: -12px; background: linear-gradient(90deg, var(--good-soft), transparent 60%); border-radius: 0 6px 6px 0; }
   .hit-title { font-weight: 600; }
+  /* check it yourself: each result opens to show its text and why it is (not) right */
+  #rule { display: none; margin-top: 8px; padding: 8px 12px; border-radius: 10px; background: var(--good-soft); color: var(--ink); font-size: 16px; line-height: 1.35; }
+  #rule.show { display: block; }
+  #rule .hint { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; }
+  ol.hits details > summary { cursor: pointer; list-style: none; }
+  ol.hits details > summary::-webkit-details-marker { display: none; }
+  ol.hits details > summary .open-why { font-size: 13px; color: var(--accent); margin-left: 6px; white-space: nowrap; }
+  ol.hits details[open] > summary .open-why::after { content: " ▾"; }
+  .proof { margin: 6px 0 10px; padding: 8px 12px; border-radius: 8px; border-left: 4px solid var(--line); background: var(--tint-2); font-size: 15px; }
+  .proof .why { font-weight: 600; margin-bottom: 6px; }
+  .proof.v-right { border-left-color: var(--good); } .proof.v-right .why { color: var(--good); }
+  .proof.v-wrong { border-left-color: var(--bad); } .proof.v-wrong .why { color: var(--bad); }
+  .proof.v-partial .why, .proof.v-unrated .why { color: var(--warn); }
+  .proof .doc { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); line-height: 1.4; font-size: 14px; }
+  .proof mark { background: #fff1a8; color: inherit; border-radius: 3px; padding: 0 2px; }
+  .coverage { font-size: 15px; margin: 4px 0 0; color: var(--muted); }
+  .coverage .zero { color: var(--bad); font-weight: 600; }
   .snip { display: block; color: var(--muted); font-size: 15px; line-height: 1.3; }
   .answer { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; margin: 12px 0 4px; background: var(--tint-2); }
   .answer .label { display: block; font-size: 12px; font-weight: 600; letter-spacing: .15em; text-transform: uppercase; color: var(--accent); }
@@ -238,6 +255,7 @@
 <div id="question-box">
   <div class="eyebrow">The question</div>
   <div id="question">Pick a question and press Run.</div>
+  <div id="rule"></div>
 </div>
 <div id="verdict"></div>
 <main>
@@ -493,6 +511,39 @@ function answerHtml(a) {
   return `<div class="answer ${cls}">${label}<span class="text">${esc(a.answer)}</span>${verdict}${why}</div>`;
 }
 
+/** `text`, HTML-escaped, with each of `marks` (any case, any spacing) wrapped in <mark>. */
+function markText(text, marks) {
+  const t = String(text || "");
+  const pats = (marks || []).filter((m) => m && String(m).trim()).map((m) =>
+    String(m).trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s*"));
+  if (!pats.length) return esc(t);
+  const re = new RegExp(pats.join("|"), "gi");
+  let out = "", at = 0;
+  for (const m of t.matchAll(re)) {
+    if (!m[0]) continue;
+    out += esc(t.slice(at, m.index)) + `<mark>${esc(m[0])}</mark>`;
+    at = m.index + m[0].length;
+  }
+  return out + esc(t.slice(at));
+}
+
+const PROOF_ICON = { right: "★ Right.", partial: "◐ Not counted.", unrated: "? Not counted.", wrong: "✗ Not right." };
+
+/** The opened part of a result: why it is (not) right, then the document's own text. */
+function proofHtml(c) {
+  if (!c) return "";
+  const v = PROOF_ICON[c.verdict] ? c.verdict : "wrong";
+  return `<div class="proof v-${v}"><div class="why">${PROOF_ICON[v]} ${esc(c.why)}</div>`
+    + `<div class="doc">${markText(c.text, c.marks)}</div></div>`;
+}
+
+/** Right results per target type (WANDS match): "Bathroom Sink Faucets 9 · Towel Bars 0". */
+function coverageHtml(cov) {
+  if (!Array.isArray(cov) || cov.length < 2) return "";
+  return `<div class="coverage">Right, by type: ${cov.map(([t, n]) =>
+    `<span class="${n ? "" : "zero"}">${esc(t)}: ${n}</span>`).join(" · ")}</div>`;
+}
+
 /** How a mode scored, in words: "4 of 4 needed docs found" when there are 10 or fewer gold
  *  documents (MuSiQue), else "8 of 10 results right" (WANDS: more gold than fits in a top 10). */
 function goldLabel(g) {
@@ -560,6 +611,12 @@ function goldFor(s) {
 }
 
 /** Fill the verdict banner when both modes are done and scored. */
+function renderRule() {
+  const a = MODES.map((m) => view.states[m] && view.states[m].answer).find((x) => x && x.rule);
+  $("rule").innerHTML = a ? `${esc(a.rule)}<span class="hint">Don't trust the ★. Click any result to see its text and why it counts or not.</span>` : "";
+  $("rule").classList.toggle("show", Boolean(a));
+}
+
 function renderVerdict() {
   const parts = MODES.map((mode) => {
     const s = view.states[mode];
@@ -608,13 +665,19 @@ function render(mode) {
     `<div class="badge ${esc(d.action)}">after turn ${d.turn + 1}: <b>${esc(d.action.replace("_", " "))}</b>${d.note ? " — " + esc(d.note) : ""}</div>`).join("");
   const goldSet = goldFor(s);
   const top = s.hits.slice(0, 10);
+  const checks = s.answer && s.answer.checks;
   const hits = top.map((h) => {
     const isGold = goldSet && goldSet.has(h.doc_id);
     const rel = h.judged && h.p_relevant != null && h.p_relevant >= 0.5 ? ` <span class="rel">✓ judged relevant</span>` : "";
     const gold = isGold ? ` <span class="gold">★ right</span>` : "";
     const name = h.title ? `<span class="hit-title">${esc(h.title)}</span>` : `<span class="hit-title">${esc(h.doc_id)}</span>`;
     const snip = snippetText(h);
-    return `<li class="${isGold ? "is-gold" : ""}" title="${esc(h.doc_id)}">${name}${gold}${rel}${snip ? `<span class="snip">${esc(snip)}</span>` : ""}</li>`;
+    const row = `${name}${gold}${rel}${snip ? `<span class="snip">${esc(snip)}</span>` : ""}`;
+    const check = checks && checks[h.key || `${h.source}:${h.doc_id}`];
+    const body = check
+      ? `<details><summary>${row.replace("</span>", `</span><span class="open-why">check why</span>`)}</summary>${proofHtml(check)}</details>`
+      : row;
+    return `<li class="${isGold ? "is-gold" : ""}" title="${esc(h.doc_id)}">${body}</li>`;
   }).join("");
   let hitsHead = `<span>Top ${Math.min(10, top.length) || 10} results${s.done ? "" : " so far"}</span>`;
   let scoreWhat = s.done ? "" : top.length ? "searching…" : "waiting…";
@@ -643,6 +706,7 @@ function render(mode) {
     ${s.error ? `<div class="error">✗ Search failed: ${esc(s.error)}</div>` : ""}
     ${answerHtml(s.answer)}
     <div class="hits-head">${hitsHead}</div>
+    ${coverageHtml(s.answer && s.answer.coverage)}
     <ol class="hits">${hits || `<li class="empty">no results yet</li>`}</ol>
     <footer class="metrics">
       <div><span>turns</span><strong>${m.turns}</strong></div>
@@ -653,6 +717,7 @@ function render(mode) {
     </footer>`;
   renderClock(mode);
   renderVerdict();
+  renderRule();
 }
 
 /** Update only the clock and the overtime cue, so ticks don't rebuild the column (and its

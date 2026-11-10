@@ -22,6 +22,7 @@ from agentic_search.server import create_app
 from agentic_search.server.config import AuthConfig, ServiceConfig
 from demo.ignite.answer import answer_from, is_correct
 from demo.ignite.build import build_demo_harness, load_config, make_client
+from demo.ignite.check import Proof, load_proofs
 from demo.ignite.corpus import Question, load_demo
 
 VIEWER_DIR = Path(__file__).parent / "viewer"
@@ -43,7 +44,7 @@ def doc_texts(documents: dict[str, list[Document]]) -> dict[str, tuple[str, str]
 
 def create_demo_app(profiles: dict[str, Harness], questions: dict[str, Question], *,
                     viewer_dir: Path = VIEWER_DIR, docs: dict[str, tuple[str, str]] | None = None,
-                    answer_client: Any = None) -> FastAPI:
+                    answer_client: Any = None, proofs: dict[str, Proof] | None = None) -> FastAPI:
     app = create_app(ServiceConfig(auth=AuthConfig(type="none"), default_profile="ignite"),
                      profiles)
     texts = docs or {}
@@ -62,6 +63,7 @@ def create_demo_app(profiles: dict[str, Harness], questions: dict[str, Question]
             raise HTTPException(404, f"unknown question {req.id!r}")
         out: dict[str, Any] = {"gold": q.gold, "expected": q.answers[0] if q.answers else None,
                                "answer": None, "steps": [], "correct": None, "error": None}
+        out.update(_proof(proofs or {}, q.id, req.keys[:10], texts))
         picked = [texts[k] for k in req.keys[:10] if k in texts]
         if answer_client is None:
             out["error"] = "no answer model configured"
@@ -76,6 +78,25 @@ def create_demo_app(profiles: dict[str, Harness], questions: dict[str, Question]
 
     app.mount("/", StaticFiles(directory=viewer_dir, html=True), name="viewer")
     return app
+
+
+def _proof(proofs: dict[str, Proof], qid: str, keys: list[str],
+           texts: dict[str, tuple[str, str]]) -> dict[str, Any]:
+    """The rule behind the ★ marks, and per result its full text plus why it is (not) right."""
+    proof = proofs.get(qid)
+    if proof is None:
+        return {"rule": None, "checks": {}, "coverage": None}
+    checks = {}
+    for k in keys:
+        if k not in texts:  # e.g. an aggregate tool's count row: not a document at all
+            checks[k] = {"verdict": "wrong", "why": "A tool's summary row, not a document. It "
+                         "does not count.", "marks": [], "target": None, "title": "", "text": ""}
+            continue
+        title, text = texts[k]
+        checks[k] = {**proof.check(k.split(":", 1)[-1]), "title": title, "text": text[:4000]}
+    coverage = getattr(proof, "coverage", None)
+    return {"rule": proof.rule(), "checks": checks,
+            "coverage": coverage([k.split(":", 1)[-1] for k in keys]) if coverage else None}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -102,7 +123,8 @@ def main() -> None:
     print(f"Ignite demo: http://{HOST}:{args.port}/  (profiles: {', '.join(profiles)})")
     # The answer box: one reader model, the same for both modes (config `answer`, else the judge).
     reader = make_client(cfg.get("answer") or cfg["judge"])
-    app = create_demo_app(profiles, questions, docs=docs, answer_client=reader)
+    app = create_demo_app(profiles, questions, docs=docs, answer_client=reader,
+                          proofs=load_proofs(questions))
     uvicorn.run(app, host=HOST, port=args.port)
 
 

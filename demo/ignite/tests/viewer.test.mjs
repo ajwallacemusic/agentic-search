@@ -9,8 +9,8 @@ const html = readFileSync(new URL("../viewer/index.html", import.meta.url), "utf
 const core = html.split("/* <core> */")[1].split("/* </core> */")[0];
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(core + "\n;globalThis.core = { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml, goldSummary, snippetText, answerHtml, goldLabel, goldShare, tilesHtml, verdictHtml };", ctx);
-const { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml, goldSummary, snippetText, answerHtml, goldLabel, goldShare, tilesHtml, verdictHtml } = ctx.core;
+vm.runInContext(core + "\n;globalThis.core = { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml, goldSummary, snippetText, answerHtml, goldLabel, goldShare, tilesHtml, verdictHtml, markText, proofHtml, coverageHtml };", ctx);
+const { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml, goldSummary, snippetText, answerHtml, goldLabel, goldShare, tilesHtml, verdictHtml, markText, proofHtml, coverageHtml } = ctx.core;
 
 const ev = (type, extra = {}) => ({ type, search_id: "s", seq: 0, turn: 0, at_ms: 0, ...extra });
 const frame = (e) => `id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
@@ -333,4 +333,24 @@ test("verdictHtml names the winner and the cost, and waits for both modes", () =
   assert.ok(html.includes("2.8× the time") && html.includes("3.0× the cost"));
   assert.equal(verdictHtml(null, h), "");
   assert.ok(verdictHtml(h, h).includes("A tie"));
+});
+
+test("markText escapes the text and marks each phrase, any case and spacing", () => {
+  const html = markText("Style :  Farmhouse / Country <b>|color : gray", ["style : farmhouse / country", "(x)"]);
+  assert.equal(html, "<mark>Style :  Farmhouse / Country</mark> &lt;b&gt;|color : gray");
+  assert.equal(markText("a < b", []), "a &lt; b");
+});
+
+test("proofHtml says why, then shows the document text", () => {
+  const html = proofHtml({ verdict: "right", why: "Catalogue: type Faucets ✓", text: "style : modern", marks: ["style : modern"] });
+  assert.ok(html.includes('class="proof v-right"') && html.includes("★ Right.") && html.includes("<mark>style : modern</mark>"));
+  assert.ok(proofHtml({ verdict: "odd", why: "x", text: "" }).includes("v-wrong"));
+  assert.equal(proofHtml(null), "");
+});
+
+test("coverageHtml lists right results per type and flags a type with none", () => {
+  const html = coverageHtml([["Bathroom Sink Faucets", 9], ["Towel Bars", 0]]);
+  assert.ok(html.includes("Bathroom Sink Faucets: 9") && html.includes('<span class="zero">Towel Bars: 0</span>'));
+  assert.equal(coverageHtml([["One", 3]]), "");
+  assert.equal(coverageHtml(null), "");
 });
