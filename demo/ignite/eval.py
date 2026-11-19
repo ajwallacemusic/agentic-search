@@ -12,6 +12,7 @@ from agentic_search.core.types import Document, Query
 from agentic_search.eval.datasets import BeirDataset
 from agentic_search.eval.runner import EvalReport, run_eval
 from agentic_search.models.base import PlannerView, PlanResult, ToolCall, ToolSpec
+from demo.ignite.swarm import Swarm
 
 
 class AllSourcesBM25Driver:
@@ -47,7 +48,7 @@ class TurnRecorder:
     """Passes `search` through to a harness and records each result's turn count, which the
     eval runner's per-query rows do not keep."""
 
-    def __init__(self, harness: Harness):
+    def __init__(self, harness: Harness | Swarm):
         self.harness = harness
         self.turns: dict[str, int] = {}
         self.top10: dict[str, list[str]] = {}
@@ -70,10 +71,11 @@ def _precision_at_10(top10: list[str], qrels: dict[str, int]) -> float:
     return sum(qrels.get(doc_id, 0) > 0 for doc_id in top10[:10]) / 10
 
 
-async def evaluate_groups(modes: list[str], harness_for: Callable[[str], Harness],
+async def evaluate_groups(modes: list[str], harness_for: Callable[[str], Harness | Swarm],
                           dataset: BeirDataset, groups: dict[str, list[str]], *,
                           name: str) -> dict[tuple[str, str], KindReport]:
-    """Run each mode over each group of query ids; a fresh harness per mode."""
+    """Run each mode over each group of query ids; a fresh harness per mode. The swarm runs one
+    query at a time: its agents already run in parallel, and 8 at once overload the shared model."""
     out: dict[tuple[str, str], KindReport] = {}
     for mode in modes:
         harness = harness_for(mode)
@@ -83,7 +85,7 @@ async def evaluate_groups(modes: list[str], harness_for: Callable[[str], Harness
                 recorder = TurnRecorder(harness)
                 report = await run_eval(recorder, dataset,  # type: ignore[arg-type]
                                         name=f"{name}/{mode}/{group}", query_ids=qids, k=10,
-                                        recall_k=10, concurrency=2,
+                                        recall_k=10, concurrency=1 if mode == "swarm" else 2,
                                         mode=run_mode)  # type: ignore[arg-type]
                 turns = [recorder.turns.get(dataset.queries[r.query_id], 0) for r in report.runs]
                 precision = [_precision_at_10(recorder.top10.get(dataset.queries[r.query_id], []),

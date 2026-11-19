@@ -1,4 +1,5 @@
-"""Score bm25, retrieval and harness modes on a public dataset sample; write results-<name>.md.
+"""Score bm25, retrieval, harness and swarm modes on a public dataset sample; write
+results-<name>.md.
 
 Run: uv run python -m demo.ignite.public.eval_public --dataset musique|wands|wands-match
 """
@@ -12,11 +13,12 @@ from typing import Any, Callable
 
 from agentic_search.core.harness import Harness
 from agentic_search.eval.runner import EvalReport
-from demo.ignite.build import build_harness_for, load_config
+from demo.ignite.build import build_demo_swarm, build_harness_for, load_config
 from demo.ignite.eval import KindReport, bm25_harness_for, evaluate_groups, results_table
 from demo.ignite.public.datasets import PublicSample, sample_musique, sample_wands
 from demo.ignite.public.fetch import FILES, fetch, sha256_of
 from demo.ignite.public.wands_match import LABELS_PATH, MATCH_PATH, sample_wands_match
+from demo.ignite.swarm import Swarm
 
 RESULTS_DIR = Path(__file__).parent.parent
 
@@ -39,14 +41,18 @@ ABOUT = {
 }
 
 
-def _harness_for(sample: PublicSample) -> Callable[[str], Harness]:
+def _harness_for(sample: PublicSample) -> Callable[[str], Harness | Swarm]:
     docs = {sample.source: sample.documents}
     descriptions = {sample.source: sample.description}
 
     def harness_for(mode: str) -> Harness:
         if mode == "bm25":
             return bm25_harness_for(docs, descriptions)
-        return build_harness_for(load_config(), docs, descriptions)
+        cfg = load_config()
+        harness = build_harness_for(cfg, docs, descriptions)
+        if mode == "swarm":
+            return build_demo_swarm(cfg, harness, descriptions)
+        return harness
     return harness_for
 
 
@@ -70,7 +76,7 @@ def _with_all(reports: dict[tuple[str, str], KindReport],
 
 async def write_results(sample: PublicSample, modes: list[str], out: Path, *,
                         settings: dict[str, Any], hashes: dict[str, str],
-                        harness_for: Callable[[str], Harness] | None = None) -> str:
+                        harness_for: Callable[[str], Harness | Swarm] | None = None) -> str:
     reports = await evaluate_groups(modes, harness_for or _harness_for(sample), sample.to_beir(),
                                     sample.groups, name=sample.name)
     reports = _with_all(reports, sample.groups)
@@ -84,7 +90,10 @@ async def write_results(sample: PublicSample, modes: list[str], out: Path, *,
              "Source files (SHA-256): " + ", ".join(f"`{n}` {h}" for n, h in hashes.items()), ""]
     lines += results_table(reports, titles)
     lines += ["`bm25`: one BM25 search with the question text, no model. `retrieval` and `harness` "
-              "use the same planner, judge and settings as the Ignite demo (`config.yaml`).", "",
+              "use the same planner, judge and settings as the Ignite demo (`config.yaml`). "
+              "`swarm`: one planner call splits the question; up to 4 harness agents run at the "
+              "same time on the parts with the harness budget divided between them; RRF merges "
+              "their lists.", "",
               "One run per query. Model runs vary, so treat differences of a few points as noise.",
               ""]
     text = "\n".join(lines)
@@ -92,14 +101,18 @@ async def write_results(sample: PublicSample, modes: list[str], out: Path, *,
     return text
 
 
-async def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--dataset", choices=[*sorted(FILES), "wands-match"], required=True)
     p.add_argument("--n", type=int, help="musique: questions per hop count (20); wands: queries (60)")
     p.add_argument("--corpus-size", type=int, default=5000, help="musique only")
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--modes", default="bm25,retrieval,harness")
-    args = p.parse_args()
+    return p
+
+
+async def main() -> None:
+    args = build_parser().parse_args()
     source = "wands" if args.dataset == "wands-match" else args.dataset
     folder = fetch(source)
     hashes = {name: sha256_of(folder / name) for name in FILES[source]}

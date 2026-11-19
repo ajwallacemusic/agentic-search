@@ -70,3 +70,21 @@ async def test_summary_table_has_both_modes():
             for m in ("retrieval", "harness")]
     table = summary_table(rows)
     assert "retrieval" in table and "harness" in table and "gold" in table
+
+
+async def test_side_by_side_saves_a_swarm_file(tmp_path, monkeypatch):
+    from demo.ignite import run_side_by_side
+    from demo.ignite.run_side_by_side import run_swarm
+    from demo.ignite.tests.test_swarm import make_swarm
+    monkeypatch.setattr(run_side_by_side, "RUNS_DIR", tmp_path)
+    out = save_path(HERO.id, "swarm", "20261119-1200")
+    lines: list[str] = []
+    s = await run_swarm(make_swarm(subs=["part a", "part b"]), HERO, save_to=out,
+                        print_fn=lines.append)
+    assert out.parent == tmp_path and out.name == "20261119-1200-hero-swarm.jsonl"
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    assert rows[0]["type"] == "swarm_started" and rows[-1]["type"] == "swarm_finished"
+    assert any(r["type"] == "agent_event" for r in rows)
+    assert s.mode == "swarm" and s.tool_calls >= 2 and s.gold_total == 2
+    assert any("split" in line and "part a" in line for line in lines)
+    assert "swarm" in summary_table([s])

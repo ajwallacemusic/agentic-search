@@ -40,3 +40,10 @@ async def test_all_row_pools_precision(tmp_path):
     pooled = _with_all(reports, sample.groups)[("bm25", "all")]
     assert pooled.precision == [p for g in sample.groups for p in reports[("bm25", g)].precision]
     assert len(pooled.precision) == 6
+
+
+def test_eval_public_accepts_swarm_mode():
+    from demo.ignite.public.eval_public import build_parser
+    args = build_parser().parse_args(["--dataset", "musique", "--modes", "harness,swarm"])
+    assert args.modes == "harness,swarm"
+

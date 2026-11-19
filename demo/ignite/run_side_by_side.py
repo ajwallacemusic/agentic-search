@@ -1,12 +1,13 @@
-"""Run one demo question in retrieval mode, then harness mode, and compare.
+"""Run one demo question in retrieval, harness and swarm modes, and compare.
 
-Run: uv run python -m demo.ignite.run_side_by_side --question hero [--controller typesafe] [--save]
+Run: uv run python -m demo.ignite.run_side_by_side --question hero [--controller typesafe] [--modes retrieval,harness,swarm] [--save]
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import time
 from datetime import datetime
@@ -28,8 +29,9 @@ from agentic_search.events import (
     ToolCallStarted,
     UsageUpdated,
 )
-from demo.ignite.build import build_demo_harness, load_config
+from demo.ignite.build import build_demo_harness, build_demo_swarm, load_config
 from demo.ignite.corpus import Question, corpus_of, load_demo
+from demo.ignite.swarm import Swarm
 
 RUNS_DIR = Path(__file__).parent / "runs"
 GOLD_K = 10
@@ -118,6 +120,55 @@ async def run_one(harness: Harness, question: Question, mode: Mode, *, save_to: 
                       gold_recall=gold_recall(doc_ids, question.gold), gold_total=len(question.gold))
 
 
+def _swarm_line(ev: dict[str, Any]) -> str | None:
+    """One trace line for a swarm wire event; agent events are saved but not shown."""
+    if ev["type"] == "swarm_split":
+        tag = " (fallback)" if ev["fallback"] else ""
+        return f"  split{tag}: " + " | ".join(ev["sub_questions"])
+    if ev["type"] == "swarm_failed":
+        return f"  ✗ swarm failed: {ev['error_type']}: {ev['message']}"
+    if ev["type"] == "swarm_finished":
+        return f"  agents: {', '.join(ev['agent_status'])}"
+    return None
+
+
+async def run_swarm(swarm: Swarm, question: Question, *, save_to: Path | None,
+                    print_fn: Callable[[str], None] = print) -> RunSummary:
+    """Stream one swarm search, printing the split and writing each wire event as a JSON line."""
+    out = save_to.open("w", encoding="utf-8") if save_to is not None else None
+    t0 = time.perf_counter()
+    finished, failed = None, None
+    try:
+        async with contextlib.aclosing(swarm.stream(question.text, snapshot_k=10)) as events:
+            async for ev in events:
+                if out is not None:
+                    out.write(json.dumps(ev) + "\n")
+                    out.flush()
+                line = _swarm_line(ev)
+                if line is not None:
+                    print_fn(line)
+                if ev["type"] == "swarm_finished":
+                    finished = ev
+                elif ev["type"] == "swarm_failed":
+                    failed = ev
+    finally:
+        if out is not None:
+            out.close()
+    seconds = time.perf_counter() - t0
+    if finished is not None:
+        usage = finished["usage"]
+        doc_ids = [h["doc_id"] for h in finished["hits"]]
+        top5 = [h["key"] for h in finished["hits"][:5]]
+        stop = "swarm: " + ", ".join(finished["agent_status"])
+        turns, calls, cost = usage["turns"], usage["tool_calls"], usage["cost_usd"]
+    else:
+        doc_ids, top5, turns, calls, cost = [], [], 0, 0, 0.0
+        stop = f"failed: {failed['error_type']}" if failed is not None else "failed: no result"
+    return RunSummary(mode="swarm", turns=turns, tool_calls=calls, seconds=seconds, cost_usd=cost,
+                      stop_reason=stop, top5=top5, gold_recall=gold_recall(doc_ids, question.gold),
+                      gold_total=len(question.gold))
+
+
 def save_path(question_id: str, mode: str, stamp: str) -> Path:
     return RUNS_DIR / f"{stamp}-{question_id}-{mode}.jsonl"
 
@@ -148,7 +199,13 @@ async def main() -> None:
     p.add_argument("--question", default="hero")
     p.add_argument("--controller", choices=["heuristic", "typesafe"], default="heuristic")
     p.add_argument("--save", action="store_true", help="write every event to runs/")
+    p.add_argument("--modes", default="retrieval,harness,swarm",
+                   help="comma-separated: retrieval, harness, swarm")
     args = p.parse_args()
+    modes = args.modes.split(",")
+    unknown = set(modes) - {"retrieval", "harness", "swarm"}
+    if unknown:
+        p.error(f"unknown modes: {', '.join(sorted(unknown))}")
     corpus = corpus_of(args.question)
     data = load_demo(corpora={corpus})[corpus]
     question = data.questions[args.question]
@@ -157,12 +214,17 @@ async def main() -> None:
         RUNS_DIR.mkdir(exist_ok=True)
         write_meta(question, stamp)
     rows = []
-    async with build_demo_harness(load_config(), data=data, controller=args.controller) as harness:
+    cfg = load_config()
+    async with build_demo_harness(cfg, data=data, controller=args.controller) as harness:
         await harness.setup()
-        for mode in ("retrieval", "harness"):
+        swarm = build_demo_swarm(cfg, harness, data.descriptions)
+        for mode in modes:
             print(f"\n=== {mode} mode: {question.text}")
             save_to = save_path(question.id, mode, stamp) if args.save else None
-            rows.append(await run_one(harness, question, mode, save_to=save_to))
+            if mode == "swarm":
+                rows.append(await run_swarm(swarm, question, save_to=save_to))
+            else:
+                rows.append(await run_one(harness, question, mode, save_to=save_to))
     print("\n" + summary_table(rows))
 
 
