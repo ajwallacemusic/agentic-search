@@ -7,7 +7,7 @@ def test_one_backend_per_source_in_order():
 
 
 def test_budget_matches_spec():
-    assert offline_harness().budget == Budget(max_turns=4, max_tool_calls=24, max_seconds=60,
+    assert offline_harness().budget == Budget(max_turns=4, max_tool_calls=24, max_seconds=120,
                                               max_cost_usd=0.50)
 
 

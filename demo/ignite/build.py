@@ -22,6 +22,7 @@ from agentic_search.embedders.base import Embedder
 from agentic_search.models.driver import ToolCallingDriver
 from agentic_search.models.llm_judge import LLMJudge
 from demo.ignite.corpus import DemoData
+from demo.ignite.swarm import Swarm, SwarmConfig
 
 logger = logging.getLogger(__name__)
 
@@ -142,3 +143,11 @@ def build_harness_for(cfg: dict[str, Any], docs: dict[str, list[Document]],
     return Harness(backends, driver, embedders=[embedder], analyzer=analyzer, controller=decider,
                    mode="harness", budget=Budget(**cfg["budget"]),
                    settings=HarnessSettings(**cfg.get("settings", {})))
+
+
+def build_demo_swarm(cfg: dict[str, Any], harness: Harness, descriptions: dict[str, str], *,
+                     client: Any = None) -> Swarm:
+    """The swarm over `harness`: the split call uses the planner model unless `client` is given;
+    agent count, turns and RRF k come from the `swarm` block."""
+    return Swarm(harness, client or make_client(cfg["driver"]),
+                 SwarmConfig(**cfg.get("swarm", {})), descriptions)

@@ -23,7 +23,12 @@ embedder: {type: sentence_transformers, model: BAAI/bge-small-en-v1.5}
 fallback_embedder: {type: hash}
 # Document embeddings are kept here between runs (git-ignored); delete the file to rebuild.
 embedding_cache: public/.cache/embeddings/document-vectors.npz
-budget: {max_turns: 4, max_tool_calls: 24, max_seconds: 60, max_cost_usd: 0.50}
+# 120 s for every mode (retrieval, harness, swarm) since 2026-11-19, so the comparison is fair.
+budget: {max_turns: 4, max_tool_calls: 24, max_seconds: 120, max_cost_usd: 0.50}
+# Swarm mode: one planner call splits the question into at most max_agents parts; one harness
+# agent per part, all at once, each with an even share of `budget` and agent_max_turns turns;
+# RRF (k = rrf_k) merges their hits. See docs/superpowers/specs/2026-11-19-ignite-swarm-design.md.
+swarm: {max_agents: 4, agent_max_turns: 2, rrf_k: 60}
 typesafe: {type: typesafe, api_key_env: TYPESAFE_API_KEY}
 # Same settings for both modes. The judge runs its batches one after another, so a larger
 # batch and fewer, smaller tool calls keep one turn's judging to about one model call.

@@ -1,18 +1,34 @@
-"""Swarm mode, pure parts: split a question, divide the budget, merge ranked lists (RRF).
+"""Swarm mode: split a question, divide the budget, run the agents, merge ranked lists (RRF).
 
 The swarm splits one question into independent sub-questions, runs one harness agent per part in
-parallel, then merges the agents' ranked documents with reciprocal rank fusion."""
+parallel, then merges the agents' ranked documents with reciprocal rank fusion. Design:
+docs/superpowers/specs/2026-11-19-ignite-swarm-design.md."""
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import re
-from typing import Any
+import time
+from collections.abc import AsyncIterator
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from agentic_search.core.types import Budget, ModelUsage
+from agentic_search.core.harness import Harness
+from agentic_search.core.result import RankedHit, SearchResult
+from agentic_search.core.state import Trace, Usage
+from agentic_search.core.types import Budget, Hit, ModelUsage, Query, StopReason
+from agentic_search.events import (
+    FactNoted,
+    ResultsUpdated,
+    SearchFailed,
+    SearchFinished,
+    UsageUpdated,
+)
 from agentic_search.models.llm import ChatMessage
+from agentic_search.server.models import render_event
 
 SPLIT_SYSTEM = (
     "You split a question into independent sub-questions for a team of search agents. Each agent "
@@ -90,3 +106,176 @@ def rrf(ranked: list[list[str]], k: int) -> list[tuple[str, float, list[int]]]:
             sources.setdefault(key, []).append(idx)
     order = sorted(scores, key=lambda key: -scores[key])  # stable: ties keep insertion order
     return [(key, scores[key], sources[key]) for key in order]
+
+
+AgentStatus = Literal["done", "failed", "cut"]
+
+
+class _Agent:
+    """What one agent has reported so far. `status` stays "cut" until its stream ends."""
+
+    def __init__(self) -> None:
+        self.keys: list[str] = []            # ranked: final hits if finished, else last snapshot
+        self.info: dict[str, dict[str, Any]] = {}   # key -> source, doc_id, title, snippet
+        self.notes: list[str] = []
+        self.usage = Usage()
+        self.status: AgentStatus = "cut"
+
+    def record(self, event: Any) -> None:
+        if isinstance(event, ResultsUpdated):
+            self.keys = [h.key for h in event.hits]
+            for h in event.hits:
+                self.info[h.key] = {"source": h.source, "doc_id": h.doc_id, "title": h.title,
+                                    "snippet": h.snippet}
+        elif isinstance(event, FactNoted):
+            self.notes.append(event.fact)
+        elif isinstance(event, UsageUpdated):
+            self.usage = event.usage
+        elif isinstance(event, SearchFinished):
+            self.status, self.usage = "done", event.result.usage
+            self.keys = [r.hit.key for r in event.result.hits]
+            for r in event.result.hits:
+                title = r.hit.metadata.get("title")
+                self.info.setdefault(r.hit.key, {
+                    "source": r.hit.source, "doc_id": r.hit.doc_id,
+                    "title": title if isinstance(title, str) else None,
+                    "snippet": r.hit.snippet(300)})
+        elif isinstance(event, SearchFailed):
+            self.status = "failed"
+
+
+class Swarm:
+    """Split, fan out over one shared harness (each agent with its share of the budget), fuse.
+
+    `stream` yields the swarm wire events; `search` has the `Harness.search` shape the eval
+    runners call."""
+
+    def __init__(self, harness: Harness, client: Any, cfg: SwarmConfig,
+                 descriptions: dict[str, str]):
+        self.harness, self.client, self.cfg, self.descriptions = harness, client, cfg, descriptions
+
+    async def __aenter__(self) -> Swarm:
+        await self.harness.__aenter__()
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.harness.__aexit__(*exc)
+
+    async def stream(self, question: str, *, snapshot_k: int = 10,
+                     include_trace: bool = False) -> AsyncIterator[dict[str, Any]]:
+        """`swarm_started`, `swarm_split`, interleaved `agent_event`s, then one `swarm_finished`
+        or `swarm_failed`. The run is cut at the harness budget's `max_seconds` (counted from
+        the start); agents still running are cancelled ("cut") and their last snapshot kept."""
+        t0 = time.monotonic()
+
+        def at_ms() -> float:
+            return round((time.monotonic() - t0) * 1000, 1)
+
+        tasks: list[asyncio.Task[None]] = []
+        try:
+            total = self.harness.budget
+            yield {"type": "swarm_started", "question": question,
+                   "max_agents": self.cfg.max_agents, "budget": total.model_dump(mode="json"),
+                   "at_ms": 0.0}
+            split = await split_question(self.client, question, self.descriptions,
+                                         self.cfg.max_agents)
+            yield {"type": "swarm_split", "sub_questions": split.sub_questions,
+                   "fallback": split.fallback, "usage": split.usage.model_dump(mode="json"),
+                   "at_ms": at_ms()}
+
+            n = len(split.sub_questions)
+            budget = agent_budget(total, n, split.usage.cost_usd, self.cfg.agent_max_turns)
+            agents = [_Agent() for _ in range(n)]
+            queue: asyncio.Queue[tuple[int, Any]] = asyncio.Queue()
+            for i, part in enumerate(split.sub_questions):
+                tasks.append(asyncio.create_task(self._run_agent(
+                    i, agent_query(question, part), budget, snapshot_k, agents[i], queue)))
+
+            deadline = None if total.max_seconds is None else t0 + total.max_seconds
+            running = n
+            while running:
+                timeout = None if deadline is None else deadline - time.monotonic()
+                if timeout is not None and timeout <= 0:
+                    break
+                try:
+                    i, event = await asyncio.wait_for(queue.get(), timeout)
+                except TimeoutError:
+                    break
+                if event is None:  # agent i's stream ended
+                    running -= 1
+                    continue
+                rendered = render_event(event, include_content=False, include_trace=include_trace)
+                yield {"type": "agent_event", "agent": i, "event": json.loads(rendered)}
+            await _cancel(tasks)
+            yield self._finished(split, agents, snapshot_k, time.monotonic() - t0, at_ms())
+        except Exception as exc:
+            yield {"type": "swarm_failed", "error_type": type(exc).__name__, "message": str(exc),
+                   "at_ms": at_ms()}
+        finally:
+            await _cancel(tasks)
+
+    async def _run_agent(self, idx: int, query: str, budget: Budget, snapshot_k: int,
+                         agent: _Agent, queue: asyncio.Queue[tuple[int, Any]]) -> None:
+        """Pump one agent's harness events into the shared queue; (idx, None) marks the end."""
+        try:
+            stream = self.harness.stream(query, top_k=snapshot_k, budget=budget,
+                                         snapshot_k=snapshot_k, include_content=False)
+            async with contextlib.aclosing(stream) as events:
+                async for event in events:
+                    agent.record(event)
+                    queue.put_nowait((idx, event))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            agent.status = "failed"
+        finally:
+            if agent.status == "cut" and not _cancelling():
+                agent.status = "failed"  # stream ended without a terminal event
+            queue.put_nowait((idx, None))
+
+    def _finished(self, split: Split, agents: list[_Agent], snapshot_k: int, seconds: float,
+                  at_ms: float) -> dict[str, Any]:
+        info: dict[str, dict[str, Any]] = {}
+        for agent in agents:
+            for key, data in agent.info.items():
+                info.setdefault(key, data)
+        fused = rrf([a.keys for a in agents], self.cfg.rrf_k)[:snapshot_k]
+        hits = [{"key": key, **info[key], "score": round(score, 6), "agents": idx}
+                for key, score, idx in fused]
+        usage = {
+            "input_tokens": split.usage.input_tokens + sum(a.usage.input_tokens for a in agents),
+            "output_tokens": split.usage.output_tokens + sum(a.usage.output_tokens for a in agents),
+            "cost_usd": split.usage.cost_usd + sum(a.usage.cost_usd for a in agents),
+            "tool_calls": sum(a.usage.tool_calls for a in agents),
+            "turns": max((a.usage.turns for a in agents), default=0)}
+        return {"type": "swarm_finished", "hits": hits,
+                "notes": [note for a in agents for note in a.notes], "usage": usage,
+                "seconds": round(seconds, 3), "agent_status": [a.status for a in agents],
+                "at_ms": at_ms}
+
+    async def search(self, question: str, *, top_k: int = 20, mode: Any = None,
+                     **_: Any) -> SearchResult:
+        """One swarm run as a SearchResult (merged hits with their RRF scores), for the eval
+        runners. Raises RuntimeError if the swarm failed."""
+        last: dict[str, Any] = {}
+        async with contextlib.aclosing(self.stream(question, snapshot_k=top_k)) as events:
+            async for event in events:
+                last = event
+        if last.get("type") != "swarm_finished":
+            raise RuntimeError(last.get("message", "swarm ended without a result"))
+        hits = [RankedHit(hit=Hit(doc_id=h["doc_id"], source=h["source"]), score=h["score"])
+                for h in last["hits"]]
+        return SearchResult(question=Query.of(question), hits=hits,
+                            stop_reason=StopReason.DELEGATE_DONE, usage=Usage(**last["usage"]),
+                            trace=Trace(), mode="swarm")
+
+
+def _cancelling() -> bool:
+    task = asyncio.current_task()
+    return bool(task and task.cancelling())
+
+
+async def _cancel(tasks: list[asyncio.Task[None]]) -> None:
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
