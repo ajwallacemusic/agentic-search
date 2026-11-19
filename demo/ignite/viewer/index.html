@@ -84,11 +84,28 @@
   #verdict .small { font-size: 17px; color: #9db6da; margin-top: 2px; }
 
   /* ---- columns ---- */
-  main { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 16px 24px 24px; }
+  /* Three lanes side by side on the stage screen (1920 wide); narrower screens put the swarm
+     under the other two, then everything in one column. */
+  main { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; padding: 16px 24px 24px; }
+  @media (max-width: 1500px) { main { grid-template-columns: 1fr 1fr; } section.col#col-swarm { grid-column: 1 / -1; } }
   @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
   section.col { padding: 16px 18px 18px; border: 1px solid var(--line); border-radius: 14px; min-width: 0; box-shadow: var(--shadow); background: var(--bg); }
   section.col#col-harness { border-top: 4px solid var(--accent); }
   section.col#col-retrieval { border-top: 4px solid #99c0ff; }
+  section.col#col-swarm { border-top: 4px solid var(--heading); }
+  .flowline { margin: 6px 0 12px; color: var(--heading); font-weight: 600; font-size: 17px; }
+  .flowline .fb { display: block; color: var(--warn); font-weight: 500; font-size: 15px; }
+  table.agents { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 12px; }
+  .agents th, .agents td { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: left; vertical-align: top; }
+  .agents tbody tr:last-child > * { border-bottom: 0; }
+  .agents th { background: var(--tint-2); font-size: 15px; font-weight: 600; color: var(--muted); }
+  .agents th.n { width: 3.9em; } .agents th.dots { width: 5.4em; } .agents th.nh { width: 3em; } .agents th.st { width: 5.6em; }
+  .agents td.n { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .agents td.sub { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .agents td.dots { color: var(--accent); font-size: 15px; white-space: nowrap; overflow: hidden; }
+  .agents td.nh { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .agents td.st { font-size: 15px; color: var(--muted); white-space: nowrap; }
+  .agents tr.done td.st { color: var(--good); } .agents tr.failed td.st { color: var(--bad); } .agents tr.cut td.st { color: var(--warn); }
   .col h2 { margin: 0; font-size: 24px; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; color: var(--heading); font-weight: 600; letter-spacing: -0.01em; }
   .col h2 .ico { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); margin-right: 8px; font-size: 20px; vertical-align: -4px; }
   .col .tag { color: var(--muted); font-size: 16px; margin: 2px 0 10px 42px; }
@@ -261,6 +278,7 @@
 <main>
   <section class="col" id="col-retrieval"></section>
   <section class="col" id="col-harness"></section>
+  <section class="col" id="col-swarm"></section>
 </main>
 <div class="pagefoot">© 2026 Egen, Inc. · Public data: MuSiQue (CC BY 4.0), WANDS by Wayfair (MIT)</div>
 <script>
@@ -382,7 +400,8 @@ function reduce(state, ev) {
 }
 const KNOWN_TYPES = new Set(["search_started", "phase_started", "phase_finished", "tool_call_started",
   "tool_call_finished", "results_updated", "usage_updated", "search_finished", "search_failed",
-  "steps_updated", "fact_noted"]);
+  "steps_updated", "fact_noted",
+  "swarm_started", "swarm_split", "agent_event", "swarm_finished", "swarm_failed"]);
 
 /** Events from a saved run: one JSON event per line. Skips blank, broken and unknown lines. */
 function parseJsonl(text) {
@@ -403,21 +422,24 @@ function schedule(events, speed) {
   return events.map((ev) => ({ delayMs: (ev.at_ms - t0) / speed, ev }));
 }
 
-/** Sort picked files by name: *-retrieval.jsonl, *-harness.jsonl and an optional *.meta.json. */
+/** Sort picked files by name: *-retrieval.jsonl, *-harness.jsonl, *-swarm.jsonl and an optional
+ *  *.meta.json. */
 function assignFiles(files) {
-  const out = { retrieval: null, harness: null, meta: null };
+  const out = { retrieval: null, harness: null, swarm: null, meta: null };
   for (const f of files) {
     if (f.name.endsWith("-retrieval.jsonl")) out.retrieval = f.text;
     else if (f.name.endsWith("-harness.jsonl")) out.harness = f.text;
+    else if (f.name.endsWith("-swarm.jsonl")) out.swarm = f.text;
     else if (f.name.endsWith(".meta.json")) {
       try { out.meta = JSON.parse(f.text); } catch (e) { out.meta = null; }
     }
   }
   return out;
 }
-/** A live column still running past the spec's 60 s stall line: time to switch to replay. */
+/** A live column still running past the 120 s stall line: time to switch to replay. */
+const OVERTIME_SECONDS = 120;
 function overtime(seconds, done, replay) {
-  return !replay && !done && seconds > 60;
+  return !replay && !done && seconds > OVERTIME_SECONDS;
 }
 /** Seconds shown on a column's clock. Finished: the run's final time. Replay: the replay clock,
  *  playing or paused. Live: wall time since the column started. */
@@ -430,16 +452,16 @@ function clockSeconds(state, { replay = false, vt = 0, startedMs = null, nowMs =
 /** The question for a replay: the meta file's text, else the run's own search_started event. */
 function questionText(meta, events) {
   if (meta && typeof meta.text === "string" && meta.text) return meta.text;
-  const started = (events || []).find((e) => e && e.type === "search_started");
+  const started = (events || []).find((e) => e && (e.type === "search_started" || e.type === "swarm_started"));
   const q = started && started.question;
   if (typeof q === "string") return q;
   const parts = q && Array.isArray(q.content) ? q.content : [];
   return parts.map((c) => (c && typeof c.text === "string" ? c.text : "")).join(" ").trim();
 }
 
-/** A replay can start with either mode's file; the other column stays empty. */
+/** A replay can start with any mode's file; the other columns stay empty. */
 function replayable(got) {
-  return Boolean(got && (got.retrieval || got.harness));
+  return Boolean(got && (got.retrieval || got.harness || got.swarm));
 }
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -579,15 +601,34 @@ function times(a, b) {
   return `${r >= 10 ? r.toFixed(0) : r.toFixed(1)}×`;
 }
 
+/** Who scored best of three: "The swarm found the most.", "X and Y tie for the most.", or a tie. */
+function bestOfThree(r, h, s) {
+  const named = [["One pass", goldShare(r.g)], ["the agent loop", goldShare(h.g)], ["the swarm", goldShare(s.g)]];
+  const top = Math.max(...named.map(([, x]) => x));
+  const win = named.filter(([, x]) => x === top).map(([n]) => n);
+  const cap = (t) => t[0].toUpperCase() + t.slice(1);
+  if (win.length === 3) return "A tie on the results.";
+  if (win.length === 2) return `${cap(win[0])} and ${win[1]} tie for the most.`;
+  return `${cap(win[0])} found the most.`;
+}
+
 /** The verdict banner once both modes have a score: who found more, and what the loop cost.
- *  r and h: {g: goldSummary, seconds, costUsd}. Empty string when either is missing. */
-function verdictHtml(r, h) {
+ *  r, h and (optional) s: {g: goldSummary, seconds, costUsd}. Empty string when r or h is
+ *  missing. Without s (an old two-lane replay, or a failed swarm) the output is the two-lane one. */
+function verdictHtml(r, h, s) {
   if (!r || !h || !r.g || !h.g || !r.g.total) return "";
   const rs = goldShare(r.g), hs = goldShare(h.g);
-  const lead = hs > rs ? "The agent loop found more." : hs < rs ? "One pass found more." : "A tie on the results.";
+  const swarm = s && s.g ? s : null;
+  const lead = swarm ? bestOfThree(r, h, swarm)
+    : hs > rs ? "The agent loop found more." : hs < rs ? "One pass found more." : "A tie on the results.";
   const t = times(h.seconds, r.seconds), c = times(h.costUsd, r.costUsd);
-  const cost = t && c ? `The loop took ${t} the time and ${c} the cost.` : "";
-  return `<div class="big">${esc(lead)} <span class="h">Harness: ${esc(goldLabel(h.g))}.</span> One pass: ${esc(goldLabel(r.g))}.</div>`
+  let cost = t && c ? `The loop took ${t} the time and ${c} the cost.` : "";
+  const clause = swarm ? ` Swarm: ${esc(goldLabel(swarm.g))}.` : "";
+  if (swarm) {
+    const st = times(swarm.seconds, r.seconds), sc = times(swarm.costUsd, r.costUsd);
+    if (st && sc) cost += `${cost ? " " : ""}The swarm took ${st} the time and ${sc} the cost of one pass.`;
+  }
+  return `<div class="big">${esc(lead)} <span class="h">Harness: ${esc(goldLabel(h.g))}.</span> One pass: ${esc(goldLabel(r.g))}.${clause}</div>`
     + (cost ? `<div class="small">${esc(cost)}</div>` : "");
 }
 
@@ -595,13 +636,99 @@ function verdictHtml(r, h) {
 function requestBody(q, mode) {
   return JSON.stringify({ profile: q.profile, question: q.text, mode, snapshot_k: 10, include_trace: true });
 }
+
+// ---- swarm lane: split the question, one harness agent per part, merge the lists (RRF) ----
+const MODES = ["retrieval", "harness", "swarm"];
+
+function initialSwarm() {
+  return { mode: "swarm", subs: [], agents: [], hits: [], notes: [], usage: null, seconds: null,
+           done: false, error: null, fallback: false, answer: null, splitMs: 0 };
+}
+
+/** Fold one swarm wire event into the swarm lane. `agent_event` folds the wrapped library event
+ *  into that agent's own column state with `reduce`. Unknown types leave the state unchanged. */
+function reduceSwarm(state, ev) {
+  switch (ev.type) {
+    case "swarm_split": {
+      const subs = ev.sub_questions || [];
+      return { ...state, subs, fallback: Boolean(ev.fallback), splitMs: ev.at_ms ?? 0,
+               agents: subs.map(() => ({ ...initialState("harness"), status: "running" })) };
+    }
+    case "agent_event": {
+      const a = state.agents[ev.agent];
+      if (!a || !ev.event) return state;
+      const next = { ...reduce(a, ev.event), status: a.status };
+      if (ev.event.type === "search_finished") next.status = "done";
+      if (ev.event.type === "search_failed") next.status = "failed";
+      const agents = state.agents.slice();
+      agents[ev.agent] = next;
+      return { ...state, agents };
+    }
+    case "swarm_finished": {
+      const st = ev.agent_status || [];
+      const agents = state.agents.map((a, i) => (st[i] ? { ...a, status: st[i] } : a));
+      return { ...state, agents, done: true, hits: ev.hits || [], notes: ev.notes || [],
+               usage: ev.usage || null, seconds: ev.seconds ?? (ev.at_ms ?? 0) / 1000 };
+    }
+    case "swarm_failed":
+      return { ...state, done: true, error: `${ev.error_type}: ${ev.message}`,
+               seconds: typeof ev.at_ms === "number" ? ev.at_ms / 1000 : state.seconds };
+    default:
+      return state;
+  }
+}
+
+/** Replay timing for a swarm file. Agent events carry only their agent's own clock (ms since that
+ *  agent started, right after the split), so each gets an outer `at_ms` = split time + its own,
+ *  never earlier than the event before it (playback applies events in file order). */
+function swarmTimeline(events) {
+  let base = 0, last = 0;
+  return events.map((ev) => {
+    let at;
+    if (ev.type === "agent_event") at = base + ((ev.event && ev.event.at_ms) || 0);
+    else at = typeof ev.at_ms === "number" ? ev.at_ms : last;
+    if (ev.type === "swarm_split") base = at;
+    last = Math.max(last, at);
+    return { ...ev, at_ms: last };
+  });
+}
+
+const SUB_MAX = 46;
+const AGENT_STATUS = { running: "running", done: "✓ done", failed: "✗ failed", cut: "✂ cut" };
+
+/** One row per agent: number, sub-question (cut short, whole in the tooltip), one dot per turn
+ *  (● finished, ○ running), hit count, status. Empty before the split. */
+function swarmRowsHtml(state) {
+  return state.agents.map((a, i) => {
+    const sub = String(state.subs[i] ?? "");
+    const short = sub.length > SUB_MAX ? sub.slice(0, SUB_MAX - 1).trimEnd() + "…" : sub;
+    const started = a.phase !== null || a.calls.length || a.metrics.turns;
+    const turns = Math.max(a.metrics.turns || 0, started ? a.turn + 1 : 0);
+    const running = a.status === "running" && !a.done;
+    const dots = turns ? "●".repeat(running ? turns - 1 : turns) + (running ? "○" : "") : "";
+    const status = AGENT_STATUS[a.status] || esc(a.status);
+    return `<tr class="agent ${esc(a.status)}"><td class="n">${i + 1}</td>`
+      + `<td class="sub" title="${esc(sub)}">${esc(short)}</td><td class="dots">${dots}</td>`
+      + `<td class="nh">${a.hits.length}</td><td class="st">${status}</td></tr>`;
+  }).join("");
+}
+
+/** The POST body for a live swarm run (no `mode`: the swarm endpoint runs harness agents). */
+function swarmRequestBody(q) {
+  return JSON.stringify({ profile: q.profile, question: q.text, snapshot_k: 10, include_trace: true });
+}
 /* </core> */
 
-const MODES = ["retrieval", "harness"];
-const TITLES = { retrieval: "Retrieval · one pass", harness: "Harness · agent loop" };
-const ICONS = { retrieval: "→", harness: "↻" };
+const TITLES = { retrieval: "Retrieval · one pass", harness: "Harness · agent loop", swarm: "Swarm · agents in parallel" };
+const ICONS = { retrieval: "→", harness: "↻", swarm: "⇉" };
 const TAGS = { retrieval: "Plans its searches, runs them, checks the results. One turn, no second try.",
-               harness: "Makes a plan, searches, checks the results, notes facts, goes again." };
+               harness: "Makes a plan, searches, checks the results, notes facts, goes again.",
+               swarm: "Splits the question, runs one agent loop per part at once, merges their lists." };
+const REDUCERS = { retrieval: reduce, harness: reduce, swarm: reduceSwarm };
+const fresh = (mode) => (mode === "swarm" ? initialSwarm() : initialState(mode));
+/** Is the swarm lane in this run at all? Live: always. Replay: once files are loaded, only with
+ *  a saved swarm file. */
+const swarmInPlay = () => !view.replay || !player.runs || player.runs.swarm.length > 0;
 
 /** The gold set a column may show: in replay always; live only once that mode has finished
  *  (never mid-run: no giveaway). */
@@ -623,9 +750,12 @@ function renderVerdict() {
     if (!s) return null;
     const gs = goldFor(s);
     if (!s.done || s.error || !gs) return null;
+    if (mode === "swarm") return { g: goldSummary(s.hits, [...gs]), seconds: s.seconds, costUsd: (s.usage && s.usage.cost_usd) || 0 };
     return { g: goldSummary(s.hits, [...gs]), seconds: s.metrics.seconds, costUsd: s.metrics.costUsd };
   });
-  const html = verdictHtml(parts[0], parts[1]);
+  // Wait for a swarm still running (no banner that changes its mind); a failed one is left out.
+  const sw = view.states.swarm;
+  const html = sw && swarmInPlay() && !sw.done ? "" : verdictHtml(parts[0], parts[1], parts[2]);
   $("verdict").innerHTML = html;
   $("verdict").classList.toggle("show", Boolean(html));
 }
@@ -638,7 +768,95 @@ function shortArgs(args) {
   return shown.map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`).join(" ");
 }
 
+/** The parts every lane shares: score tiles, answer box, the top 10 (with check-it-yourself) and
+ *  the "no saved file" note. Gold shows only once the lane is done (or in replay). */
+function resultsParts(s, mode) {
+  const goldSet = goldFor(s);
+  const top = s.hits.slice(0, 10);
+  const checks = s.answer && s.answer.checks;
+  const hits = top.map((h) => {
+    const isGold = goldSet && goldSet.has(h.doc_id);
+    const rel = h.judged && h.p_relevant != null && h.p_relevant >= 0.5 ? ` <span class="rel">✓ judged relevant</span>` : "";
+    const gold = isGold ? ` <span class="gold">★ right</span>` : "";
+    const name = h.title ? `<span class="hit-title">${esc(h.title)}</span>` : `<span class="hit-title">${esc(h.doc_id)}</span>`;
+    const snip = snippetText(h);
+    const row = `${name}${gold}${rel}${snip ? `<span class="snip">${esc(snip)}</span>` : ""}`;
+    const check = checks && checks[h.key || `${h.source}:${h.doc_id}`];
+    const body = check
+      ? `<details><summary>${row.replace("</span>", `</span><span class="open-why">check why</span>`)}</summary>${proofHtml(check)}</details>`
+      : row;
+    return `<li class="${isGold ? "is-gold" : ""}" title="${esc(h.doc_id)}">${body}</li>`;
+  }).join("");
+  const label = mode === "swarm" ? "Merged top" : "Top";
+  let hitsHead = `<span>${label} ${Math.min(10, top.length) || 10} results${s.done ? "" : " so far"}</span>`;
+  let scoreWhat = s.done ? "" : top.length ? "searching…" : "waiting…";
+  let scoreCls = "wait";
+  if (goldSet && goldSet.size) {
+    const g = goldSummary(top, [...goldSet]);
+    hitsHead += `<b class="gold">★ ${esc(goldLabel(g))}</b>`;
+    scoreWhat = goldLabel(g);
+    scoreCls = goldShare(g) >= 0.5 ? "good" : "bad";
+  } else if (s.done) {
+    scoreWhat = "scoring…";
+  }
+  const missing = view.replay && player.runs && !player.runs[mode].length
+    ? `<div class="empty">No saved file for this mode.</div>` : "";
+  return {
+    missing,
+    score: `<div class="score">${tilesHtml(top, goldSet)}<span class="what ${scoreCls}">${esc(scoreWhat)}</span></div>`,
+    results: `${answerHtml(s.answer)}
+    <div class="hits-head">${hitsHead}</div>
+    ${coverageHtml(s.answer && s.answer.coverage)}
+    <ol class="hits">${hits || `<li class="empty">${mode === "swarm" && !s.done ? "merged when the agents finish" : "no results yet"}</li>`}</ol>`,
+  };
+}
+
+function colHead(mode) {
+  return `<h2><span><span class="ico">${ICONS[mode]}</span>${TITLES[mode]}</span><span class="clock" id="clock-${mode}"></span></h2>
+    <div class="tag">${TAGS[mode]}</div>
+    <div class="error" id="overtime-${mode}" hidden>⚠ Past 120 s. Switch to replay?</div>`;
+}
+
+/** The swarm lane: split → N agents → merge, one row per agent, then the merged top 10. Live,
+ *  before the end, the footer sums the agents' own counters. */
+function renderSwarm() {
+  const s = view.states.swarm;
+  if (!swarmInPlay()) {  // an old two-lane replay: say so, show nothing else
+    $("col-swarm").innerHTML = `${colHead("swarm")}<div class="empty">No saved file for this mode.</div>`;
+    return;
+  }
+  const n = s.agents.length;
+  const flow = n ? `split → ${n} agent${n === 1 ? "" : "s"} → merge (RRF)` : s.done ? "split → merge (RRF)" : "splitting the question…";
+  const fb = s.fallback ? `<span class="fb">The split did not work: one agent on the whole question.</span>` : "";
+  const rows = swarmRowsHtml(s);
+  const table = rows ? `<table class="agents"><thead><tr><th class="n">agent</th><th class="sub">sub-question</th>`
+    + `<th class="dots">turns</th><th class="nh">hits</th><th class="st">status</th></tr></thead><tbody>${rows}</tbody></table>` : "";
+  const u = s.usage;
+  const turns = u ? u.turns : Math.max(0, ...s.agents.map((a) => a.metrics.turns));
+  const calls = u ? u.tool_calls : s.agents.reduce((t, a) => t + a.metrics.toolCalls, 0);
+  const cost = u ? u.cost_usd : s.agents.reduce((t, a) => t + a.metrics.costUsd, 0);
+  // Before the end: split time + the slowest agent's own clock (agents start right after the split).
+  const secs = s.seconds ?? ((s.splitMs || 0) / 1000 + Math.max(0, ...s.agents.map((a) => a.metrics.seconds)));
+  const p = resultsParts(s, "swarm");
+  $("col-swarm").innerHTML = `
+    ${colHead("swarm")}
+    ${p.missing}
+    ${p.score}
+    <div class="flowline">${flow}${fb}</div>
+    ${table}
+    ${s.error ? `<div class="error">✗ Swarm failed: ${esc(s.error)}</div>` : ""}
+    ${p.results}
+    <footer class="metrics">
+      <div><span>agents</span><strong>${n}</strong></div>
+      <div><span>max turns</span><strong>${turns}</strong></div>
+      <div><span>tool calls</span><strong>${calls}</strong></div>
+      <div><span>seconds</span><strong>${secs.toFixed(1)}</strong></div>
+      <div><span>cost</span><strong>$${cost.toFixed(4)}</strong></div>
+    </footer>`;
+}
+
 function render(mode) {
+  if (mode === "swarm") { renderSwarm(); renderClock(mode); renderVerdict(); renderRule(); return; }
   const s = view.states[mode];
   const el = $(`col-${mode}`);
   const maxTurn = Math.max(0, s.turn, ...s.calls.map((c) => c.turn));
@@ -663,51 +881,18 @@ function render(mode) {
   const head = turns.map((t) => `<th>turn ${t + 1}</th>`).join("");
   const decisions = s.decisions.map((d) =>
     `<div class="badge ${esc(d.action)}">after turn ${d.turn + 1}: <b>${esc(d.action.replace("_", " "))}</b>${d.note ? " — " + esc(d.note) : ""}</div>`).join("");
-  const goldSet = goldFor(s);
-  const top = s.hits.slice(0, 10);
-  const checks = s.answer && s.answer.checks;
-  const hits = top.map((h) => {
-    const isGold = goldSet && goldSet.has(h.doc_id);
-    const rel = h.judged && h.p_relevant != null && h.p_relevant >= 0.5 ? ` <span class="rel">✓ judged relevant</span>` : "";
-    const gold = isGold ? ` <span class="gold">★ right</span>` : "";
-    const name = h.title ? `<span class="hit-title">${esc(h.title)}</span>` : `<span class="hit-title">${esc(h.doc_id)}</span>`;
-    const snip = snippetText(h);
-    const row = `${name}${gold}${rel}${snip ? `<span class="snip">${esc(snip)}</span>` : ""}`;
-    const check = checks && checks[h.key || `${h.source}:${h.doc_id}`];
-    const body = check
-      ? `<details><summary>${row.replace("</span>", `</span><span class="open-why">check why</span>`)}</summary>${proofHtml(check)}</details>`
-      : row;
-    return `<li class="${isGold ? "is-gold" : ""}" title="${esc(h.doc_id)}">${body}</li>`;
-  }).join("");
-  let hitsHead = `<span>Top ${Math.min(10, top.length) || 10} results${s.done ? "" : " so far"}</span>`;
-  let scoreWhat = s.done ? "" : top.length ? "searching…" : "waiting…";
-  let scoreCls = "wait";
-  if (goldSet && goldSet.size) {
-    const g = goldSummary(top, [...goldSet]);
-    hitsHead += `<b class="gold">★ ${esc(goldLabel(g))}</b>`;
-    scoreWhat = goldLabel(g);
-    scoreCls = goldShare(g) >= 0.5 ? "good" : "bad";
-  } else if (s.done) {
-    scoreWhat = "scoring…";
-  }
   const m = s.metrics;
-  const missing = view.replay && player.runs && !player.runs[mode].length
-    ? `<div class="empty">No saved file for this mode.</div>` : "";
+  const p = resultsParts(s, mode);
   el.innerHTML = `
-    <h2><span><span class="ico">${ICONS[mode]}</span>${TITLES[mode]}</span><span class="clock" id="clock-${mode}"></span></h2>
-    <div class="tag">${TAGS[mode]}</div>
-    <div class="error" id="overtime-${mode}" hidden>⚠ Past 60 s. Switch to replay?</div>
-    ${missing}
-    <div class="score">${tilesHtml(top, goldSet)}<span class="what ${scoreCls}">${esc(scoreWhat)}</span></div>
+    ${colHead(mode)}
+    ${p.missing}
+    ${p.score}
     <div class="phases">${phases}</div>
     <table class="lanes"><thead><tr><th class="src">tool</th>${head}</tr></thead><tbody>${rows}</tbody></table>
     <div class="decisions">${decisions}</div>
     ${stepsHtml(s)}
     ${s.error ? `<div class="error">✗ Search failed: ${esc(s.error)}</div>` : ""}
-    ${answerHtml(s.answer)}
-    <div class="hits-head">${hitsHead}</div>
-    ${coverageHtml(s.answer && s.answer.coverage)}
-    <ol class="hits">${hits || `<li class="empty">no results yet</li>`}</ol>
+    ${p.results}
     <footer class="metrics">
       <div><span>turns</span><strong>${m.turns}</strong></div>
       <div><span>tool calls</span><strong>${m.toolCalls}</strong></div>
@@ -723,15 +908,18 @@ function render(mode) {
 /** Update only the clock and the overtime cue, so ticks don't rebuild the column (and its
  *  hover tooltips) between events. */
 function renderClock(mode) {
-  const s = view.states[mode];
+  const st = view.states[mode];
+  // The swarm state keeps its final time in `seconds`; give clockSeconds the column shape.
+  const s = mode === "swarm" ? { done: st.done, metrics: { seconds: st.seconds ?? 0 } } : st;
+  const noFile = view.replay && player.runs && !player.runs[mode].length;
   const secs = clockSeconds(s, { replay: view.replay, vt: player.vt, startedMs: view.started[mode],
                                  nowMs: performance.now() });
-  $(`clock-${mode}`).textContent = `${secs.toFixed(1)} s`;
+  $(`clock-${mode}`).textContent = noFile ? "" : `${secs.toFixed(1)} s`;
   $(`overtime-${mode}`).hidden = !overtime(secs, s.done, view.replay);
 }
 
 function reset() {
-  for (const mode of MODES) { view.states[mode] = initialState(mode); view.started[mode] = null; render(mode); }
+  for (const mode of MODES) { view.states[mode] = fresh(mode); view.started[mode] = null; render(mode); }
 }
 
 function startClock() {
@@ -744,9 +932,14 @@ function startClock() {
 
 function apply(mode, ev) {
   const wasDone = view.states[mode].done;
-  view.states[mode] = reduce(view.states[mode], ev);
+  view.states[mode] = REDUCERS[mode](view.states[mode], ev);
   render(mode);
   if (!wasDone && view.states[mode].done && !view.states[mode].error) fetchAnswer(mode);
+}
+
+/** The notes a lane hands the answer step: the swarm's merged notes, else the column's facts. */
+function answerNotes(s) {
+  return s.mode === "swarm" ? (s.notes || []) : (s.facts || []).map((f) => f.fact);
 }
 
 /** When a mode finishes: ask the server for an answer read from its top 10 (and, live, the gold
@@ -761,7 +954,7 @@ async function fetchAnswer(mode) {
   let a;
   try {
     const r = await fetch("/ignite/answer", { method: "POST", headers: { "Content-Type": "application/json" },
-                                              body: JSON.stringify({ id: view.qid, keys, notes: (s.facts || []).map((f) => f.fact) }) });
+                                              body: JSON.stringify({ id: view.qid, keys, notes: answerNotes(s) }) });
     a = r.ok ? await r.json() : { error: `HTTP ${r.status}` };
   } catch (e) {
     a = { error: e.message };
@@ -789,12 +982,15 @@ async function loadQuestions() {
   }
 }
 
+const failType = (mode) => (mode === "swarm" ? "swarm_failed" : "search_failed");
+
 async function streamMode(mode, q, signal) {
   view.started[mode] = performance.now();
   try {
-    const resp = await fetch("/v1/search/stream", {
+    const swarm = mode === "swarm";
+    const resp = await fetch(swarm ? "/ignite/swarm" : "/v1/search/stream", {
       method: "POST", signal, headers: { "Content-Type": "application/json" },
-      body: requestBody(q, mode),
+      body: swarm ? swarmRequestBody(q) : requestBody(q, mode),
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
     const reader = resp.body.getReader();
@@ -808,10 +1004,10 @@ async function streamMode(mode, q, signal) {
       for (const ev of events) apply(mode, ev);
       if (done) break;
     }
-    if (!view.states[mode].done) apply(mode, { type: "search_failed", error_type: "StreamClosed", message: "the stream ended without a result" });
+    if (!view.states[mode].done) apply(mode, { type: failType(mode), error_type: "StreamClosed", message: "the stream ended without a result" });
   } catch (e) {
     if (e.name === "AbortError") return;
-    apply(mode, { type: "search_failed", error_type: e.name || "Error", message: e.message });
+    apply(mode, { type: failType(mode), error_type: e.name || "Error", message: e.message });
   }
 }
 
@@ -848,7 +1044,7 @@ function enterReplay() {
   $("replay-bar").style.display = "flex";
   $("switch").style.display = "none";
   banner("Replay: a saved run, played back with its original timing.");
-  $("question").textContent = "Load the -retrieval.jsonl and -harness.jsonl files of one run (and its .meta.json).";
+  $("question").textContent = "Load the -retrieval.jsonl, -harness.jsonl and -swarm.jsonl files of one run (and its .meta.json).";
   reset();
 }
 
@@ -857,14 +1053,15 @@ async function loadFiles(fileList) {
     const files = await Promise.all([...fileList].map(async (f) => ({ name: f.name, text: await f.text() })));
     const got = assignFiles(files);
     if (!replayable(got)) {
-      banner("Pick the files of one run: *-retrieval.jsonl and/or *-harness.jsonl (plus .meta.json).");
+      banner("Pick the files of one run: *-retrieval.jsonl, *-harness.jsonl and/or *-swarm.jsonl (plus .meta.json).");
       return;
     }
     player.runs = { retrieval: got.retrieval ? parseJsonl(got.retrieval) : [],
-                    harness: got.harness ? parseJsonl(got.harness) : [] };
+                    harness: got.harness ? parseJsonl(got.harness) : [],
+                    swarm: got.swarm ? swarmTimeline(parseJsonl(got.swarm)) : [] };
     view.gold = new Set((got.meta && Array.isArray(got.meta.gold) && got.meta.gold) || []);
     view.qid = (got.meta && got.meta.question_id) || null;
-    $("question").textContent = questionText(got.meta, [...player.runs.harness, ...player.runs.retrieval]);
+    $("question").textContent = questionText(got.meta, [...player.runs.harness, ...player.runs.retrieval, ...player.runs.swarm]);
     banner(`Replay: a saved run, played back with its original timing.${view.gold.size ? " ★ marks the right results." : ""}`);
     rewind();
     $("play").textContent = "Play";
@@ -883,6 +1080,7 @@ function rewind() {
     const evs = player.runs[mode];
     player.offsets[mode] = schedule(evs, 1);
     player.idx[mode] = 0;
+    if (mode === "swarm") continue;
     const fin = evs.find((e) => e.type === "search_finished");
     view.states[mode].notes = fin ? notesFromTrace(fin.result) : {};
   }
@@ -898,7 +1096,7 @@ function tick() {
     const before = player.idx[mode];
     const wasDone = view.states[mode].done;
     while (player.idx[mode] < offs.length && offs[player.idx[mode]].delayMs <= player.vt) {
-      view.states[mode] = reduce(view.states[mode], offs[player.idx[mode]].ev);
+      view.states[mode] = REDUCERS[mode](view.states[mode], offs[player.idx[mode]].ev);
       player.idx[mode] += 1;
     }
     if (!wasDone && view.states[mode].done && !view.states[mode].error) fetchAnswer(mode);

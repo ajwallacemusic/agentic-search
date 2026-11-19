@@ -204,3 +204,10 @@ shared model was slower, match runs hit the 60 s budget, and retrieval dropped a
 recall 0.697 → 0.661). WANDS and match were re-run one at a time (rows above). MuSiQue's row is
 from the shared run; the rule almost never fires there (simulation: same turns), so its change is
 noise.
+
+## Viewer: third lane for the swarm (2026-11-19)
+
+The viewer now has three columns. At 1920×1080 all three fit side by side (each about 610 px
+wide); no column is stacked. Below 1500 px wide the swarm column goes under the other two, and
+below 1100 px all three stack. Checked on a synthetic swarm replay; the real hero replays come
+in the live rehearsal.
