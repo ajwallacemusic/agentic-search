@@ -16,3 +16,7 @@ def test_body_font_is_at_least_18px():
 
 def test_core_tests_pass():
     subprocess.run(["node", "--test", str(TESTS / "viewer.test.mjs")], check=True)
+
+
+def test_has_swarm_column():
+    assert '<section class="col" id="col-swarm">' in VIEWER.read_text()

@@ -9,8 +9,8 @@ const html = readFileSync(new URL("../viewer/index.html", import.meta.url), "utf
 const core = html.split("/* <core> */")[1].split("/* </core> */")[0];
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(core + "\n;globalThis.core = { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml, goldSummary, snippetText, answerHtml, goldLabel, goldShare, tilesHtml, verdictHtml, markText, proofHtml, coverageHtml, MODES, initialSwarm, reduceSwarm, swarmRowsHtml, swarmRequestBody, swarmTimeline };", ctx);
-const { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml, goldSummary, snippetText, answerHtml, goldLabel, goldShare, tilesHtml, verdictHtml, markText, proofHtml, coverageHtml, MODES, initialSwarm, reduceSwarm, swarmRowsHtml, swarmRequestBody, swarmTimeline } = ctx.core;
+vm.runInContext(core + "\n;globalThis.core = { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml, goldSummary, snippetText, answerHtml, goldLabel, goldShare, tilesHtml, verdictHtml, markText, proofHtml, coverageHtml, MODES, initialSwarm, reduceSwarm, swarmRowsHtml, swarmRequestBody, swarmTimeline, swarmPending };", ctx);
+const { SETS, optionsHtml, requestBody, TOOLS, laneNames, chipLabel, parseSse, initialState, reduce, notesFromTrace, parseJsonl, schedule, assignFiles, overtime, clockSeconds, questionText, replayable, stepsHtml, goldSummary, snippetText, answerHtml, goldLabel, goldShare, tilesHtml, verdictHtml, markText, proofHtml, coverageHtml, MODES, initialSwarm, reduceSwarm, swarmRowsHtml, swarmRequestBody, swarmTimeline, swarmPending } = ctx.core;
 
 const ev = (type, extra = {}) => ({ type, search_id: "s", seq: 0, turn: 0, at_ms: 0, ...extra });
 const frame = (e) => `id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
@@ -511,4 +511,25 @@ test("verdictHtml adds a swarm clause and names the best of three", () => {
   assert.ok(html.includes("The swarm took 3.8× the time and 10×"));
   assert.ok(verdictHtml(r, h, { ...s, g: h.g }).includes("The agent loop and the swarm tie for the most."));
   assert.ok(verdictHtml(s, s, s).includes("A tie on the results."));
+});
+
+test("swarmPending: live, the banner waits for the swarm's answer, not just its finish", () => {
+  const live = { inPlay: true, replay: false };
+  const running = reduceSwarm(initialSwarm(), split(["a"]));
+  const finished = reduceSwarm(running, { type: "swarm_finished", hits: [], agent_status: ["done"], seconds: 1 });
+  assert.equal(swarmPending(running, live), true);
+  assert.equal(swarmPending(finished, live), true);                                   // answer not asked yet
+  assert.equal(swarmPending({ ...finished, answer: { pending: true } }, live), true);  // answer on its way
+  assert.equal(swarmPending({ ...finished, answer: { gold: ["x"] } }, live), false);   // answer back
+  assert.equal(swarmPending({ ...finished, answer: { error: "HTTP 500" } }, live), false); // failed: no wait
+});
+
+test("swarmPending: replay waits only until done; no swarm file or a failed swarm never waits", () => {
+  const running = reduceSwarm(initialSwarm(), split(["a"]));
+  const finished = reduceSwarm(running, { type: "swarm_finished", hits: [], agent_status: ["done"], seconds: 1 });
+  assert.equal(swarmPending(running, { inPlay: true, replay: true }), true);
+  assert.equal(swarmPending(finished, { inPlay: true, replay: true }), false);
+  assert.equal(swarmPending(running, { inPlay: false, replay: true }), false);
+  const failed = reduceSwarm(running, { type: "swarm_failed", error_type: "E", message: "m" });
+  assert.equal(swarmPending(failed, { inPlay: true, replay: false }), false);
 });

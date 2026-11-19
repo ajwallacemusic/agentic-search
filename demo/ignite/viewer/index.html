@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Retrieval vs Harness</title>
+<title>Retrieval vs Harness vs Swarm</title>
 <link rel="icon" href="data:,">
 <style>
   /* Space Grotesk (SIL Open Font License), bundled so the demo needs no internet. */
@@ -56,7 +56,8 @@
   #banner { display: none; padding: 8px 24px; background: var(--accent-soft); color: var(--heading); font-weight: 500; font-size: 17px; border-bottom: 1px solid var(--line); }
 
   /* ---- how it works + why we care ---- */
-  .explain { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; padding: 16px 24px; background: var(--tint); }
+  .explain { display: grid; grid-template-columns: 1fr 1fr 1fr 0.8fr; gap: 16px; padding: 16px 24px; background: var(--tint); }
+  @media (max-width: 1500px) { .explain { grid-template-columns: 1fr 1fr; } }
   @media (max-width: 1100px) { .explain { grid-template-columns: 1fr; } }
   .card { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; box-shadow: var(--shadow); }
   .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .15em; text-transform: uppercase; color: var(--accent); }
@@ -208,7 +209,7 @@
   <div class="brand">
     <img src="egen-logo.png" alt="egen">
     <span class="sep"></span>
-    <h1><small>Agentic search</small>One pass vs agent loop</h1>
+    <h1><small>Agentic search</small>One pass vs agent loop vs swarm</h1>
   </div>
   <div id="live-bar">
     <label>Question <select id="q-select"></select></label>
@@ -261,6 +262,23 @@
       <rect class="box end" x="420" y="10" width="96" height="36" rx="8"/><text class="t end" x="468" y="28">Top 10</text>
       <path class="loop" d="M356 48 V66 H150 V54" marker-end="url(#ar3)"/>
       <text class="note go" x="253" y="84">not done yet? note what it learned, go again</text>
+    </svg>
+  </div>
+  <div class="card">
+    <div class="eyebrow">Swarm · agents in parallel</div>
+    <h3>Split the question, run the parts at once.</h3>
+    <svg class="flow" viewBox="0 0 520 92" role="img" aria-label="Question, split into three agent loops, merge with RRF, top 10">
+      <defs><marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#00368c"/></marker></defs>
+      <rect class="box" x="4" y="10" width="84" height="36" rx="8"/><text class="t" x="46" y="28">Question</text>
+      <line class="ln" x1="92" y1="28" x2="110" y2="28" marker-end="url(#ar4)"/>
+      <rect class="box" x="114" y="10" width="64" height="36" rx="8"/><text class="t" x="146" y="28">Split</text>
+      <path class="ln" d="M182 28 H192 M192 6 V50 M192 6 H204 M192 28 H204 M192 50 H204"/>
+      <rect class="box" x="206" y="0" width="90" height="12" rx="4"/><rect class="box" x="206" y="22" width="90" height="12" rx="4"/><rect class="box" x="206" y="44" width="90" height="12" rx="4"/>
+      <path class="ln" d="M298 6 H310 M298 28 H310 M298 50 H310 M310 6 V50 M310 28 H318" marker-end="url(#ar4)"/>
+      <rect class="box" x="322" y="10" width="94" height="36" rx="8"/><text class="t" x="369" y="28">Merge</text>
+      <line class="ln" x1="420" y1="28" x2="428" y2="28" marker-end="url(#ar4)"/>
+      <rect class="box end" x="432" y="10" width="84" height="36" rx="8"/><text class="t end" x="474" y="28">Top 10</text>
+      <text class="note" x="260" y="80">splits the question, runs several agent loops at once, merges with RRF</text>
     </svg>
   </div>
   <div class="card why-card">
@@ -713,6 +731,15 @@ function swarmRowsHtml(state) {
   }).join("");
 }
 
+/** Should the verdict banner wait for the swarm? Yes while a swarm in this run is still going,
+ *  and live also until its answer (which brings the gold list) is back, so the banner never shows
+ *  the two-lane verdict first and then changes its mind. A failed swarm is left out, no wait. */
+function swarmPending(sw, { inPlay, replay }) {
+  if (!inPlay || !sw || sw.error) return false;
+  if (!sw.done) return true;
+  return !replay && (!sw.answer || Boolean(sw.answer.pending));
+}
+
 /** The POST body for a live swarm run (no `mode`: the swarm endpoint runs harness agents). */
 function swarmRequestBody(q) {
   return JSON.stringify({ profile: q.profile, question: q.text, snapshot_k: 10, include_trace: true });
@@ -753,9 +780,8 @@ function renderVerdict() {
     if (mode === "swarm") return { g: goldSummary(s.hits, [...gs]), seconds: s.seconds, costUsd: (s.usage && s.usage.cost_usd) || 0 };
     return { g: goldSummary(s.hits, [...gs]), seconds: s.metrics.seconds, costUsd: s.metrics.costUsd };
   });
-  // Wait for a swarm still running (no banner that changes its mind); a failed one is left out.
-  const sw = view.states.swarm;
-  const html = sw && swarmInPlay() && !sw.done ? "" : verdictHtml(parts[0], parts[1], parts[2]);
+  const wait = swarmPending(view.states.swarm, { inPlay: swarmInPlay(), replay: view.replay });
+  const html = wait ? "" : verdictHtml(parts[0], parts[1], parts[2]);
   $("verdict").innerHTML = html;
   $("verdict").classList.toggle("show", Boolean(html));
 }
