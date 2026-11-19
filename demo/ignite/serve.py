@@ -6,12 +6,16 @@ Run: uv run python -m demo.ignite.serve [--port 8765]
 from __future__ import annotations
 
 import argparse
+import asyncio
+import json
 import logging
 import os
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.staticfiles import StaticFiles
 
@@ -20,14 +24,23 @@ from agentic_search.core.secrets import scrub
 from agentic_search.core.types import Document, text_of
 from agentic_search.server import create_app
 from agentic_search.server.config import AuthConfig, ServiceConfig
+from agentic_search.server.sse import format_sse, wait_for_disconnect
 from demo.ignite.answer import answer_from, is_correct
-from demo.ignite.build import build_demo_harness, load_config, make_client
+from demo.ignite.build import build_demo_harness, build_demo_swarm, load_config, make_client
 from demo.ignite.check import Proof, load_proofs
 from demo.ignite.corpus import Question, load_demo
+from demo.ignite.swarm import Swarm
 
 VIEWER_DIR = Path(__file__).parent / "viewer"
 PROFILE_OF = {"musique": "ignite", "wands": "ignite-wands"}  # corpus -> harness profile
 HOST = "127.0.0.1"  # localhost only: the service has no auth
+
+
+class SwarmRequest(BaseModel):
+    profile: str
+    question: str
+    snapshot_k: int = 10
+    include_trace: bool = False
 
 
 class AnswerRequest(BaseModel):
@@ -44,7 +57,8 @@ def doc_texts(documents: dict[str, list[Document]]) -> dict[str, tuple[str, str]
 
 def create_demo_app(profiles: dict[str, Harness], questions: dict[str, Question], *,
                     viewer_dir: Path = VIEWER_DIR, docs: dict[str, tuple[str, str]] | None = None,
-                    answer_client: Any = None, proofs: dict[str, Proof] | None = None) -> FastAPI:
+                    answer_client: Any = None, proofs: dict[str, Proof] | None = None,
+                    swarms: dict[str, Swarm] | None = None) -> FastAPI:
     app = create_app(ServiceConfig(auth=AuthConfig(type="none"), default_profile="ignite"),
                      profiles)
     texts = docs or {}
@@ -53,6 +67,19 @@ def create_demo_app(profiles: dict[str, Harness], questions: dict[str, Question]
     async def list_questions() -> list[dict[str, str]]:
         return [{"id": q.id, "text": q.text, "kind": q.kind, "set": q.set,
                  "profile": PROFILE_OF[q.corpus]} for q in questions.values()]
+
+    @app.post("/ignite/swarm")
+    async def swarm(req: SwarmRequest, request: Request) -> StreamingResponse:
+        """The swarm run as SSE: one frame per wire-format event. A client that goes away
+        cancels every agent."""
+        target = (swarms or {}).get(req.profile)
+        if target is None:
+            raise HTTPException(404, f"unknown profile {req.profile!r}")
+        events = target.stream(req.question, snapshot_k=req.snapshot_k,
+                               include_trace=req.include_trace)
+        return StreamingResponse(_swarm_sse(events, request.receive),
+                                 media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache"})
 
     @app.post("/ignite/answer")
     async def answer(req: AnswerRequest) -> dict[str, Any]:
@@ -78,6 +105,34 @@ def create_demo_app(profiles: dict[str, Harness], questions: dict[str, Question]
 
     app.mount("/", StaticFiles(directory=viewer_dir, html=True), name="viewer")
     return app
+
+
+async def _swarm_sse(events: AsyncIterator[dict[str, Any]], receive: Any) -> AsyncIterator[bytes]:
+    """Frame swarm events as SSE; on client disconnect (seen via `receive`) close the stream,
+    which cancels the agents."""
+    pending: asyncio.Future[dict[str, Any]] | None = None
+    watcher = asyncio.ensure_future(wait_for_disconnect(receive))
+    try:
+        while True:
+            if pending is None:
+                pending = asyncio.ensure_future(events.__anext__())
+            await asyncio.wait({pending, watcher}, return_when=asyncio.FIRST_COMPLETED)
+            if watcher.done():
+                return
+            finished, pending = pending, None
+            try:
+                event = finished.result()
+            except StopAsyncIteration:
+                return
+            yield format_sse(event["type"], json.dumps(event))
+    finally:
+        watcher.cancel()
+        if pending is not None and not pending.done():
+            pending.cancel()
+            await asyncio.wait({pending})
+        if pending is not None and pending.done() and not pending.cancelled():
+            pending.exception()  # mark retrieved; the stream is being abandoned
+        await events.aclose()  # cancels the agents
 
 
 def _proof(proofs: dict[str, Proof], qid: str, keys: list[str],
@@ -117,6 +172,9 @@ def main() -> None:
         if os.environ.get("TYPESAFE_API_KEY"):
             profiles[f"{PROFILE_OF[corpus]}-typesafe"] = build_demo_harness(
                 cfg, data=corpus_data, controller="typesafe")
+    swarms = {PROFILE_OF[corpus]: build_demo_swarm(cfg, profiles[PROFILE_OF[corpus]],
+                                                   corpus_data.descriptions)
+              for corpus, corpus_data in data.items()}
     questions = {qid: q for d in data.values() for qid, q in d.questions.items()}
     docs = {k: v for d in data.values() for k, v in doc_texts(d.documents).items()}
     logging.basicConfig(level=logging.INFO)
@@ -124,7 +182,7 @@ def main() -> None:
     # The answer box: one reader model, the same for both modes (config `answer`, else the judge).
     reader = make_client(cfg.get("answer") or cfg["judge"])
     app = create_demo_app(profiles, questions, docs=docs, answer_client=reader,
-                          proofs=load_proofs(questions))
+                          proofs=load_proofs(questions), swarms=swarms)
     uvicorn.run(app, host=HOST, port=args.port)
 
 

@@ -107,3 +107,64 @@ async def test_answer_endpoint_model_error_is_reported_not_raised(tmp_path):
 
 def test_cli_binds_localhost_only():
     assert "--host" not in build_parser().format_help()
+
+
+# --- Swarm endpoint ---
+
+def _swarm_app(tmp_path, swarm):
+    (tmp_path / "index.html").write_text("<!doctype html><title>viewer</title>")
+    return create_demo_app({"ignite": offline_harness()}, demo_data().questions,
+                           viewer_dir=tmp_path, swarms={"ignite": swarm})
+
+
+@pytest.fixture
+def swarm_client(tmp_path):
+    from demo.ignite.tests.test_swarm import make_swarm
+    app = _swarm_app(tmp_path, make_swarm(subs=["a", "b"]))
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+async def test_swarm_stream_returns_sse(swarm_client):
+    r = await swarm_client.post("/ignite/swarm", json={"profile": "ignite", "question": "Q"})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+    assert "event: swarm_split" in r.text
+    assert r.text.rstrip().split("event: ")[-1].startswith("swarm_finished")
+
+
+async def test_swarm_unknown_profile_is_404(swarm_client):
+    r = await swarm_client.post("/ignite/swarm", json={"profile": "nope", "question": "Q"})
+    assert r.status_code == 404
+
+
+async def test_swarm_disconnect_cancels_agents(tmp_path):
+    import asyncio
+    import json
+
+    from demo.ignite.tests.test_swarm import SpyHarness, make_swarm, swarm_harness
+    spy = SpyHarness(swarm_harness(), stall_agent=1)
+    app = _swarm_app(tmp_path, make_swarm(subs=["a", "b"], harness=spy))
+    baseline = asyncio.all_tasks()
+    body = json.dumps({"profile": "ignite", "question": "Q"}).encode()
+    inbox: asyncio.Queue = asyncio.Queue()
+    inbox.put_nowait({"type": "http.request", "body": body, "more_body": False})
+    agent_started = asyncio.Event()
+
+    async def send(msg):
+        # the stalling agent has started once its first results_updated frame arrives
+        if b'"agent": 1' in msg.get("body", b"") and b"results_updated" in msg["body"]:
+            agent_started.set()
+
+    scope = {"type": "http", "method": "POST", "path": "/ignite/swarm", "headers": [
+        (b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())],
+        "query_string": b"", "http_version": "1.1", "scheme": "http", "server": ("test", 80),
+        "client": ("c", 1), "root_path": ""}
+    run = asyncio.ensure_future(app(scope, inbox.get, send))
+    await asyncio.wait_for(agent_started.wait(), 5)
+    inbox.put_nowait({"type": "http.disconnect"})  # the client closes the stream
+    await asyncio.wait_for(run, 1)
+    for _ in range(100):  # every agent task is gone within a second
+        if spy.stall_closed and not (asyncio.all_tasks() - baseline - {asyncio.current_task()}):
+            break
+        await asyncio.sleep(0.01)
+    assert spy.stall_closed
+    assert not (asyncio.all_tasks() - baseline - {asyncio.current_task()})
