@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import re
 import time
 from collections.abc import AsyncIterator
@@ -18,6 +19,7 @@ from pydantic import BaseModel
 
 from agentic_search.core.harness import Harness
 from agentic_search.core.result import RankedHit, SearchResult
+from agentic_search.core.secrets import scrub
 from agentic_search.core.state import Trace, Usage
 from agentic_search.core.types import Budget, Hit, ModelUsage, Query, StopReason
 from agentic_search.events import (
@@ -29,6 +31,8 @@ from agentic_search.events import (
 )
 from agentic_search.models.llm import ChatMessage
 from agentic_search.server.models import render_event
+
+logger = logging.getLogger(__name__)
 
 SPLIT_SYSTEM = (
     "You split a question into independent sub-questions for a team of search agents. Each agent "
@@ -188,8 +192,10 @@ class Swarm:
             agents = [_Agent() for _ in range(n)]
             queue: asyncio.Queue[tuple[int, Any]] = asyncio.Queue()
             for i, part in enumerate(split.sub_questions):
+                # A fallback agent searches the question itself, unchanged.
+                query = question if split.fallback else agent_query(question, part)
                 tasks.append(asyncio.create_task(self._run_agent(
-                    i, agent_query(question, part), budget, snapshot_k, agents[i], queue)))
+                    i, query, budget, snapshot_k, agents[i], queue)))
 
             deadline = None if total.max_seconds is None else t0 + total.max_seconds
             running = n
@@ -204,9 +210,12 @@ class Swarm:
                 if event is None:  # agent i's stream ended
                     running -= 1
                     continue
-                rendered = render_event(event, include_content=False, include_trace=include_trace)
-                yield {"type": "agent_event", "agent": i, "event": json.loads(rendered)}
+                yield _agent_event(i, event, include_trace)
             await _cancel(tasks)
+            while not queue.empty():  # events queued at the deadline: their hits are merged
+                i, event = queue.get_nowait()
+                if event is not None:
+                    yield _agent_event(i, event, include_trace)
             yield self._finished(split, agents, snapshot_k, time.monotonic() - t0, at_ms())
         except Exception as exc:
             yield {"type": "swarm_failed", "error_type": type(exc).__name__, "message": str(exc),
@@ -216,7 +225,8 @@ class Swarm:
 
     async def _run_agent(self, idx: int, query: str, budget: Budget, snapshot_k: int,
                          agent: _Agent, queue: asyncio.Queue[tuple[int, Any]]) -> None:
-        """Pump one agent's harness events into the shared queue; (idx, None) marks the end."""
+        """Pump one agent's harness events into the shared queue; (idx, None) marks the end.
+        If the stream raises, the cause is logged and sent on as a `search_failed`-shaped dict."""
         try:
             stream = self.harness.stream(query, top_k=snapshot_k, budget=budget,
                                          snapshot_k=snapshot_k, include_content=False)
@@ -226,8 +236,11 @@ class Swarm:
                     queue.put_nowait((idx, event))
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
+            logger.warning("swarm agent %d failed", idx, exc_info=True)
             agent.status = "failed"
+            queue.put_nowait((idx, {"type": "search_failed", "error_type": type(exc).__name__,
+                                    "message": scrub(str(exc))}))
         finally:
             if agent.status == "cut" and not _cancelling():
                 agent.status = "failed"  # stream ended without a terminal event
@@ -268,6 +281,14 @@ class Swarm:
         return SearchResult(question=Query.of(question), hits=hits,
                             stop_reason=StopReason.DELEGATE_DONE, usage=Usage(**last["usage"]),
                             trace=Trace(), mode="swarm")
+
+
+def _agent_event(idx: int, event: Any, include_trace: bool) -> dict[str, Any]:
+    """Wrap a library event (or an already-shaped dict) as a swarm `agent_event`."""
+    if not isinstance(event, dict):
+        event = json.loads(render_event(event, include_content=False,
+                                        include_trace=include_trace))
+    return {"type": "agent_event", "agent": idx, "event": event}
 
 
 def _cancelling() -> bool:

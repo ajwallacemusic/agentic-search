@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import json
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -8,7 +9,7 @@ import pytest
 
 from agentic_search.core.types import Budget, ModelUsage
 from agentic_search.embedders.local import HashEmbedder
-from agentic_search.events import ResultsUpdated, SearchFailed
+from agentic_search.events import HitSummary, ResultsUpdated, SearchFailed
 from agentic_search.models.llm import ChatResponse
 from agentic_search.testing import KeywordJudge, ScriptedDriver, call
 from demo.ignite.build import build_demo_harness, build_demo_swarm, load_config
@@ -113,8 +114,10 @@ class SpyHarness:
     """Wraps a harness: records each stream call; agent `fail_agent` fails at once, agent
     `stall_agent` sends one results_updated and then hangs."""
 
-    def __init__(self, inner, *, fail_agent: int | None = None, stall_agent: int | None = None):
+    def __init__(self, inner, *, fail_agent: int | None = None, stall_agent: int | None = None,
+                 raise_agent: int | None = None):
         self.inner, self.fail_agent, self.stall_agent = inner, fail_agent, stall_agent
+        self.raise_agent = raise_agent
         self.calls: list[StreamCall] = []
         self.stall_closed = False
 
@@ -126,6 +129,8 @@ class SpyHarness:
         self.calls.append(StreamCall(question, kw["budget"]))
         if idx == self.fail_agent:
             return self._fail()
+        if idx == self.raise_agent:
+            return self._raise()
         if idx == self.stall_agent:
             return self._stall(question, kw)
         return self.inner.stream(question, **kw)
@@ -133,6 +138,10 @@ class SpyHarness:
     async def _fail(self):
         yield SearchFailed(search_id="x", seq=0, turn=0, at_ms=0.0, error_type="RuntimeError",
                            message="model unavailable")
+
+    async def _raise(self):
+        raise ConnectionError("backend down")
+        yield  # pragma: no cover - makes this an async generator
 
     async def _stall(self, question, kw):
         try:
@@ -198,6 +207,50 @@ async def test_each_agent_gets_the_divided_budget_and_its_query(spy_harness):
 async def test_one_failed_agent_does_not_sink_the_swarm():
     fin = (await collect(make_swarm(subs=["a", "b"], fail_agent=1).stream("Q")))[-1]
     assert fin["type"] == "swarm_finished" and fin["agent_status"] == ["done", "failed"]
+
+
+async def test_agent_that_raises_is_logged_and_reported(caplog):
+    spy = SpyHarness(swarm_harness(), raise_agent=1)
+    with caplog.at_level("WARNING", logger="demo.ignite.swarm"):
+        evs = await collect(make_swarm(subs=["a", "b"], harness=spy).stream("Q"))
+    failed = [e for e in evs if e["type"] == "agent_event" and e["agent"] == 1]
+    assert [e["event"] for e in failed] == [
+        {"type": "search_failed", "error_type": "ConnectionError", "message": "backend down"}]
+    assert evs[-1]["agent_status"] == ["done", "failed"]
+    assert any("swarm agent 1 failed" in r.getMessage() and r.exc_info for r in caplog.records)
+
+
+async def test_fallback_agent_searches_the_question_unchanged(spy_harness):
+    evs = await collect(make_swarm(subs=["only one"], harness=spy_harness).stream("Q"))
+    assert evs[1]["fallback"] is True
+    assert [c.question for c in spy_harness.calls] == ["Q"]
+
+
+async def test_events_queued_at_the_deadline_still_reach_the_viewer():
+    """Agent events still queued when time runs out are sent before swarm_finished, so the
+    lane shows every snapshot that was merged."""
+    def snapshot(n):
+        hit = HitSummary(key=f"wiki:d{n}", source="wiki", doc_id=f"d{n}", snippet="s", score=1.0,
+                         first_turn=0)
+        return ResultsUpdated(search_id="x", seq=n, turn=0, at_ms=0.0, hits=[hit], pool_size=1,
+                              n_relevant=0)
+
+    class Burst(SpyHarness):
+        def stream(self, question, **kw):
+            self.calls.append(StreamCall(question, kw["budget"]))
+            return self._burst()
+
+        async def _burst(self):
+            yield snapshot(1)   # no await between yields: both land in the queue at once
+            yield snapshot(2)
+            time.sleep(0.2)     # block the loop past the deadline before the swarm reads them
+            await asyncio.sleep(3600)
+
+    spy = Burst(swarm_harness())
+    evs = await collect(make_swarm(subs=["a", "b"], harness=spy, max_seconds=0.1).stream("Q"))
+    assert evs[-1]["type"] == "swarm_finished" and evs[-1]["agent_status"] == ["cut", "cut"]
+    sent = [e for e in evs if e["type"] == "agent_event"]
+    assert len(sent) == 4 and {e["agent"] for e in sent} == {0, 1}
 
 
 async def test_time_cut_keeps_partial_hits():
