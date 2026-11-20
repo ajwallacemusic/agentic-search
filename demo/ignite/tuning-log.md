@@ -211,3 +211,107 @@ The viewer now has three columns. At 1920×1080 all three fit side by side (each
 wide); no column is stacked. Below 1500 px wide the swarm column goes under the other two, and
 below 1100 px all three stack. Checked on a synthetic swarm replay; the real hero replays come
 in the live rehearsal.
+
+## Round 15: swarm mode, 120 s budget for every mode (2026-11-19)
+
+**What changed.**
+
+- Time budget 60 s → 120 s for **all** modes (retrieval, harness, swarm; `budget.max_seconds`
+  in `config.yaml`), so no mode is cut short where another is not. The viewer's stall line moved
+  to 120 s ("⚠ Past 120 s").
+- New mode **swarm** (`swarm.py`): one planner call splits the question into up to 4 parts, one
+  harness agent per part runs at the same time (2 turns each), RRF (k = 60) merges their lists.
+- **Fair-spend rule:** the whole swarm gets one harness budget (24 tool calls, $0.50, 120 s).
+  The split call's cost comes off the top; each agent gets an even share of the rest. This is a
+  **cap**, not equal spend. The single harness usually stops early (stop-when-done, round 14),
+  while swarm agents use close to their whole share, so the swarm spends about 20–24 tool calls
+  and $0.07–0.08 per question against the harness's 8–18 calls and $0.02–0.06.
+
+**Evals**, all four modes, run one at a time (not in parallel; round 14 showed shared runs score
+lower), 120 s budget. The new numbers replace the 60 s numbers in the results files.
+
+| Set (metric) | bm25 | retrieval | harness | swarm |
+|---|---|---|---|---|
+| MuSiQue (recall@10) | 0.468 | 0.757 | **0.885** | 0.749 |
+| WANDS (nDCG@10) | 0.715 | 0.775 | **0.797** | 0.758 |
+| WANDS match (P@10) | 0.015 | 0.010 | **0.515** | 0.025 |
+
+Cost and time per question, retrieval / harness / swarm:
+
+| Set | Cost | Seconds | Tool calls |
+|---|---|---|---|
+| MuSiQue | $0.014 / $0.042 / $0.080 | 15 / 40 / 33 | 4.6 / 15.3 / 23.8 |
+| WANDS | $0.018 / $0.024 / $0.074 | 14 / 21 / 32 | 5.9 / 8.1 / 22.1 |
+| WANDS match | $0.013 / $0.064 / $0.074 | 10 / 46 / 31 | 3.5 / 18.4 / 20.0 |
+
+Cost of the eval runs (avg cost × n, all modes): MuSiQue about $8.1, WANDS about $6.9, WANDS
+match about $3.0; about $18 in all, of which the swarm is about $10.7. No errors in any mode.
+
+**The swarm lost on every set.** Plainly:
+
+- **MuSiQue:** recall@10 0.749, below the harness (0.885) and level with one pass (0.757), at
+  1.9× the harness's cost. By hops: 2-hop 0.825 (harness 0.925, retrieval 0.800), 3-hop 0.783
+  (0.917, 0.883), 4-hop 0.637 (0.812, 0.588). Its MRR (0.885) is higher than the harness's
+  (0.856) but below retrieval (0.941). It is faster than the harness (33 s vs 40 s) because its
+  agents run at once and get only 2 turns.
+- **WANDS:** nDCG@10 0.758, below both retrieval (0.775) and harness (0.797), at 3× the
+  harness's cost and the slowest of the three (32 s). Plain product search has nothing to split;
+  the parts are rewordings of the same query.
+- **WANDS match:** P@10 0.025 (wood tone 0.029, color 0.029, style 0.017), no better than one
+  pass (0.010) and far below the harness (0.515), at 1.2× the harness's cost. The split runs
+  before anyone has read the anchor, so the agents for the target types do not know which wood
+  tone, color or style to look for.
+
+Why: our questions are chains. Hop 2 needs hop 1's answer; "same wood tone" needs the anchor's
+wood tone first. A swarm runs the parts side by side, so a later part cannot use an earlier
+part's answer. That is the talk point.
+
+**The exception: the model already knows the chain.** Live smoke run on `hero` (swarm only):
+4/4 gold, 25.9 s, $0.0898. The split already named the chain from the model's own memory: "Where
+was Andrew Deveaux born?", "What is the state capital of South Carolina?", "Which cities share a
+border with Columbia...". One rehearsal split even guessed a city ("What county is West Columbia,
+South Carolina located in?"; West Columbia is not the gold city, Forest Acres is), and the
+"cities that border Columbia" agent still found Forest Acres. So the swarm wins on `hero` because
+the model knows the path, not because it searched for it. The eval shows this does not hold in
+general: on MuSiQue's 4-hop questions the swarm's recall is 0.637.
+
+**Rehearsal** (CLI, `run_side_by_side --question <id> --save`, all three modes, one run at a
+time, 2× each; gold in top 10, seconds, cost):
+
+| Question | Run | Retrieval | Harness | Swarm |
+|---|---|---|---|---|
+| `hero` | 1 | 1/4, 15.3 s, $0.0148 | 4/4, 41.1 s, $0.0503 | 4/4, 24.1 s, $0.0866 (4 agents) |
+| `hero` | 2 | 1/4, 12.7 s, $0.0093 | 4/4, 41.6 s, $0.0480 | 4/4, 28.4 s, $0.0734 (3 agents) |
+| `awning` | 1 | 10/26, 12.3 s, $0.0142 | 10/26, 12.9 s, $0.0147 | 10/26, 17.1 s, $0.0454 |
+| `awning` | 2 | 10/26, 14.6 s, $0.0144 | 10/26, 12.0 s, $0.0154 | 10/26, 25.4 s, $0.0571 |
+| `trays` | 1 | 9/19, 12.6 s, $0.0167 | 9/19, 12.7 s, $0.0154 | 9/19, 26.8 s, $0.0616 |
+| `trays` | 2 | 9/19, 13.3 s, $0.0153 | 9/19, 15.3 s, $0.0152 | 9/19, 27.8 s, $0.0532 |
+| `match-hero` | 1 | 0/40, 12.4 s, $0.0145 | 2/40, 45.7 s, $0.0688 | 3/40, 23.5 s, $0.0622 |
+| `match-hero` | 2 | 0/40, 13.8 s, $0.0122 | 6/40, 52.4 s, $0.0610 | 5/40, 32.4 s, $0.0825 |
+
+Every lane finished inside 120 s (longest 52.4 s); no swarm agent was cut; no errors. Saved as
+`runs/20261119-2012*`–`20261119-2020*`. Each saved `-swarm.jsonl` was loaded through the
+viewer's own replay functions (`assignFiles` → `parseJsonl` → `swarmTimeline` → `schedule` →
+`reduceSwarm`, run in node like the viewer tests): all 9 (with the smoke run) parse every line,
+play in order, end done, and give the same gold count as the CLI. The browser rehearsal (live
+and replay, at 1920×1080 on the presentation laptop) is still to do (AJ).
+
+**Surprises.**
+
+- **`match-hero` came in weak for the harness: 2 and 6 of 10** (it was 10 of 10 in 3 of 3 on
+  2026-11-09). In both runs the planner fetched the chair on turn 1 but noted "dswoodtone :
+  light wood" only on turn 2, leaving 2 of its 4 turns for step 2. The 120 s budget is not the
+  limit here (46–52 s); the 4-turn cap is. The match-set average held (P@10 0.515, same as
+  2026-11-09), so this looks like run-to-run variance on one question, but it is a stage risk:
+  keep the 2026-11-09 replay ready.
+- **The swarm scored 3 and 5 on `match-hero`, level with or above the harness in these runs.**
+  Not a real win: its split told the sofa and table agents to "check their wood tone", so they
+  return patio sofas and tables that list a wood tone. Of the 383 patio sofas and tables, 113
+  list a wood tone and 36 are light wood, so about a third of such a list is right by chance.
+  On the 20-question set the swarm's P@10 is 0.025.
+- On `awning` and `trays` all three modes return the same top 10. The swarm costs 3–4× for it.
+
+**Layout.** All three lanes side by side at 1920×1080 (each about 610 px); below 1500 px the swarm
+lane goes under the other two, below 1100 px all three stack. Four explainer cards (retrieval,
+harness, swarm, why), with the flow-diagram notes at about 11 px. No concurrency change: evals
+and rehearsal ran one at a time.

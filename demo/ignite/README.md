@@ -1,25 +1,34 @@
-# Ignite demo: retrieval vs harness, live
+# Ignite demo: retrieval vs harness vs swarm, live
 
-One question, one corpus, one pair of models, two modes. **Retrieval** plans one pass and ranks
+One question, one corpus, one pair of models, three modes. **Retrieval** plans one pass and ranks
 what it finds. **Harness** runs the full loop: plan → query → judge → decide, and goes again when
-it does not have enough. The viewer shows both side by side as they run: which tools the agent
-uses on each turn and what it searches for, the step it is on, when the loop decides to keep
-going, and the bill.
+it does not have enough. **Swarm** splits the question into parts with one planner call, runs one
+harness agent per part at the same time (up to 4, the harness budget divided between them), and
+merges their lists (RRF). The viewer shows all three side by side as they run: which tools the
+agent uses on each turn and what it searches for, the step it is on, when the loop decides to
+keep going, and the bill.
 
 Talk: "Will the Real Agentic Search Please Stand Up?" (Egen Ignite). Specs:
 `docs/superpowers/specs/2026-10-29-ignite-demo-design.md`,
-`docs/superpowers/specs/2026-10-30-ignite-wands-design.md`.
+`docs/superpowers/specs/2026-10-30-ignite-wands-design.md`,
+`docs/superpowers/specs/2026-11-19-ignite-swarm-design.md`.
 
-## The story in three parts
+## The story in four parts
 
 1. **MuSiQue: the loop wins on multi-hop questions.** Each hop needs a fact from the hop before
    it. One planned pass cannot know what to search for next.
 2. **WANDS: the loop does not help plain product search.** Same models, same settings. Ranking
-   is about the same (within noise) for about 3× the cost. Use the least agentic setting that
-   works.
+   is about the same (within noise; nDCG@10 0.797 vs 0.775) for about 1.4× the cost: the loop
+   usually stops after one turn. Use the least agentic setting that works.
 3. **WANDS match: the loop wins again when the question has steps.** Same WANDS catalogue, our own
    rule-labeled questions: "I have product X. Find a Y with the same wood tone." First find X and
    read its wood tone, then search for Y. One pass cannot do the second step.
+4. **Swarm: splitting does not help when the work is a chain.** A swarm splits the work into
+   parts that run side by side. Our questions are chains: hop 2 needs hop 1's answer, and "same
+   wood tone" needs the anchor's wood tone read first. So the swarm loses to the single harness
+   on all three sets, at a higher cost, and on WANDS match it is no better than one pass. The
+   exception is when the model already knows the chain: on `hero` the split named the state
+   capital and its neighbours from the model's own memory, and the swarm found 4 of 4.
 
 Three question sets, two corpora, all in `questions.yaml`:
 
@@ -52,11 +61,14 @@ the question's own words does not find them.
 
 ### WANDS picks
 
-- `awning` (query 260, "retractable side awning"): a tie. Both modes nDCG@10 1.0. Since the
-  stop-when-done rule (round 14) the harness stops after 1 turn: same cost as one pass (live
-  2026-11-10: 1 turn, 10 s, $0.015 vs retrieval $0.015, 10 of 10 right in both).
-- `trays` (query 346, "nesting tray set"): the harness costs about 4.5× more and scores a little
-  lower (nDCG@10 0.93 vs 0.96).
+- `awning` (query 260, "retractable side awning"): a tie. Retrieval and harness both nDCG@10 1.0
+  (2026-11-10). Since the stop-when-done rule (round 14) the harness stops after 1 turn: same
+  cost as one pass. Rehearsal 2026-11-19, 2 runs: all three modes 10 of 26 gold in top 10 (the
+  whole top 10); retrieval and harness about $0.015 and 12–15 s, swarm $0.045–0.057 and
+  17–25 s (3–4× the cost for the same list).
+- `trays` (query 346, "nesting tray set"): a tie at the same cost since round 14 (it was 4.5× at
+  60 s before the rule). Rehearsal 2026-11-19, 2 runs: all three modes 9 of 19 gold in top 10;
+  retrieval and harness about $0.015–0.017, 13–15 s; swarm $0.053–0.062, 27–28 s.
 
 ### WANDS match hero
 
@@ -70,6 +82,19 @@ that wood tone. The question never says "light wood", so a single pass searches 
 for "patio sofa" and finds no gold. The harness makes a 2-step plan, opens the chair, notes "wood
 tone: light wood" in its notebook, then searches patio sofas and tables for it.
 
+The swarm cannot do this: its split runs before anyone has read the chair, so the agents get
+"find the chair's wood tone", "find patio sofas and their wood tones", "find patio tables and
+their wood tones" at the same time. The sofa and table agents do not know which wood tone to look
+for. They return patio pieces that list some wood tone, and about a third of those are light
+wood (36 of the 113 patio sofas and tables that list one), so the swarm lands 3–5 of 10 by
+chance.
+
+**Rehearsal warning (2026-11-19):** in both rehearsal runs the harness took until turn 2 to note
+the wood tone, leaving 2 turns for step 2, and scored only 2 and 6 of 10 (swarm 3 and 5,
+retrieval 0). On 2026-11-09 it was 10 of 10 in 3 of 3 runs. Across all 20 match questions the
+harness still averages P@10 0.515 against the swarm's 0.025, so quote the average. Have the
+2026-11-09 replay ready in case the live run comes in weak.
+
 More match examples, one per attribute (picked from a scan of all 20 rules on 2026-11-09, then
 rehearsed twice each; gold in top 10, retrieval / harness):
 
@@ -79,8 +104,8 @@ rehearsed twice each; gold in top 10, retrieval / harness):
 | `match-vase` | `match-17` | Bruster metal rock climber decor → fountain or vase, same color | 0, 0 | 8, 7 |
 | `match-faucet` | `match-06` | Nuala toilet paper holder → sink faucet and towel bar, same style | 0, 0 | 9, 8 |
 
-Harness time 38–51 s. The answer box names matching products for the harness and says "not found"
-for retrieval.
+Harness time 38–51 s (2026-11-09, 60 s budget, before the swarm; not re-run). The answer box
+names matching products for the harness and says "not found" for retrieval.
 
 How the questions are made (`public/wands_match.py`):
 
@@ -119,7 +144,7 @@ Models and prices are in `config.yaml` (Vertex, `global` endpoint, project `ajw-
 | planner (driver) | `gemini-4-argon` | $2.00 / $10.00 | `reasoning_effort: low`, cut at 45 s, 1 retry |
 | judge | `gemini-3.5-flash-lite` | $0.30 / $2.50 | cut at 15 s, 1 retry |
 
-Both modes use the same pair. Argon prices are the introductory prices; they are reported to go
+All three modes use the same pair. Argon prices are the introductory prices; they are reported to go
 to $4 / $20 on 2026-12-01. Why Argon: with `gemini-3.5-flash` as the planner, the WANDS match
 harness scored P@10 0.055, because Flash did not write facts to its notebook. Argon does
 (`tuning-log.md`, round 10).
@@ -139,8 +164,8 @@ merged). The planner keeps a short step plan and a notebook of
 facts it read in documents, with the document each fact came from. The loop does not stop while a
 step is open. Once no step is open (no plan, or every step done), it stops when at least 8 of
 the top 10 are judged relevant or a turn adds no judged-relevant result (library setting
-`stop_when_done`, tuning-log round 14). Simple WANDS questions now take 1.5 turns and about
-27 s instead of 3.2 turns and 47 s, at the same quality. The viewer shows the steps and facts as they happen. The demo itself changes nothing under
+`stop_when_done`, tuning-log round 14). Simple WANDS questions now take 1.4 turns and about
+21 s instead of 3.2 turns and 47 s, at the same quality. The viewer shows the steps and facts as they happen. The demo itself changes nothing under
 `src/`.
 
 The library fixes the demo once worked around are merged (library PRs #4, #5 and #6): the
@@ -149,12 +174,29 @@ sentence-transformers embedder is thread-safe, `vertex` clients take `reasoning_
 note. The viewer still reads notes from the final trace as a fallback, for replays saved before
 the fix.
 
+### How the swarm is built
+
+`swarm.py` (demo code, nothing under `src/`): one planner call splits the question into parts
+(falls back to the whole question if the split fails), then one harness agent per part runs at
+the same time, up to 4 (`swarm:` in `config.yaml`: `max_agents: 4`, `agent_max_turns: 2`,
+`rrf_k: 60`). RRF merges their top lists. `serve.py` streams it at `/ignite/swarm`.
+
+**Fair spend.** The whole swarm gets the same budget as one harness run (`budget` in
+`config.yaml`: 24 tool calls, $0.50, 120 s). The split call's cost comes off the top; each agent
+gets an even share of what is left (tool calls rounded down, at least 1) and 2 turns. The
+whole run is cut at 120 s; agents still running are cancelled and their hits so far are kept.
+This caps the swarm at one harness budget. It does **not** make actual spend equal: a single
+harness usually stops early (stop-when-done), while each swarm agent tends to use its whole
+share, so the swarm spends about 20–24 tool calls and about $0.07–0.08 per question against the
+harness's 8–18 calls and $0.02–0.06.
+
 ## Commands
 
 ```bash
-uv run python -m demo.ignite.run_side_by_side --question hero         # terminal trace + summary
+uv run python -m demo.ignite.run_side_by_side --question hero         # terminal trace + summary (all three modes)
 uv run python -m demo.ignite.run_side_by_side --question match-hero   # WANDS match hero
 uv run python -m demo.ignite.run_side_by_side --question hero --save  # also writes runs/<stamp>-hero-*.jsonl
+uv run python -m demo.ignite.run_side_by_side --question hero --modes retrieval,harness  # skip the swarm
 uv run python -m demo.ignite.serve                           # http://127.0.0.1:8765/ (viewer + API)
 uv run pytest demo/ignite/tests -q                           # demo tests (offline; needs node)
 ```
@@ -171,8 +213,11 @@ is set (the viewer itself runs the `ignite` and `ignite-wands` profiles).
 
 `viewer/index.html`, one file, no build step, no network calls except to `serve.py`.
 
-- **Live:** open `http://127.0.0.1:8765/`, pick a question (grouped by set), press **Run**. Both modes
-  start at the same time.
+- **Live:** open `http://127.0.0.1:8765/`, pick a question (grouped by set), press **Run**. All three
+  modes start at the same time. At 1920×1080 the three columns sit side by side (about 610 px
+  each); below 1500 px the swarm column goes under the other two, below 1100 px all three stack.
+- **Swarm column:** the split's parts, then one row per agent: its part, one dot per turn, hits
+  so far and status (running, ✓ done, ✗ failed, ✂ cut at 120 s). Then the merged top 10.
 - **Swimlanes:** one row per tool (`lexical`, `vector`, `hybrid`, `filter`, `fetch`, …), one
   column per turn. Each dot shows what that call searched for; hover for the full arguments.
 - **Steps:** under the harness lanes, the step plan with the current step marked **NOW**, and
@@ -189,38 +234,64 @@ is set (the viewer itself runs the `ignite` and `ignite-wands` profiles).
   its full text, with the deciding field highlighted, and the reason it counts or not. WANDS match
   also shows right results per target type, so "9 faucets, 0 towel bars" is visible. Needs `serve`.
 - **Replay:** press **Switch to replay** (or open `viewer/index.html` straight from Finder; no
-  server or internet needed). Pick the three files of one saved run:
-  `<stamp>-<id>-retrieval.jsonl`, `<stamp>-<id>-harness.jsonl` and `<stamp>-<id>.meta.json`.
+  server or internet needed). Pick the files of one saved run:
+  `<stamp>-<id>-retrieval.jsonl`, `<stamp>-<id>-harness.jsonl`, `<stamp>-<id>-swarm.jsonl` and
+  `<stamp>-<id>.meta.json`. Runs saved before 2026-11-19 have no swarm file; the swarm column
+  then has nothing to play.
   Press **Play**. Speed 1×/2×/4×, **Pause**, **Replay again**. Gold docs get ★ gold in replay
   only.
 
 ## Numbers for the slides
 
-All numbers: Argon planner, step tracking on, project `ajw-sandbox-497707`, one run per
-question, seed 7, 2026-11-09 (judge sees noted facts; `max_limit: 20`; `tuning-log.md` round 11).
+All numbers: Argon planner, step tracking on, stop-when-done on, project `ajw-sandbox-497707`,
+one run per question, seed 7, a 120 s budget for every mode, evals run one at a time,
+2026-11-19 (`tuning-log.md` round 15).
 
-| set | what it tests | sample | metric | bm25 | retrieval | harness | harness cost vs retrieval |
+| set | what it tests | sample | metric | bm25 | retrieval | harness | swarm |
 |---|---|---|---|---|---|---|---|
-| MuSiQue (multi-hop Wikipedia) | does the loop chase hops? | 60 questions (20 each 2/3/4-hop), 5,000 paragraphs | recall@10 | 0.468 | 0.697 | **0.875** | ~3.3× |
-| WANDS (Wayfair product search) | does the loop help plain ranking? | 60 queries, 42,994 products | nDCG@10 | 0.715 | 0.787 | 0.766 | ~3.1× |
-| WANDS match (ours) | does the loop help when a step needs a fact read on the way? | 20 questions, same catalogue | P@10 | 0.015 | 0.050 | **0.515** | ~4.6× |
+| MuSiQue (multi-hop Wikipedia) | does the loop chase hops? | 60 questions (20 each 2/3/4-hop), 5,000 paragraphs | recall@10 | 0.468 | 0.757 | **0.885** | 0.749 |
+| WANDS (Wayfair product search) | does the loop help plain ranking? | 60 queries, 42,994 products | nDCG@10 | 0.715 | 0.775 | 0.797 | 0.758 |
+| WANDS match (ours) | does the loop help when a step needs a fact read on the way? | 20 questions, same catalogue | P@10 | 0.015 | 0.010 | **0.515** | 0.025 |
 
-- **MuSiQue:** 4-hop recall@10 0.800 vs 0.575.
-- **WANDS:** -0.02 nDCG@10 for about 3× the cost and about 3× the time (47 s vs 15 s). The sign
-  has flipped between runs (+0.03 on 2026-10-30); call it a tie.
-- **WANDS match:** wood tone 0.714 vs 0.086, color 0.414 vs 0.014, style 0.400 vs 0.050 (P@10).
-  Quote the average, not only the hero.
-- The harness is slow: about 40–55 s per question, against about 10–15 s for retrieval.
+Average cost and time per question (retrieval / harness / swarm):
 
-Hero runs (`tuning-log.md`, round 10):
+| set | cost | seconds | tool calls |
+|---|---|---|---|
+| MuSiQue | $0.014 / $0.042 / $0.080 | 15 / 40 / 33 | 4.6 / 15.3 / 23.8 |
+| WANDS | $0.018 / $0.024 / $0.074 | 14 / 21 / 32 | 5.9 / 8.1 / 22.1 |
+| WANDS match | $0.013 / $0.064 / $0.074 | 10 / 46 / 31 | 3.5 / 18.4 / 20.0 |
 
-- MuSiQue `hero`: harness 4/4 gold in 3 of 3 runs, 31–35 s, about $0.043. Retrieval 1/4, about
-  $0.010.
-- WANDS match `match-hero` (2026-11-09): harness 10 of 10 gold in 3 of 3 runs, 46–47 s, about
-  $0.06. Retrieval 0 in all 3.
+- **MuSiQue:** 4-hop recall@10 harness 0.812, retrieval 0.588, swarm 0.637. Harness about 3.1×
+  the cost of retrieval.
+- **WANDS:** harness +0.02 nDCG@10 over retrieval for about 1.4× the cost (1.4 turns, 21 s vs
+  14 s). The sign has flipped between runs (-0.02 on 2026-11-09); call it a tie.
+- **WANDS match:** harness P@10 by attribute: wood tone 0.700, color 0.371, style 0.467;
+  retrieval 0.000, 0.029, 0.000. Harness about 5× the cost of retrieval. Quote the average, not
+  only the hero.
+- **Swarm: it loses everywhere.** Below the harness on all three sets, about level with one pass
+  on MuSiQue and WANDS, and no better than one pass on WANDS match (P@10 0.025: wood tone 0.029,
+  color 0.029, style 0.017). It costs the most: about 1.9× the harness on MuSiQue, 3× on WANDS,
+  1.2× on WANDS match. The split cannot know what step 1 will find (the anchor's wood tone, the
+  next hop's name), so the agents search for the wrong thing at the same time.
+- The harness is slow: about 40–46 s per chain question, 21 s on plain WANDS, against about
+  10–15 s for retrieval.
 
-Say on the slide: both modes run with `max_limit: 20` and `max_calls_per_turn: 6`
-(`config.yaml`), and a budget of 4 turns.
+Hero runs (rehearsal 2026-11-19, 120 s budget, `tuning-log.md` round 15):
+
+- MuSiQue `hero`, 2 runs: harness 4/4 gold both times, 41–42 s, about $0.049. Retrieval 1/4,
+  about $0.010–0.015. Swarm 4/4 both times, 24–28 s, $0.073–0.087: the one place it wins on
+  time, because the split already names the chain from the model's own memory ("What is the
+  state capital of South Carolina?", "Which cities border Columbia, South Carolina?"). Say so on
+  stage: the swarm works here because the model knows the answer path, not because it searched
+  for it.
+- WANDS match `match-hero`, 2 runs: harness 2 and 6 of 10, 46–52 s, $0.061–0.069; swarm 3 and 5,
+  24–32 s, $0.062–0.083; retrieval 0. Weaker than on 2026-11-09 (harness 10 of 10 in 3 of 3,
+  46–47 s); see the warning above.
+
+Say on the slide: all modes run with `max_limit: 20` and `max_calls_per_turn: 6`
+(`config.yaml`) and a budget of 4 turns, 24 tool calls, $0.50 and 120 s. The swarm gets that same
+budget in total, split between its agents (2 turns each); it is a cap, and the swarm spends more
+of it than the harness does.
 
 ## Public datasets and re-runs
 
@@ -228,12 +299,14 @@ MuSiQue and WANDS have human labels; nothing in them was written or tuned by us.
 uses the WANDS catalogue with our rule labels.
 
 ```bash
-uv run python -m demo.ignite.public.eval_public --dataset musique       # --n 20 per hop, --corpus-size 5000
-uv run python -m demo.ignite.public.eval_public --dataset wands         # --n 60
-uv run python -m demo.ignite.public.eval_public --dataset wands-match   # all 20 rules
+uv run python -m demo.ignite.public.eval_public --dataset musique --modes bm25,retrieval,harness,swarm      # --n 20 per hop, --corpus-size 5000
+uv run python -m demo.ignite.public.eval_public --dataset wands --modes bm25,retrieval,harness,swarm        # --n 60
+uv run python -m demo.ignite.public.eval_public --dataset wands-match --modes bm25,retrieval,harness,swarm  # all 20 rules
 ```
 
-The three runs took about 25, 25 and 10 minutes and cost about $2.70, $3.80 and $1.30.
+Run them one at a time: run together they share the model and run slower, and hit the time
+budget (tuning-log round 14). With all four modes the three runs cost about $8.10, $6.90 and
+$3.00 (about $18 in all; the swarm is more than half of it).
 
 Why MuSiQue and not HotpotQA: MuSiQue was built to drop questions a single-hop shortcut can answer,
 a known weakness of HotpotQA, and each question ships with its own 20 paragraphs, so a sample is
@@ -247,24 +320,32 @@ WANDS, Chen et al., ECIR 2022 (MIT), github.com/wayfair/WANDS.
 1. Rehearse three times on the presentation laptop, on the venue network if you can.
 2. Before the talk: `gcloud auth application-default login` (tokens expire), start `serve` (fills
    the embedding cache on the first start), run `hero` and `match-hero` once to warm up, then
-   reload the page.
+   reload the page. Check all three lanes at 1920×1080 on the projector.
 3. Keep a second tab open on `viewer/index.html` from disk with the backup runs loaded in replay.
 4. Keep the three `results-*.md` files open in a third tab.
 
 ## Fallback
 
-If a live run stalls past 60 seconds or shows **✗ Search failed**: press **Switch to replay**
+If a live run stalls past 120 seconds or shows **✗ Search failed**: press **Switch to replay**
 (or go to the replay tab) and say so plainly: "the live API is slow, here is the same run from
 this morning."
 
 Backup runs in `runs/` (Argon):
 
+- 2026-11-19, all three modes, 120 s budget (rehearsal; gold in top 10 retrieval / harness /
+  swarm): `20261119-201201-hero-*` (1/4, 4/4, 4/4), `20261119-201330-hero-*` (1/4, 4/4, 4/4),
+  `20261119-201503-awning-*` and `20261119-201558-awning-*` (10, 10, 10),
+  `20261119-201703-trays-*` and `20261119-201808-trays-*` (9, 9, 9),
+  `20261119-201917-match-hero-*` (0, 2, 3), `20261119-202051-match-hero-*` (0, 6, 5).
+  `20261119-175800-hero-swarm.jsonl`: a swarm-only smoke run (4/4). For a strong match-hero
+  replay use the 2026-11-09 runs below (no swarm file).
+
 - `20261030-133739-hero-*`, `20261030-133833-hero-*`, `20261030-133927-hero-*`: MuSiQue hero,
   harness 4/4, retrieval 1/4.
 - `20261109-132250-hero-*` (retrieval 2/4), `20261109-132357-hero-*` (retrieval 1/4): MuSiQue hero,
-  harness 4/4, current code; decide events carry the controller's notes.
+  harness 4/4, 60 s budget; decide events carry the controller's notes.
 - `20261109-121547-match-hero-*`, `20261109-121658-match-hero-*`, `20261109-121804-match-hero-*`:
-  harness 10 gold in top 10, retrieval 0 (current code).
+  harness 10 gold in top 10, retrieval 0 (60 s budget, no swarm file).
 - `20261109-163827-*` and `20261109-1639*-*` (`match-bookcase`, `match-vase`, `match-faucet`):
   2 runs each, harness 7–10 gold in top 10, retrieval 0.
 - `20261030-*-match-hero-*`: older (judge without facts); harness 10, 10 and 8 gold.
@@ -272,8 +353,10 @@ Backup runs in `runs/` (Argon):
 
 The `20261029-*-hero-*` runs are older, from the Flash planner.
 
-**Known risk: live time.** A harness run takes 30–60 s with Argon, and the viewer shows "⚠ Past
-60 s. Switch to replay?" in a live column that runs long. A planner call that times out twice in a
-row ends the harness run with `APITimeoutError` (2 of 60 MuSiQue runs in the eval). One planner
-call waits at most about 90 s (45 s, one retry). For the WANDS match hero, expect a weak run (2/10
-once in 5); keep the replay ready.
+**Known risk: live time.** A harness run takes 30–60 s with Argon, a swarm run 25–40 s, and the
+viewer shows "⚠ Past 120 s. Switch to replay?" in a live column that runs long. The swarm is cut
+at 120 s by itself (agents still running show ✂ cut, their hits so far are kept). A planner call that times out twice in a
+row ends the harness run with `APITimeoutError` (2 of 60 MuSiQue runs in an earlier eval;
+none in the 2026-11-19 evals). One planner call waits at most about 90 s (45 s, one retry).
+For the WANDS match hero, expect a weak run: 2/10 once in 5 before 2026-11-19, then 2/10 and
+6/10 in the two 2026-11-19 rehearsal runs; keep the replay ready.
