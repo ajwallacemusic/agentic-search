@@ -127,6 +127,8 @@ async def _swarm_sse(events: AsyncIterator[dict[str, Any]], receive: Any) -> Asy
             yield format_sse(event["type"], json.dumps(event))
     finally:
         watcher.cancel()
+        if watcher.done() and not watcher.cancelled():
+            watcher.exception()  # mirrors sse_body: avoid "exception was never retrieved"
         if pending is not None and not pending.done():
             pending.cancel()
             await asyncio.wait({pending})

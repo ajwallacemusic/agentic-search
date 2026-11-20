@@ -86,8 +86,8 @@ The swarm cannot do this: its split runs before anyone has read the chair, so th
 "find the chair's wood tone", "find patio sofas and their wood tones", "find patio tables and
 their wood tones" at the same time. The sofa and table agents do not know which wood tone to look
 for. They return patio pieces that list some wood tone, and about a third of those are light
-wood (36 of the 113 patio sofas and tables that list one), so the swarm lands 3–5 of 10 by
-chance.
+wood (40 of the 122 patio sofas and tables that list one), so on `match-hero` the swarm lands 3–5 of
+10 by chance. This explains that one question only; the set-wide wood-tone swarm P@10 is 0.029.
 
 **Rehearsal warning (2026-11-19):** in both rehearsal runs the harness took until turn 2 to note
 the wood tone, leaving 2 turns for step 2, and scored only 2 and 6 of 10 (swarm 3 and 5,
@@ -279,8 +279,10 @@ Average cost and time per question (retrieval / harness / swarm):
 Hero runs (rehearsal 2026-11-19, 120 s budget, `tuning-log.md` round 15):
 
 - MuSiQue `hero`, 2 runs: harness 4/4 gold both times, 41–42 s, about $0.049. Retrieval 1/4,
-  about $0.010–0.015. Swarm 4/4 both times, 24–28 s, $0.073–0.087: the one place it wins on
-  time, because the split already names the chain from the model's own memory ("What is the
+  about $0.009–0.015. Swarm 4/4 both times, 24–28 s, $0.073–0.087: it ties the harness on gold
+  and is faster, as it is on MuSiQue overall and on `match-hero` (the swarm eval ran one question
+  at a time and the others two, so the seconds are only roughly comparable). The split already
+  names the chain from the model's own memory ("What is the
   state capital of South Carolina?", "Which cities border Columbia, South Carolina?"). Say so on
   stage: the swarm works here because the model knows the answer path, not because it searched
   for it.

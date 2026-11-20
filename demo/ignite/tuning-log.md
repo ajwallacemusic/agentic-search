@@ -306,12 +306,14 @@ and replay, at 1920×1080 on the presentation laptop) is still to do (AJ).
   keep the 2026-11-09 replay ready.
 - **The swarm scored 3 and 5 on `match-hero`, level with or above the harness in these runs.**
   Not a real win: its split told the sofa and table agents to "check their wood tone", so they
-  return patio sofas and tables that list a wood tone. Of the 383 patio sofas and tables, 113
-  list a wood tone and 36 are light wood, so about a third of such a list is right by chance.
+  return patio sofas and tables that list a wood tone. Of the 420 patio sofas and tables, 122
+  list a wood tone and 40 are light wood, so about a third of such a list is right by chance
+  (this explains `match-hero` only; the set-wide wood-tone swarm P@10 is 0.029).
   On the 20-question set the swarm's P@10 is 0.025.
 - On `awning` and `trays` all three modes return the same top 10. The swarm costs 3–4× for it.
 
 **Layout.** All three lanes side by side at 1920×1080 (each about 610 px); below 1500 px the swarm
 lane goes under the other two, below 1100 px all three stack. Four explainer cards (retrieval,
-harness, swarm, why), with the flow-diagram notes at about 11 px. No concurrency change: evals
-and rehearsal ran one at a time.
+harness, swarm, why), with the flow-diagram notes at 13 px in the CSS. Concurrency: the swarm eval rows ran one
+question at a time (concurrency 1) while retrieval and harness ran two at a time, so the swarm's
+seconds are not directly comparable; the results files say so. Rehearsal runs were one at a time.

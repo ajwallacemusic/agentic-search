@@ -13,6 +13,7 @@ async def test_eval_public_bm25_on_fixture_writes_tables(tmp_path):
     for group in ("2hop", "3hop", "4hop", "All"):
         assert f"## {group}" in text
     assert "| bm25 |" in text and "nDCG@10" in text and "abc" in text and "per_hop" in text
+    assert "concurrency 1" in text and "not directly comparable" in text
 
 
 async def test_all_row_pools_the_group_runs(tmp_path):

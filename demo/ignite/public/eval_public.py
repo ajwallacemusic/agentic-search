@@ -93,7 +93,11 @@ async def write_results(sample: PublicSample, modes: list[str], out: Path, *,
               "use the same planner, judge and settings as the Ignite demo (`config.yaml`). "
               "`swarm`: one planner call splits the question; up to 4 harness agents run at the "
               "same time on the parts with the harness budget divided between them; RRF merges "
-              "their lists.", "",
+              "their lists.",
+              "",
+              "`swarm` ran one query at a time (concurrency 1; its agents already run in "
+              "parallel) while the other modes ran two at a time, so its seconds are not "
+              "directly comparable.", "",
               "One run per query. Model runs vary, so treat differences of a few points as noise.",
               ""]
     text = "\n".join(lines)
