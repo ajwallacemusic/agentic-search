@@ -317,3 +317,55 @@ lane goes under the other two, below 1100 px all three stack. Four explainer car
 harness, swarm, why), with the flow-diagram notes at 13 px in the CSS. Concurrency: the swarm eval rows ran one
 question at a time (concurrency 1) while retrieval and harness ran two at a time, so the swarm's
 seconds are not directly comparable; the results files say so. Rehearsal runs were one at a time.
+
+## Round 16: does the swarm work when the parts are independent? (2026-11-23)
+
+**Why.** Round 15's swarm lost on all three sets, and all three are chain questions. SID's report
+says swarms win on wide "find every item" searches and gain little on chain sets (HotpotQA
++0.05). AJ: "I want to validate that swarm can work." Design:
+`docs/superpowers/specs/2026-11-23-swarm-wide-recall-design.md`.
+
+**What changed.**
+
+- New eval set `wands-multi` (`public/wands_multi.py`, frozen in `wands_multi.yaml`, seed 7,
+  built before any model ran): 20 shopping tasks, each joining 3 or 4 real WANDS queries from
+  different product classes. Text is a fixed template ("I'm shopping for a few things: a; b; c.").
+  Gold per part = that query's human Exact labels.
+- New scores: part coverage@10 (share of parts with an Exact product in the top 10; headline) and
+  part recall@30 (per part, capped so a huge part does not swamp a small one).
+- New control mode `swarm-4x`: 4× tool calls and cost (96, $2.00), 4 turns per agent (AJ: with 2
+  turns × 6 calls an agent can never use more than 12 calls), same 120 s. Eval only.
+- Pass mark set before the run: the swarm works if its part coverage beats the harness by ≥ 0.10
+  and its part recall is not lower.
+- No change to the swarm algorithm, the viewer or the library.
+
+**Result: the swarm works here.**
+
+| mode | part coverage@10 | part recall@30 | nDCG@10 | cost | seconds | tool calls |
+|---|---|---|---|---|---|---|
+| retrieval | 0.642 | 0.552 | 0.894 | $0.019 | 17.2 | 6.0 |
+| harness | 0.546 | 0.586 | 0.809 | $0.027 | 26.2 | 8.4 |
+| swarm | **0.800** | 0.642 | 0.756 | $0.071 | 22.6 | 21.8 |
+| swarm-4x | **0.863** | 0.646 | 0.767 | $0.082 | 27.3 | 26.6 |
+
+- Gap +0.254 on part coverage at the fair budget, and higher part recall: the bar is met with
+  room. It is not "only spend": the fair-budget swarm passes on its own. The 4× control adds a
+  little (+0.063 coverage) at little extra real spend, because agents stop when done.
+- The harness covers fewer parts than one plain pass (0.546 vs 0.642). Its loop goes deep on
+  one or two parts and fills the top 10 with them; P@10 and nDCG stay high, but whole parts go
+  missing. The swarm gives each part its own agent, so each part gets a share of the list.
+- nDCG@10 is lowest for the swarm. It pools all parts' labels, so it rewards a top 10 drawn
+  from one big part. That is why part coverage is the headline here (see the results file).
+- Cost: the swarm costs 2.7× the harness per question. 20 questions is a small set; treat the
+  numbers as rough. No errors in any mode.
+
+**Spend:** full run about $3.96 (avg cost × 20, all four modes), smoke run (2 questions) about
+$0.35.
+
+**What it means.** The swarm is a tool for wide questions whose parts stand alone; the loop is
+the tool for chains. Same models, same budget cap: the shape of the question picks the winner.
+That is the talk point, and it matches SID's report. Next: part B (agents that talk) tests
+whether a shared board can help the swarm on chains without losing this win.
+
+**Set notes.** m01 and m10 hold near-duplicate desk queries (different WANDS ids); m08 has 6
+products Exact for two parts. Neither favours a mode. Not re-rolled.

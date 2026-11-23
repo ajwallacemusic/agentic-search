@@ -42,6 +42,11 @@ Be open about the picks: every demo question was picked from a full scan because
 point clearly (`tuning-log.md`, rounds 9 and 10). The fair numbers are the averages in
 `results-musique.md`, `results-wands.md` and `results-wands-match.md`.
 
+Swarm check (`wands-multi`, eval only, not on stage): 20 shopping tasks whose parts do not depend
+on each other, built from real WANDS queries and human labels (`wands_multi.yaml`). There the
+swarm beats the harness on part coverage@10 (0.800 vs 0.546). See `results-wands-multi.md` and
+`tuning-log.md`, round 16.
+
 ### MuSiQue hero
 
 `hero` (`4hop1__777217_32392_823060_610794`):
