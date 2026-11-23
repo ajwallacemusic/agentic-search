@@ -25,6 +25,8 @@ class PublicSample:
     groups: dict[str, list[str]]
     # query id -> the true answer and its aliases (MuSiQue only; shown in the demo, not scored)
     answers: dict[str, list[str]] = field(default_factory=dict)
+    # question id -> part id -> Exact doc ids (wands-multi only; scored by part)
+    parts: dict[str, dict[str, list[str]]] = field(default_factory=dict)
 
     def to_beir(self) -> BeirDataset:
         corpus = {d.doc_id: {"title": str(d.metadata.get("title", "")), "text": text_of(d.content)}
