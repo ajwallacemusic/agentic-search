@@ -86,8 +86,10 @@ AJ picked both 1 and 2 on 2026-11-23, in the order 1 then 2.
 
 - `retrieval`, `harness`, `swarm`: as in round 15. Budget is `config.yaml`'s `budget` (24 tool
   calls, $0.50, 120 s). For the swarm this total is shared by all agents.
-- `swarm-4x`: the same swarm with a total of 96 tool calls and $2.00. Time stays at 120 s, and
-  agent turns stay at 2. Eval-only. It is a control: it shows whether extra spend explains a win.
+- `swarm-4x`: the same swarm with a total of 96 tool calls and $2.00, and 4 turns per agent
+  (AJ, 2026-11-23: with 2 turns × 6 calls per turn an agent can never use more than 12 calls, so
+  4× would really be 2×). Time stays at 120 s. Eval-only. It is a control: it shows whether extra
+  spend explains a win.
 - Run one mode at a time and one set at a time, with swarm agents at concurrency 1 as in round 15.
 
 ### Pass mark (set before the run)

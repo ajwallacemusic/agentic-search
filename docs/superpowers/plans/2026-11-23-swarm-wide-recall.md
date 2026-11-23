@@ -33,7 +33,7 @@ recall@30 when a sample has parts; it also prints a parts table and the verdict.
 - Part recall@30 = mean over parts of min(1, |part Exact ∩ top 30| ÷ min(|part Exact|,
   ⌊30 ÷ number of parts⌋)). A product that is Exact for several parts counts for each.
 - `swarm-4x` = the swarm with total budget `max_tool_calls` 96 and `max_cost_usd` 2.00;
-  `max_seconds` stays 120, `agent_max_turns` stays 2. Eval only.
+  and `agent_max_turns` 4 (AJ, 2026-11-23); `max_seconds` stays 120. Eval only.
 - Swarm modes (`swarm`, `swarm-4x`) run at concurrency 1; others at 2 (as round 15).
 - Verdict, checked in this order, gap = swarm coverage − harness coverage (absolute):
   1. `works`: gap ≥ 0.10 and swarm part recall@30 ≥ harness part recall@30.
@@ -210,10 +210,11 @@ async def test_old_datasets_unchanged():
 - Consumes: `sample_wands_multi`, `MULTI_PATH` (Task 1); `parts_table`, `verdict`,
   `evaluate_groups(parts=...)` (Task 2); `build_demo_swarm`, `build_harness_for`, `load_config`.
 - Produces:
-  - `scaled_budget_cfg(cfg: dict, factor: int) -> dict` — a deep copy with
-    `budget.max_tool_calls` and `budget.max_cost_usd` times `factor`; `max_seconds`,
-    `max_turns` and the `swarm` block unchanged.
-  - `_harness_for` handles `"swarm-4x"`: `build_harness_for(scaled_budget_cfg(cfg, 4), ...)`
+  - `a deep copy with
+    `budget.max_tool_calls` and `budget.max_cost_usd` times `factor`; signature `scaled_budget_cfg(cfg: dict, factor: int, agent_max_turns: int) -> dict` sets
+    `swarm.agent_max_turns`; called with `(cfg, 4, 4)`. `max_seconds` and `budget.max_turns`
+    unchanged.
+  - `_harness_for` handles `"swarm-4x"`: `build_harness_for(scaled_budget_cfg(cfg, 4, 4), ...)`
     then `build_demo_swarm`.
   - `--dataset wands-multi` passes `--n` through to `sample_wands_multi` (settings `{"questions": "wands_multi.yaml"}`; hashes
     `product.csv`, `label.csv`, `wands_multi.yaml`); `ABOUT["wands-multi"]` explains the set,
@@ -228,10 +229,10 @@ async def test_old_datasets_unchanged():
 def test_scaled_budget_cfg_does_not_mutate():
     cfg = {"budget": {"max_turns": 4, "max_tool_calls": 24, "max_seconds": 120,
                       "max_cost_usd": 0.50}, "swarm": {"agent_max_turns": 2}}
-    out = scaled_budget_cfg(cfg, 4)
+    out = scaled_budget_cfg(cfg, 4, 4)
     assert out["budget"] == {"max_turns": 4, "max_tool_calls": 96, "max_seconds": 120,
                              "max_cost_usd": 2.00}
-    assert out["swarm"] == {"agent_max_turns": 2}
+    assert out["swarm"] == {"agent_max_turns": 4}
     assert cfg["budget"]["max_tool_calls"] == 24
 
 def test_parser_accepts_wands_multi():
