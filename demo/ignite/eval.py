@@ -52,11 +52,13 @@ class TurnRecorder:
         self.harness = harness
         self.turns: dict[str, int] = {}
         self.top10: dict[str, list[str]] = {}
+        self.ranked: dict[str, list[str]] = {}  # first 30 doc ids (part scores)
 
     async def search(self, question: str | Query, **kwargs: Any) -> Any:
         result = await self.harness.search(question, **kwargs)
         self.turns[str(question)] = result.usage.turns
         self.top10[str(question)] = [h.hit.doc_id for h in result.hits[:10]]
+        self.ranked[str(question)] = [h.hit.doc_id for h in result.hits[:30]]
         return result
 
 
@@ -65,17 +67,43 @@ class KindReport:
     report: EvalReport
     turns: list[int] = field(default_factory=list)
     precision: list[float] = field(default_factory=list)  # P@10 per run; an errored run is 0
+    coverage: list[float] = field(default_factory=list)  # part coverage@10 per run (wands-multi)
+    part_recall: list[float] = field(default_factory=list)  # part recall@30 per run (wands-multi)
 
 
 def _precision_at_10(top10: list[str], qrels: dict[str, int]) -> float:
     return sum(qrels.get(doc_id, 0) > 0 for doc_id in top10[:10]) / 10
 
 
+def part_coverage(ranked: list[str], parts: dict[str, list[str]], k: int = 10) -> float:
+    """Share of parts with at least one of their Exact products in the top `k`."""
+    if not parts:
+        return 0.0
+    top = set(ranked[:k])
+    return sum(bool(top & set(gold)) for gold in parts.values()) / len(parts)
+
+
+def part_recall(ranked: list[str], parts: dict[str, list[str]], k: int = 30) -> float:
+    """Mean over parts of found ÷ min(Exact count, k // number of parts), each capped at 1, so
+    a part with hundreds of Exact products does not swamp a part with three."""
+    if not parts:
+        return 0.0
+    top = set(ranked[:k])
+    share = max(1, k // len(parts))
+    scores = [min(1.0, len(top & set(gold)) / min(len(gold), share)) if gold else 0.0
+              for gold in parts.values()]
+    return sum(scores) / len(scores)
+
+
 async def evaluate_groups(modes: list[str], harness_for: Callable[[str], Harness | Swarm],
                           dataset: BeirDataset, groups: dict[str, list[str]], *,
-                          name: str) -> dict[tuple[str, str], KindReport]:
+                          name: str,
+                          parts: dict[str, dict[str, list[str]]] | None = None,
+                          ) -> dict[tuple[str, str], KindReport]:
     """Run each mode over each group of query ids; a fresh harness per mode. The swarm runs one
-    query at a time: its agents already run in parallel, and 8 at once overload the shared model."""
+    query at a time: its agents already run in parallel, and 8 at once overload the shared model.
+    With `parts` (question id -> part id -> Exact ids), also score part coverage@10 and part
+    recall@30 per run; an errored run scores 0."""
     out: dict[tuple[str, str], KindReport] = {}
     for mode in modes:
         harness = harness_for(mode)
@@ -85,13 +113,21 @@ async def evaluate_groups(modes: list[str], harness_for: Callable[[str], Harness
                 recorder = TurnRecorder(harness)
                 report = await run_eval(recorder, dataset,  # type: ignore[arg-type]
                                         name=f"{name}/{mode}/{group}", query_ids=qids, k=10,
-                                        recall_k=10, concurrency=1 if mode == "swarm" else 2,
+                                        recall_k=10, concurrency=1 if mode.startswith("swarm") else 2,
                                         mode=run_mode)  # type: ignore[arg-type]
                 turns = [recorder.turns.get(dataset.queries[r.query_id], 0) for r in report.runs]
                 precision = [_precision_at_10(recorder.top10.get(dataset.queries[r.query_id], []),
                                               dataset.qrels.get(r.query_id, {}))
                              for r in report.runs]
-                out[(mode, group)] = KindReport(report=report, turns=turns, precision=precision)
+                kr = KindReport(report=report, turns=turns, precision=precision)
+                if parts is not None:
+                    for r in report.runs:
+                        ranked = ([] if r.error is not None else
+                                  recorder.ranked.get(dataset.queries[r.query_id], []))
+                        gold = parts.get(r.query_id, {})
+                        kr.coverage.append(part_coverage(ranked, gold))
+                        kr.part_recall.append(part_recall(ranked, gold))
+                out[(mode, group)] = kr
     return out
 
 
@@ -116,3 +152,57 @@ def results_table(reports: dict[tuple[str, str], KindReport], groups: dict[str, 
                          f"{errors} |")
         lines.append("")
     return lines
+
+
+def _mean(xs: list[float]) -> float:
+    return sum(xs) / len(xs) if xs else 0.0
+
+
+def parts_table(reports: dict[tuple[str, str], KindReport], group: str = "all") -> list[str]:
+    """Markdown lines for the wands-multi scores, one row per mode."""
+    lines = ["| mode | part coverage@10 | part recall@30 | nDCG@10 | avg cost | avg seconds | "
+             "avg tool calls | n | errors |",
+             "|---|---|---|---|---|---|---|---|---|"]
+    for (mode, g), kr in reports.items():
+        if g != group:
+            continue
+        r = kr.report
+        errors = sum(run.error is not None for run in r.runs)
+        lines.append(f"| {mode} | {_mean(kr.coverage):.3f} | {_mean(kr.part_recall):.3f} | "
+                     f"{r.mean('ndcg') if r.runs else 0.0:.3f} | "
+                     f"${r.mean('cost_usd') if r.runs else 0.0:.4f} | "
+                     f"{r.mean('seconds') if r.runs else 0.0:.1f} | "
+                     f"{r.mean('tool_calls') if r.runs else 0.0:.1f} | {len(r.runs)} | {errors} |")
+    lines.append("")
+    return lines
+
+
+_EPS = 1e-9
+
+
+def verdict(reports: dict[tuple[str, str], KindReport], group: str = "all") -> tuple[str, str]:
+    """The pass mark set before the run (design 2026-11-23), checked in order:
+    works / spend / unclear / no. gap = swarm coverage - harness coverage."""
+    def scores(mode: str) -> tuple[float, float] | None:
+        kr = reports.get((mode, group))
+        return None if kr is None else (_mean(kr.coverage), _mean(kr.part_recall))
+
+    h, s, s4 = scores("harness"), scores("swarm"), scores("swarm-4x")
+    if h is None or s is None:
+        raise ValueError("verdict needs harness and swarm rows")
+
+    def passes(x: tuple[float, float]) -> bool:
+        return x[0] - h[0] >= 0.10 - _EPS and x[1] >= h[1] - _EPS
+
+    gap = s[0] - h[0]
+    nums = (f"swarm part coverage@10 {s[0]:.3f} vs harness {h[0]:.3f} (gap {gap:+.3f}); "
+            f"part recall@30 {s[1]:.3f} vs {h[1]:.3f}")
+    if s4 is not None:
+        nums += f"; swarm-4x {s4[0]:.3f} / {s4[1]:.3f}"
+    if passes(s):
+        return "works", f"The swarm works here: {nums}."
+    if s4 is not None and passes(s4):
+        return "spend", f"Only extra spend works: the fair-budget swarm misses the bar, the 4x one passes. {nums}."
+    if gap >= 0.05 - _EPS:
+        return "unclear", f"Unclear: the swarm is ahead but misses the bar. {nums}."
+    return "no", f"The swarm does not work here: {nums}."
