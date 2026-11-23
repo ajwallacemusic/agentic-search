@@ -48,3 +48,38 @@ def test_eval_public_accepts_swarm_mode():
     args = build_parser().parse_args(["--dataset", "musique", "--modes", "harness,swarm"])
     assert args.modes == "harness,swarm"
 
+
+
+def test_scaled_budget_cfg_does_not_mutate():
+    from demo.ignite.public.eval_public import scaled_budget_cfg
+    cfg = {"budget": {"max_turns": 4, "max_tool_calls": 24, "max_seconds": 120,
+                      "max_cost_usd": 0.50}, "swarm": {"agent_max_turns": 2}}
+    out = scaled_budget_cfg(cfg, 4, 4)
+    assert out["budget"] == {"max_turns": 4, "max_tool_calls": 96, "max_seconds": 120,
+                             "max_cost_usd": 2.00}
+    assert out["swarm"] == {"agent_max_turns": 4}
+    assert cfg["budget"]["max_tool_calls"] == 24 and cfg["swarm"]["agent_max_turns"] == 2
+
+
+def test_parser_accepts_wands_multi_and_out():
+    from demo.ignite.public.eval_public import build_parser
+    args = build_parser().parse_args(["--dataset", "wands-multi", "--n", "2", "--out", "x.md"])
+    assert args.dataset == "wands-multi" and args.n == 2 and args.out == "x.md"
+
+
+async def test_write_results_wands_multi_has_parts_and_verdict(tmp_path):
+    from agentic_search.core.types import Document, TextPart
+    from demo.ignite.eval import bm25_harness_for
+    from demo.ignite.public.datasets import PublicSample
+
+    docs = [Document(doc_id=i, content=[TextPart(text=t)])
+            for i, t in [("a", "teak chair"), ("b", "patio umbrella"), ("c", "outdoor rug")]]
+    sample = PublicSample(name="wands-multi", source="s", description="d", documents=docs,
+                          queries={"m01": "teak chair; patio umbrella"},
+                          qrels={"m01": {"a": 2, "b": 2}}, groups={"all": ["m01"]},
+                          parts={"m01": {"1": ["a"], "2": ["b"]}})
+    text = await write_results(sample, ["harness", "swarm", "swarm-4x"], tmp_path / "r.md",
+                               settings={}, hashes={},
+                               harness_for=lambda m: bm25_harness_for({"s": docs}, {"s": "d"}))
+    assert "part coverage@10" in text and "## Verdict" in text and "swarm-4x" in text
+    assert "| swarm-4x |" in text

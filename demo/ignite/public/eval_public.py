@@ -1,23 +1,26 @@
 """Score bm25, retrieval, harness and swarm modes on a public dataset sample; write
 results-<name>.md.
 
-Run: uv run python -m demo.ignite.public.eval_public --dataset musique|wands|wands-match
+Run: uv run python -m demo.ignite.public.eval_public --dataset musique|wands|wands-match|wands-multi
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 from pathlib import Path
 from typing import Any, Callable
 
 from agentic_search.core.harness import Harness
 from agentic_search.eval.runner import EvalReport
 from demo.ignite.build import build_demo_swarm, build_harness_for, load_config
-from demo.ignite.eval import KindReport, bm25_harness_for, evaluate_groups, results_table
+from demo.ignite.eval import (KindReport, bm25_harness_for, evaluate_groups, parts_table,
+                              results_table, verdict)
 from demo.ignite.public.datasets import PublicSample, sample_musique, sample_wands
 from demo.ignite.public.fetch import FILES, fetch, sha256_of
 from demo.ignite.public.wands_match import LABELS_PATH, MATCH_PATH, sample_wands_match
+from demo.ignite.public.wands_multi import MULTI_PATH, sample_wands_multi
 from demo.ignite.swarm import Swarm
 
 RESULTS_DIR = Path(__file__).parent.parent
@@ -38,7 +41,27 @@ ABOUT = {
                     "the rules, not by a model: gold = a target product type with the anchor's "
                     "value. Most questions have more than 10 right answers, so P@10 (share of "
                     "the top 10 that is right) is the headline metric."),
+    "wands-multi": ("WANDS multi: our own shopping tasks over the WANDS catalogue (Wayfair, MIT), "
+                    "built to test the swarm on questions whose parts do not depend on each "
+                    "other. Each question joins 3 or 4 real WANDS shopper queries from different "
+                    "product classes (picked once by a seeded rule before any model ran, "
+                    "`wands_multi.yaml`). Gold for a part is that query's human-labelled Exact "
+                    "products. Part coverage@10 = share of parts with at least one Exact product "
+                    "in the top 10 (headline). Part recall@30 = per part, Exact products found in "
+                    "the top 30 out of at most 30 / parts, averaged over parts. Pass mark, set "
+                    "before the run: the swarm works if its part coverage beats the harness by at "
+                    "least 0.10 and its part recall is not lower."),
 }
+
+
+def scaled_budget_cfg(cfg: dict[str, Any], factor: int, agent_max_turns: int) -> dict[str, Any]:
+    """A copy of `cfg` with the budget's tool calls and cost times `factor` and the swarm agents'
+    turns set to `agent_max_turns`; time and the harness's own turns stay the same."""
+    out = copy.deepcopy(cfg)
+    out["budget"]["max_tool_calls"] = out["budget"]["max_tool_calls"] * factor
+    out["budget"]["max_cost_usd"] = out["budget"]["max_cost_usd"] * factor
+    out.setdefault("swarm", {})["agent_max_turns"] = agent_max_turns
+    return out
 
 
 def _harness_for(sample: PublicSample) -> Callable[[str], Harness | Swarm]:
@@ -49,8 +72,10 @@ def _harness_for(sample: PublicSample) -> Callable[[str], Harness | Swarm]:
         if mode == "bm25":
             return bm25_harness_for(docs, descriptions)
         cfg = load_config()
+        if mode == "swarm-4x":  # eval-only control: 4x tool calls and cost, 4 turns per agent
+            cfg = scaled_budget_cfg(cfg, 4, 4)
         harness = build_harness_for(cfg, docs, descriptions)
-        if mode == "swarm":
+        if mode in ("swarm", "swarm-4x"):
             return build_demo_swarm(cfg, harness, descriptions)
         return harness
     return harness_for
@@ -78,7 +103,8 @@ async def write_results(sample: PublicSample, modes: list[str], out: Path, *,
                         settings: dict[str, Any], hashes: dict[str, str],
                         harness_for: Callable[[str], Harness | Swarm] | None = None) -> str:
     reports = await evaluate_groups(modes, harness_for or _harness_for(sample), sample.to_beir(),
-                                    sample.groups, name=sample.name)
+                                    sample.groups, name=sample.name,
+                                    parts=sample.parts or None)
     reports = _with_all(reports, sample.groups)
     titles = {g: g for g in sample.groups}
     if len(sample.groups) > 1 or "all" in sample.groups:
@@ -88,6 +114,11 @@ async def write_results(sample: PublicSample, modes: list[str], out: Path, *,
              f"source (`{sample.source}`). Settings: "
              + ", ".join(f"`{k}={v}`" for k, v in settings.items()) + ".", "",
              "Source files (SHA-256): " + ", ".join(f"`{n}` {h}" for n, h in hashes.items()), ""]
+    if sample.parts:
+        lines += ["## Part scores", ""] + parts_table(reports)
+        if ("harness", "all") in reports and ("swarm", "all") in reports:
+            lines += ["## Verdict", "", verdict(reports)[1], "",
+                      "20 questions is a small set: treat the bar as rough.", ""]
     lines += results_table(reports, titles)
     lines += ["`bm25`: one BM25 search with the question text, no model. `retrieval` and `harness` "
               "use the same planner, judge and settings as the Ignite demo (`config.yaml`). "
@@ -98,6 +129,10 @@ async def write_results(sample: PublicSample, modes: list[str], out: Path, *,
               "`swarm` ran one query at a time (concurrency 1; its agents already run in "
               "parallel) while the other modes ran two at a time, so its seconds are not "
               "directly comparable.", "",
+              *(["`swarm-4x` (eval-only control): the same swarm with 4x the tool calls and cost "
+                 "(96 calls, $2.00), 4 turns per agent, the same 120 s; also concurrency 1. It "
+                 "shows whether extra spend alone explains a swarm win.", ""]
+                if "swarm-4x" in modes else []),
               "One run per query. Model runs vary, so treat differences of a few points as noise.",
               ""]
     text = "\n".join(lines)
@@ -107,20 +142,28 @@ async def write_results(sample: PublicSample, modes: list[str], out: Path, *,
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--dataset", choices=[*sorted(FILES), "wands-match"], required=True)
-    p.add_argument("--n", type=int, help="musique: questions per hop count (20); wands: queries (60)")
+    p.add_argument("--dataset", choices=[*sorted(FILES), "wands-match", "wands-multi"],
+                   required=True)
+    p.add_argument("--n", type=int, help="musique: questions per hop count (20); wands: queries "
+                   "(60); wands-multi: keep the first n questions (all)")
     p.add_argument("--corpus-size", type=int, default=5000, help="musique only")
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--modes", default="bm25,retrieval,harness")
+    p.add_argument("--out", help="results file (default: results-<dataset>.md next to the demo)")
     return p
 
 
 async def main() -> None:
     args = build_parser().parse_args()
-    source = "wands" if args.dataset == "wands-match" else args.dataset
+    source = "wands" if args.dataset in ("wands-match", "wands-multi") else args.dataset
     folder = fetch(source)
     hashes = {name: sha256_of(folder / name) for name in FILES[source]}
-    if args.dataset == "wands-match":
+    if args.dataset == "wands-multi":
+        settings = {"questions": MULTI_PATH.name, **({"n": args.n} if args.n else {})}
+        hashes = {"product.csv": hashes["product.csv"], "label.csv": hashes["label.csv"],
+                  MULTI_PATH.name: sha256_of(MULTI_PATH)}
+        sample = sample_wands_multi(folder, n=args.n)
+    elif args.dataset == "wands-match":
         settings = {"questions": MATCH_PATH.name, "labels": LABELS_PATH.name}
         hashes = {"product.csv": hashes["product.csv"], MATCH_PATH.name: sha256_of(MATCH_PATH),
                   LABELS_PATH.name: sha256_of(LABELS_PATH)}
@@ -131,7 +174,7 @@ async def main() -> None:
     else:
         settings = {"n": args.n or 60, "seed": args.seed}
         sample = sample_wands(folder, **settings)
-    out = RESULTS_DIR / f"results-{args.dataset}.md"
+    out = Path(args.out) if args.out else RESULTS_DIR / f"results-{args.dataset}.md"
     print(await write_results(sample, args.modes.split(","), out, settings=settings,
                               hashes=hashes))
 
