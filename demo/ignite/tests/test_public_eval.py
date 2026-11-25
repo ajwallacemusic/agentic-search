@@ -83,3 +83,40 @@ async def test_write_results_wands_multi_has_parts_and_verdict(tmp_path):
                                harness_for=lambda m: bm25_harness_for({"s": docs}, {"s": "d"}))
     assert "part coverage@10" in text and "## Verdict" in text and "swarm-4x" in text
     assert "| swarm-4x |" in text
+
+
+def test_harness_flashlite_swaps_in_the_baseline_judge(monkeypatch):
+    from agentic_search.models.llm_judge import LLMJudge
+    from demo.ignite.build import load_config, make_judge
+    from demo.ignite.decision_judge import DecisionJudge
+    from demo.ignite.public.eval_public import judge_variant_cfg
+
+    monkeypatch.setenv("IGNITE_GCP_PROJECT", "demo-project-1")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    cfg = load_config()
+    base = judge_variant_cfg(cfg, "harness-flashlite")
+    assert base["judge"]["model"] == "gemini-3.5-flash-lite" and base["driver"] == cfg["driver"]
+    assert isinstance(make_judge(base["judge"], None), LLMJudge)
+    assert judge_variant_cfg(cfg, "harness") is cfg
+    assert isinstance(make_judge(cfg["judge"], None), DecisionJudge)
+
+
+def test_harness_flashlite_runs_as_a_harness_search():
+    from demo.ignite.eval import RUN_MODE
+
+    assert RUN_MODE["harness-flashlite"] == "harness" and RUN_MODE["bm25"] == "retrieval"
+
+
+async def test_write_results_explains_harness_flashlite(tmp_path):
+    from agentic_search.core.types import Document, TextPart
+    from demo.ignite.eval import bm25_harness_for
+    from demo.ignite.public.datasets import PublicSample
+
+    docs = [Document(doc_id=i, content=[TextPart(text=t)]) for i, t in [("a", "teak chair")]]
+    sample = PublicSample(name="wands", source="s", description="d", documents=docs,
+                          queries={"q1": "teak chair"}, qrels={"q1": {"a": 2}},
+                          groups={"all": ["q1"]})
+    text = await write_results(sample, ["harness", "harness-flashlite"], tmp_path / "r.md",
+                               settings={}, hashes={},
+                               harness_for=lambda m: bm25_harness_for({"s": docs}, {"s": "d"}))
+    assert "| harness-flashlite |" in text and "eval-only judge control" in text

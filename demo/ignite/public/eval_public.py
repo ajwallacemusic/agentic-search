@@ -64,6 +64,14 @@ def scaled_budget_cfg(cfg: dict[str, Any], factor: int, agent_max_turns: int) ->
     return out
 
 
+def judge_variant_cfg(cfg: dict[str, Any], mode: str) -> dict[str, Any]:
+    """`harness-flashlite` (eval-only): the demo config with the earlier judge (`judge_baseline`,
+    gemini-3.5-flash-lite) in place of Gemini Decision 1. Other modes: `cfg` unchanged."""
+    if mode != "harness-flashlite":
+        return cfg
+    return {**cfg, "judge": cfg["judge_baseline"]}
+
+
 def _harness_for(sample: PublicSample) -> Callable[[str], Harness | Swarm]:
     docs = {sample.source: sample.documents}
     descriptions = {sample.source: sample.description}
@@ -71,7 +79,7 @@ def _harness_for(sample: PublicSample) -> Callable[[str], Harness | Swarm]:
     def harness_for(mode: str) -> Harness:
         if mode == "bm25":
             return bm25_harness_for(docs, descriptions)
-        cfg = load_config()
+        cfg = judge_variant_cfg(load_config(), mode)
         if mode == "swarm-4x":  # eval-only control: 4x tool calls and cost, 4 turns per agent
             cfg = scaled_budget_cfg(cfg, 4, 4)
         harness = build_harness_for(cfg, docs, descriptions)
@@ -129,6 +137,10 @@ async def write_results(sample: PublicSample, modes: list[str], out: Path, *,
               "`swarm` ran one query at a time (concurrency 1; its agents already run in "
               "parallel) while the other modes ran two at a time, so its seconds are not "
               "directly comparable.", "",
+              *(["`harness-flashlite` (eval-only judge control): the same harness, planner and "
+                 "budget with the earlier judge, gemini-3.5-flash-lite on Vertex, in place of "
+                 "Gemini Decision 1. It shows what the judge change does to scores, time and cost.",
+                 ""] if "harness-flashlite" in modes else []),
               *(["`swarm-4x` (eval-only control): the same swarm with 4x the tool calls and cost "
                  "(96 calls, $2.00), 4 turns per agent, the same 120 s; also concurrency 1. It "
                  "shows whether extra spend alone explains a swarm win.", ""]

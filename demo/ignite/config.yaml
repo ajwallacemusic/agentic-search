@@ -15,10 +15,11 @@ driver: {type: vertex, model: gemini-4-hydrogen, project_env: IGNITE_GCP_PROJECT
 # macOS Keychain item `gemini-api-key` (see decision_judge.py).
 judge: {type: gemini_decision, model: gemini-decision-1, api_key_env: GEMINI_API_KEY,
         price_per_mtok: [0.10, 0.0], request_timeout_s: 15, max_retries: 1}
-# Earlier judge (and the fallback if AI Studio is down): gemini-3.5-flash-lite ($0.30 / $2.50) on Vertex.
-# judge: {type: vertex, model: gemini-3.5-flash-lite, project_env: IGNITE_GCP_PROJECT,
-#         location: global, price_per_mtok: [0.30, 2.50], reasoning_effort: low,
-#         request_timeout_s: 15, max_retries: 1}
+# The earlier judge, kept for the eval-only `harness-flashlite` mode (the same harness, this judge)
+# and as the fallback if AI Studio is down (copy it into `judge:`): gemini-3.5-flash-lite on Vertex.
+judge_baseline: {type: vertex, model: gemini-3.5-flash-lite, project_env: IGNITE_GCP_PROJECT,
+                 location: global, price_per_mtok: [0.30, 2.50], reasoning_effort: low,
+                 request_timeout_s: 15, max_retries: 1}
 # Answer box in the viewer (not used by search or evals): reads one mode's top 10 and answers.
 # gemini-3.5-flash ($1.50 / $9.00): 18 of 18 right on harness hero runs, ~4 s. Flash-lite and
 # Argon said "not found" too often (tuning-log.md, round 12).

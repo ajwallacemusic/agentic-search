@@ -164,7 +164,7 @@ aistudio.google.com (project `ajw-sandbox-497707`) and store it in the macOS Key
 security add-generic-password -a "$USER" -s gemini-api-key -w   # paste the key twice
 ```
 
-If AI Studio is down, switch back to the commented flash-lite `judge:` block in `config.yaml`.
+If AI Studio is down, copy the `judge_baseline:` block (flash-lite on Vertex) into `judge:` in `config.yaml`.
 The eval numbers in `results-*.md` are still from Argon + flash-lite until the next full run.
 
 To use Anthropic instead: comment out `driver:` and `judge:` and uncomment the `anthropic` line;
@@ -319,10 +319,13 @@ MuSiQue and WANDS have human labels; nothing in them was written or tuned by us.
 uses the WANDS catalogue with our rule labels.
 
 ```bash
-uv run python -m demo.ignite.public.eval_public --dataset musique --modes bm25,retrieval,harness,swarm      # --n 20 per hop, --corpus-size 5000
-uv run python -m demo.ignite.public.eval_public --dataset wands --modes bm25,retrieval,harness,swarm        # --n 60
-uv run python -m demo.ignite.public.eval_public --dataset wands-match --modes bm25,retrieval,harness,swarm  # all 20 rules
+uv run python -m demo.ignite.public.eval_public --dataset musique --modes bm25,retrieval,harness,harness-flashlite,swarm      # --n 20 per hop, --corpus-size 5000
+uv run python -m demo.ignite.public.eval_public --dataset wands --modes bm25,retrieval,harness,harness-flashlite,swarm        # --n 60
+uv run python -m demo.ignite.public.eval_public --dataset wands-match --modes bm25,retrieval,harness,harness-flashlite,swarm  # all 20 rules
 ```
+
+`harness-flashlite` is an eval-only judge control: the same harness with the earlier judge
+(gemini-3.5-flash-lite, config `judge_baseline`) in place of Gemini Decision 1.
 
 Run them one at a time: run together they share the model and run slower, and hit the time
 budget (tuning-log round 14). With all four modes the three runs cost about $8.10, $6.90 and

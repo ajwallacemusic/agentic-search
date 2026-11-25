@@ -95,6 +95,11 @@ def part_recall(ranked: list[str], parts: dict[str, list[str]], k: int = 30) -> 
     return sum(scores) / len(scores)
 
 
+# Eval-only modes that run as another library mode: bm25 is a retrieval run with a BM25-only
+# harness; harness-flashlite is the harness with the earlier judge (config `judge_baseline`).
+RUN_MODE = {"bm25": "retrieval", "harness-flashlite": "harness"}
+
+
 async def evaluate_groups(modes: list[str], harness_for: Callable[[str], Harness | Swarm],
                           dataset: BeirDataset, groups: dict[str, list[str]], *,
                           name: str,
@@ -107,7 +112,7 @@ async def evaluate_groups(modes: list[str], harness_for: Callable[[str], Harness
     out: dict[tuple[str, str], KindReport] = {}
     for mode in modes:
         harness = harness_for(mode)
-        run_mode = "retrieval" if mode == "bm25" else mode
+        run_mode = RUN_MODE.get(mode, mode)
         async with harness:
             for group, qids in groups.items():
                 recorder = TurnRecorder(harness)
