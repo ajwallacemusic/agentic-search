@@ -75,16 +75,26 @@ def test_a_stalled_turn_is_cut_short():
     s = offline_harness().settings
     assert s.call_timeout <= 15 and s.decider_timeout <= 15
     assert cfg["judge"]["request_timeout_s"] * (cfg["judge"]["max_retries"] + 1) <= 30
-    # Argon plans slowly; one planning call may take up to 45 s, retried once.
+    # One planning call may take up to 45 s, retried once.
     assert cfg["driver"]["request_timeout_s"] * (cfg["driver"]["max_retries"] + 1) <= 90
 
 
-def test_planner_is_gemini_4_argon():
+def test_planner_is_gemini_4_hydrogen():
     from demo.ignite.build import load_config
 
     driver = load_config()["driver"]
-    assert driver["model"] == "gemini-4-argon" and driver["price_per_mtok"] == [2.0, 10.0]
+    assert driver["model"] == "gemini-4-hydrogen" and driver["price_per_mtok"] == [1.5, 7.5]
     assert driver["request_timeout_s"] == 45
+
+
+def test_judge_is_gemini_decision_1(monkeypatch):
+    from demo.ignite.build import load_config, make_judge
+    from demo.ignite.decision_judge import DecisionJudge
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    judge = make_judge(load_config()["judge"], fallback_client=None)
+    assert isinstance(judge, DecisionJudge) and judge.id == "decision-judge:gemini-decision-1"
+    assert judge.price_in == 0.10 and judge._key == "test-key"
 
 
 def test_build_harness_for_one_source():

@@ -142,17 +142,30 @@ takes about 4.5 minutes. The vectors are then kept in
 `public/.cache/embeddings/document-vectors.npz` (`embedding_cache` in `config.yaml`), and later
 starts take about 10 s. Start `serve` once before the talk to fill the cache.
 
-Models and prices are in `config.yaml` (Vertex, `global` endpoint, project `ajw-sandbox-497707`):
+Models and prices are in `config.yaml` (planner on Vertex, `global` endpoint, project
+`ajw-sandbox-497707`; judge on the Gemini Developer API):
 
 | role | model | price per 1M tokens (in / out) | per call |
 |---|---|---|---|
-| planner (driver) | `gemini-4-argon` | $2.00 / $10.00 | `reasoning_effort: low`, cut at 45 s, 1 retry |
-| judge | `gemini-3.5-flash-lite` | $0.30 / $2.50 | cut at 15 s, 1 retry |
+| planner (driver) | `gemini-4-hydrogen` | $1.50 / $7.50 | `reasoning_effort: low`, cut at 45 s, 1 retry |
+| judge | `gemini-decision-1` | $0.10 / not billed | one yes/no probability per hit, cut at 15 s, 1 retry |
 
-All three modes use the same pair. Argon prices are the introductory prices; they are reported to go
-to $4 / $20 on 2026-12-01. Why Argon: with `gemini-3.5-flash` as the planner, the WANDS match
-harness scored P@10 0.055, because Flash did not write facts to its notebook. Argon does
-(`tuning-log.md`, round 10).
+All three modes use the same pair (since 2026-11-25, `tuning-log.md` round 17). Why Hydrogen: as the
+planner on WANDS match it scored P@10 0.650 and 0.600 in two runs, against Argon 0.445, Carbon 0.520
+and Neon 0.485, at about 30 s and $0.04 per question (Argon 66 s, $0.06). Why Decision 1: on 720
+human-labelled WANDS pairs it was right 0.929 of the time against flash-lite's 0.900, and found more
+of the right products, at half the cost.
+
+**Decision 1 needs an AI Studio key.** On 2026-11-25 it is not on Vertex (404). Make a key at
+aistudio.google.com (project `ajw-sandbox-497707`) and store it in the macOS Keychain, or set
+`GEMINI_API_KEY`:
+
+```bash
+security add-generic-password -a "$USER" -s gemini-api-key -w   # paste the key twice
+```
+
+If AI Studio is down, switch back to the commented flash-lite `judge:` block in `config.yaml`.
+The eval numbers in `results-*.md` are still from Argon + flash-lite until the next full run.
 
 To use Anthropic instead: comment out `driver:` and `judge:` and uncomment the `anthropic` line;
 set `ANTHROPIC_API_KEY` and `uv sync --extra anthropic`.

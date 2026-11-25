@@ -1,18 +1,24 @@
 # Ignite demo harness config. `*_env` keys read environment variables (library convention).
 # Models and prices: Vertex (Agent Platform), global. Run in project ajw-sandbox-497707.
-# Planner gemini-4-argon (since 2026-10-30): $2.00 / $10.00 per 1M tokens, the introductory rate
-# from third-party price trackers (reported to rise to $4 / $20 on 2026-12-01; check Google's
-# pricing page). On the WANDS match questions it took harness P@10 from 0.055 (gemini-3.5-flash)
-# to 0.260 (0.515 after round 11: judge sees noted facts, max_limit 20). It plans slowly, so a request is cut at 45 s (15 s gave timeouts) and retried once.
-# reasoning_effort low. Earlier planner: gemini-3.5-flash ($1.50 / $9.00), see tuning-log.md.
-driver: {type: vertex, model: gemini-4-argon, project_env: IGNITE_GCP_PROJECT, location: global,
-         price_per_mtok: [2.00, 10.00], reasoning_effort: low, request_timeout_s: 45,
+# Planner gemini-4-hydrogen (since 2026-11-25): $1.50 / $7.50 per 1M tokens (third-party price
+# trackers; check Google's pricing page). Gemini 4 planner check, WANDS match harness, 20 q:
+# hydrogen P@10 0.650 / 0.600 (2 runs, ~30 s, $0.04), argon 0.445 (66 s, $0.06), carbon 0.520,
+# neon 0.485 with 7 of 20 errored (tuning-log.md, round 17). reasoning_effort low, cut at 45 s.
+# Earlier planners: gemini-4-argon ($2 / $10, 2026-10-30 to 11-25), gemini-3.5-flash.
+driver: {type: vertex, model: gemini-4-hydrogen, project_env: IGNITE_GCP_PROJECT, location: global,
+         price_per_mtok: [1.50, 7.50], reasoning_effort: low, request_timeout_s: 45,
          max_retries: 1}
-# Judge gemini-3.5-flash-lite ($0.30 / $2.50): ~2.5 s per 30-hit batch with the same hero
-# judgments as the larger models. Both modes use the same planner and judge.
-judge: {type: vertex, model: gemini-3.5-flash-lite, project_env: IGNITE_GCP_PROJECT,
-        location: global, price_per_mtok: [0.30, 2.50], reasoning_effort: low,
-        request_timeout_s: 15, max_retries: 1}
+# Judge gemini-decision-1 (since 2026-11-25): the Gemini Decisions API, one yes/no probability per
+# hit, one call per batch, output not billed ($0.10 per 1M input). WANDS judge test, 720 human-labelled
+# pairs: accuracy 0.929 at cut 0.5 vs flash-lite 0.900, finds 92% of Exact matches vs 80%, half the
+# cost (tuning-log.md, round 17). Not on Vertex yet: needs an AI Studio key in GEMINI_API_KEY or the
+# macOS Keychain item `gemini-api-key` (see decision_judge.py).
+judge: {type: gemini_decision, model: gemini-decision-1, api_key_env: GEMINI_API_KEY,
+        price_per_mtok: [0.10, 0.0], request_timeout_s: 15, max_retries: 1}
+# Earlier judge (and the fallback if AI Studio is down): gemini-3.5-flash-lite ($0.30 / $2.50) on Vertex.
+# judge: {type: vertex, model: gemini-3.5-flash-lite, project_env: IGNITE_GCP_PROJECT,
+#         location: global, price_per_mtok: [0.30, 2.50], reasoning_effort: low,
+#         request_timeout_s: 15, max_retries: 1}
 # Answer box in the viewer (not used by search or evals): reads one mode's top 10 and answers.
 # gemini-3.5-flash ($1.50 / $9.00): 18 of 18 right on harness hero runs, ~4 s. Flash-lite and
 # Argon said "not found" too often (tuning-log.md, round 12).

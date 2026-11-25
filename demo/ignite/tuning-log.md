@@ -369,3 +369,41 @@ whether a shared board can help the swarm on chains without losing this win.
 
 **Set notes.** m01 and m10 hold near-duplicate desk queries (different WANDS ids); m08 has 6
 products Exact for two parts. Neither favours a mode. Not re-rolled.
+
+## Round 17: Gemini 4 planner check, Decision 1 judge (2026-11-25)
+
+All four Gemini 4 models (argon, carbon, hydrogen, neon) are in Model Garden and answer in
+`ajw-sandbox-497707`, `global`. Each ran as the planner on WANDS match (20 questions, harness
+only, judge flash-lite, one run each unless noted):
+
+| planner | P@10 | nDCG@10 | avg seconds | avg cost | errors |
+|---|---|---|---|---|---|
+| gemini-4-argon (was the planner) | 0.445 | 0.464 | 65.8 | $0.060 | 1 |
+| gemini-4-carbon | 0.520 | 0.563 | 75.5 | $0.065 | 1 |
+| **gemini-4-hydrogen** | **0.650** / 0.600 (2 runs) | 0.706 / 0.641 | 26.8 / 32.1 | $0.040 / $0.044 | 0 / 0 |
+| gemini-4-neon | 0.485 | 0.510 | 44.9 | $0.048 | 7 |
+
+Argon scored 0.445 against 0.515 on 2026-11-09: run-to-run spread. Neon's 7 errors were not
+traced, so its score is not a fair read. Prices from third-party trackers: hydrogen $1.50 / $7.50,
+carbon $2 / $10 (reported $4 / $20 from 2026-12-01), neon $3 / $15. **Hydrogen is the planner now.**
+
+**Judge: Gemini Decision 1.** `gemini-decision-1` (released 2026-11-11) scores closed questions
+and returns probabilities, no text; one call grades a whole batch (one yes/no "noul" question per
+hit), output tokens are not billed. Not on Vertex yet (404 in our project, global and
+us-central1); it works with an AI Studio key (`POST /v1beta/decisions`). Offline test against
+WANDS human labels, 40 queries × 18 products (6 Exact, 6 Partial, 6 Irrelevant), same prompt
+text for both judges, cut tuned on 20 queries and scored on the other 20:
+
+| judge | test accuracy (Exact vs Irrelevant) | yes to Exact | yes to Partial | yes to Irrelevant | AUC | cost (720 pairs) |
+|---|---|---|---|---|---|---|
+| decision-1, cut 0.50 | 0.929 | 0.92 | 0.33 | 0.06 | 0.980 | $0.013 |
+| decision-1, cut 0.35 | 0.942 | 0.95 | 0.43 | 0.07 | | |
+| flash-lite | 0.900 | 0.80 | 0.21 | 0.00 | 0.894 | $0.027 |
+
+Decision 1 is the judge now (`decision_judge.py`, `make_judge` in `build.py`), at the library's
+default cut of 0.5; 0.35 was a little better on the test half but is not set yet. Live hero run
+with Hydrogen + Decision 1: harness 4/4 gold, 17 s, $0.028.
+
+**Not done yet:** the full four-set re-run with the new pair (stopped before a network drop).
+`results-*.md` and the README numbers are still Argon + flash-lite. Spend this round: about
+$5.10 planner evals, $0.04 judge tests, $0.03 live check.

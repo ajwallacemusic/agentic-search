@@ -8,6 +8,7 @@ from __future__ import annotations
 import atexit
 import hashlib
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -22,6 +23,7 @@ from agentic_search.embedders.base import Embedder
 from agentic_search.models.driver import ToolCallingDriver
 from agentic_search.models.llm_judge import LLMJudge
 from demo.ignite.corpus import DemoData
+from demo.ignite.decision_judge import DecisionJudge
 from demo.ignite.swarm import Swarm, SwarmConfig
 
 logger = logging.getLogger(__name__)
@@ -95,6 +97,21 @@ def make_client(cfg: dict[str, Any]) -> Any:
     return build("client", resolve_env(cfg), BuildContext(base_dir=CONFIG_PATH.parent))
 
 
+def make_judge(cfg: dict[str, Any] | None, fallback_client: Any) -> Any:
+    """The judge from the `judge` block: `type: gemini_decision` is Gemini Decision 1 (one yes/no
+    probability per hit, `decision_judge.py`); any other type is an LLM client behind LLMJudge.
+    No block: the planner's client judges."""
+    if not cfg:
+        return LLMJudge(fallback_client)
+    if cfg.get("type") == "gemini_decision":
+        return DecisionJudge(model=cfg.get("model", "gemini-decision-1"),
+                             key=os.environ.get(cfg.get("api_key_env", "GEMINI_API_KEY")) or None,
+                             price_per_mtok_in=float(cfg.get("price_per_mtok", [0.10, 0.0])[0]),
+                             request_timeout_s=float(cfg.get("request_timeout_s", 15)),
+                             max_retries=int(cfg.get("max_retries", 1)))
+    return LLMJudge(make_client(cfg))
+
+
 def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     return yaml.safe_load(Path(path).read_text()) or {}
 
@@ -130,8 +147,7 @@ def build_harness_for(cfg: dict[str, Any], docs: dict[str, list[Document]],
     if driver is None or analyzer is None:
         client = make_client(cfg["driver"])
         driver = driver or ToolCallingDriver(client)
-        judge_client = make_client(cfg["judge"]) if cfg.get("judge") else client
-        analyzer = analyzer or LLMJudge(judge_client)
+        analyzer = analyzer or make_judge(cfg.get("judge"), client)
     decider = build("decider", cfg["typesafe"], ctx) if controller == "typesafe" else None
     if embedder is None:
         embedder = _embedder(cfg, ctx)
