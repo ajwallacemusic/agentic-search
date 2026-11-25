@@ -126,11 +126,29 @@ class DelegateRequest(BaseModel):
     context: str = ""
 
 
+class ToolOutcome(BaseModel):
+    """One tool call's result for a delegate-mode driver: the rendered text (what `call` returns)
+    and the hits behind it, with full content (redacted per the source policy), for drivers that
+    render results in their own format. `error` is set when the call failed or was refused."""
+
+    call_id: str
+    text: str
+    hits: list[Hit] = Field(default_factory=list)
+    error: str | None = None
+
+
 class ToolRuntime(Protocol):
     """Executes tool calls for a delegate-mode driver; returns one text result per call.
-    Drivers call report_usage after every model response so cost/token budgets apply mid-run."""
+    Drivers call report_usage after every model response so cost/token budgets apply mid-run.
 
-    async def call(self, calls: list[ToolCall]) -> list[str]: ...
+    `count_turn=False` runs the calls without advancing the turn counter, so the turn budget does
+    not bind; for drivers that run many agents at once, where one batch of calls is not a turn.
+    The tool-call, token, cost and time budgets still apply."""
+
+    async def call(self, calls: list[ToolCall], *, count_turn: bool = True) -> list[str]: ...
+
+    async def call_hits(self, calls: list[ToolCall], *,
+                        count_turn: bool = True) -> list[ToolOutcome]: ...
 
     def report_usage(self, usage: ModelUsage) -> None: ...
 
