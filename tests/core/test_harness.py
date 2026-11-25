@@ -103,6 +103,66 @@ async def test_model_mode_budget(docs_backend):
     assert res.stop_reason is StopReason.BUDGET_TOOL_CALLS
 
 
+class HitsDriver:
+    """A delegate driver that asks for structured hits, as a multi-agent or SDK-rendering driver would."""
+
+    def __init__(self, calls, *, keys=(), count_turn=True, id="hits-driver"):
+        self.calls, self.keys, self.count_turn, self.id = calls, list(keys), count_turn, id
+        self.supports_images = False
+        self.outcomes = []
+
+    async def plan(self, view, tools):
+        raise NotImplementedError
+
+    async def run_delegate(self, question, tools, runtime, budget, context=""):
+        for batch in self.calls:
+            self.outcomes.append(await runtime.call_hits(batch, count_turn=self.count_turn))
+        from agentic_search.models.base import DelegateResult
+        return DelegateResult(ranked_keys=self.keys)
+
+
+async def test_model_mode_call_hits_returns_text_and_hits(docs_backend):
+    driver = HitsDriver([[lex("headache", id="a"), call("lexical_search", id="b", source="nope", text="x")]])
+    await make(docs_backend, driver).search("q", mode="model")
+    [[ok, bad]] = driver.outcomes
+    assert ok.call_id == "a" and ok.error is None and ok.hits
+    assert "docs:d1" in [h.key for h in ok.hits] and "docs:d1" in ok.text
+    assert ok.hits[0].content  # full content, for drivers that render hits themselves
+    assert bad.call_id == "b" and bad.hits == [] and bad.error and "unknown source" in bad.text
+
+
+async def test_call_hits_without_counting_turns_ignores_the_turn_budget(docs_backend):
+    driver = HitsDriver([[lex("headache")], [lex("pain")], [lex("fever")]], count_turn=False)
+    res = await make(docs_backend, driver).search("q", mode="model", budget=Budget(max_turns=1))
+    assert all(o[0].error is None for o in driver.outcomes)
+    assert res.usage.tool_calls == 3 and res.usage.turns == 0
+    assert res.stop_reason is StopReason.DELEGATE_DONE
+
+
+async def test_call_hits_counting_turns_still_stops_at_the_turn_budget(docs_backend):
+    driver = HitsDriver([[lex("headache")], [lex("pain")]])
+    res = await make(docs_backend, driver).search("q", mode="model", budget=Budget(max_turns=1))
+    assert driver.outcomes[1][0].hits == [] and driver.outcomes[1][0].text.startswith("[budget]")
+    assert res.stop_reason is StopReason.BUDGET_TURNS
+
+
+async def test_call_hits_redacts_hits_the_model_may_not_see(docs_backend):
+    driver = HitsDriver([[lex("headache")]])
+    await make(docs_backend, driver, source_policy={"docs": {"someone-else"}}).search("q", mode="model")
+    hits = driver.outcomes[0][0].hits
+    assert hits and all(h.content == [] and h.metadata.get("_redacted") for h in hits)
+
+
+async def test_judge_delegate_off_keeps_the_driver_order(docs_backend):
+    driver = ScriptedDriver(delegate_calls=[[lex("headache", id="a")]],
+                            delegate_keys=["docs:d4", "docs:d1"])
+    h = make(docs_backend, driver, analyzer=KeywordJudge(["aspirin"]),
+             settings=HarnessSettings(judge_delegate=False))
+    res = await h.search("q", mode="model")
+    assert res.keys() == ["docs:d4", "docs:d1"]
+    assert not res.trace.of_type("judge") and not any(x.judged for x in res.hits)
+
+
 async def test_failing_judge_fails_open(docs_backend):
     driver = ScriptedDriver([[lex("headache")]])
     res = await make(docs_backend, driver, analyzer=FailingDecider()).search("q")

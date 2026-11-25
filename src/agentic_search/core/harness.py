@@ -39,12 +39,13 @@ from agentic_search.models.base import (
     DelegateRequest,
     Driver,
     ToolCall,
+    ToolOutcome,
     ToolSpec,
     TurnSummary,
 )
 from agentic_search.roles.analyzer import Analyzer
 from agentic_search.roles.controller import Controller
-from agentic_search.roles.executor import Executor
+from agentic_search.roles.executor import ExecResult, Executor
 from agentic_search.roles.planner import Planner, render_manifests
 from agentic_search.roles.tools import build_tool_specs
 from agentic_search.roles.workspace import WorkspaceUpdate
@@ -85,6 +86,9 @@ class HarnessSettings(BaseModel):
     done_min_relevant: int = Field(8, ge=1)
     snippet_chars: int = Field(240, ge=40)
     fetch_chars: int = Field(1500, ge=100)
+    # Model mode: judge the driver's ranked keys and re-sort by the judge (True), or keep the
+    # driver's own order unjudged (False), e.g. to score a search model on its own.
+    judge_delegate: bool = True
 
 
 class _Options(BaseModel):
@@ -151,7 +155,11 @@ class _DelegateRuntime:
                           output_tokens=max(0, total.output_tokens - r.output_tokens),
                           cost_usd=max(0.0, total.cost_usd - r.cost_usd))
 
-    async def call(self, calls: list[ToolCall]) -> list[str]:
+    async def call(self, calls: list[ToolCall], *, count_turn: bool = True) -> list[str]:
+        return [o.text for o in await self.call_hits(calls, count_turn=count_turn)]
+
+    async def call_hits(self, calls: list[ToolCall], *,
+                        count_turn: bool = True) -> list[ToolOutcome]:
         state = self.state
         reason = self.controller.budget_stop(state)
         allowed: list[ToolCall] = []
@@ -163,23 +171,35 @@ class _DelegateRuntime:
             self.exhausted = reason
         message = (f"[budget] {reason.value}: stop searching and call finish with your ranked keys."
                    if reason is not None else "")
-        outputs: dict[str, str] = {}
+        result = ExecResult()
         if allowed:
             result = await self.executor.run(allowed, question=state.question, turn=state.turn,
                                              pool=state.pool, trace=state.trace,
                                              model_id=self.model_id, emitter=state.emitter)
             state.usage.tool_calls += len(allowed)
-            state.usage.turns += 1
+            if count_turn:
+                state.usage.turns += 1
             self.on_round()
-            state.turn += 1
-            outputs = result.outputs
-        texts = [outputs.get(c.id, message) for c in calls]
+            if count_turn:
+                state.turn += 1
+        errors = {e.call_id: e.render() for e in result.errors}
+        texts = [result.outputs.get(c.id, message) for c in calls]
+        hits = [self.executor.policy.redact([state.pool[k].hit
+                                             for k in result.hits_per_call.get(c.id, [])
+                                             if k in state.pool], self.model_id)
+                for c in calls]
         try:
-            return list(await self.hooks.before_model_call(self.model_id, texts))
+            texts = list(await self.hooks.before_model_call(self.model_id, texts))
+            hits = [list(await self.hooks.before_model_call(self.model_id, hs)) if hs else hs
+                    for hs in hits]
         except Exception as exc:
             state.trace.add("hook_error", state.turn, model=self.model_id, n=len(calls),
                             error=f"{type(exc).__name__}: {str(exc)[:300]}")
-            return [f"[withheld by hook] {type(exc).__name__}" for _ in calls]
+            texts = [f"[withheld by hook] {type(exc).__name__}" for _ in calls]
+            hits = [[] for _ in calls]
+        return [ToolOutcome(call_id=c.id, text=t, hits=hs,
+                            error=errors.get(c.id) or (t if c.id not in result.outputs else None))
+                for c, t, hs in zip(calls, texts, hits)]
 
 
 class Harness:
@@ -490,7 +510,7 @@ class Harness:
                            duration_ms=(time.perf_counter() - t0) * 1000,
                            summary=PhaseSummary(n_ranked=len(ranked),
                                                 note=scrub(result.note) if result.note else None))
-        if self.analyzer_decider is not None:
+        if self.analyzer_decider is not None and self.settings.judge_delegate:
             keys = ranked or [c.hit.key for c in state.pool.candidates()]
             state.usage.add_model(await analyzer.judge_keys(state, keys))
         progress()
