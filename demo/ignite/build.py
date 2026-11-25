@@ -179,7 +179,9 @@ def make_sid_driver(cfg: dict[str, Any], *, connect: Any = None) -> SidSwarmDriv
                           reward=sid.get("reward", "ndcg"),
                           price_per_mtok=tuple(sid.get("price_per_mtok", (0.50, 0.05, 2.00))),
                           key=os.environ.get(sid.get("api_key_env", "SID_API_KEY")) or None,
-                          grace_s=float(sid.get("grace_s", 8.0)), connect=connect)
+                          grace_s=float(sid.get("grace_s", 8.0)),
+                          est_cost_per_action=float(sid.get("est_cost_per_action", 0.0)),
+                          connect=connect)
 
 
 def build_sid_harness_for(cfg: dict[str, Any], docs: dict[str, list[Document]],

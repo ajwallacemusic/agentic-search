@@ -187,7 +187,7 @@ class SidSwarmDriver:
                  price_per_mtok: tuple[float, float, float] = (0.50, 0.05, 2.00),
                  key: str | None = None, base_url: str = BASE_URL,
                  connect: Callable[[], Any] | None = None, poll_s: float = 0.5,
-                 grace_s: float = 8.0):
+                 grace_s: float = 8.0, est_cost_per_action: float = 0.0):
         if not 1 <= max_agents <= 24:
             raise ValueError("max_agents must be 1..24")
         self.model, self.max_agents, self.agent_max_turns = model, max_agents, agent_max_turns
@@ -195,6 +195,9 @@ class SidSwarmDriver:
         self.price_in, self.price_cached, self.price_out = price_per_mtok
         self._key, self.base_url, self._connect, self.poll_s = key, base_url, connect, poll_s
         self.grace_s = grace_s  # after the budget runs out: refuse searches, take reports
+        # SID-2 Swarm sends no token counts (checked live 2026-11-25; usage is only on the
+        # dashboard), so cost is estimated per model action (tool or multi-agent call).
+        self.est_cost_per_action = est_cost_per_action
         self.id = f"sid:{model}"
         self.events: list[dict[str, Any]] = []  # every server event of the last run, for checks
 
@@ -232,7 +235,10 @@ class SidSwarmDriver:
                  f"{sum(1 for r in run.reports.values() if r)} reports"]
         if run.stopped:
             notes.append(f"stopped early: {run.stopped}")
-        if not run.saw_usage:
+        if not run.saw_usage and self.est_cost_per_action:
+            notes.append(f"cost estimated: {run.actions} model actions x "
+                         f"${self.est_cost_per_action} (SID sends no usage)")
+        elif not run.saw_usage:
             notes.append("SID reported no token usage; cost reads 0")
         return DelegateResult(ranked_keys=ranked, usage=run.usage, note="; ".join(notes))
 
@@ -254,6 +260,7 @@ class _Run:
         self.usage = ModelUsage()
         self.cached = 0
         self.saw_usage = False
+        self.actions = 0
         self.stopped: str | None = None
 
     async def send(self, message: dict[str, Any]) -> None:
@@ -296,7 +303,10 @@ class _Run:
         if kind == "response.created":
             self.response_id = event["response"]["id"]
         elif kind == "response.output_item.done" and item.get("type") == "function_call":
+            self.estimate(1)
             self.answer_later(agent, item)
+        elif kind == "response.output_item.done" and item.get("type") == "multi_agent_call":
+            self.estimate(1)
         elif kind == "response.output_item.done" and item.get("type") == "multi_agent_call_output":
             children = json.loads(item["output"][0]["text"])["agents"]
             for path, child in zip(children, self.caches[agent].fork(len(children)), strict=True):
@@ -307,6 +317,15 @@ class _Run:
             err = (event.get("response") or {}).get("error") or event.get("error")
             raise RuntimeError(f"SID swarm failed: {err}")
         return False
+
+    def estimate(self, n_actions: int) -> None:
+        """Estimated cost of model actions, when SID sends no usage (see est_cost_per_action)."""
+        self.actions += n_actions
+        if self.saw_usage or not self.d.est_cost_per_action:
+            return
+        step = ModelUsage(cost_usd=n_actions * self.d.est_cost_per_action)
+        self.usage = self.usage.plus(step)
+        self.runtime.report_usage(step)
 
     def add_usage(self, event: dict[str, Any]) -> None:
         for u in _usage_in(event):

@@ -193,3 +193,16 @@ def test_sid_swarm_is_an_eval_mode_that_runs_as_model_mode():
     from demo.ignite.eval import RUN_MODE
 
     assert RUN_MODE["sid-swarm"] == "model"
+
+
+async def test_without_usage_the_cost_is_estimated_per_model_action():
+    fake = FakeSid([CREATED, call("/root", "c1", "text_search", query="aspirin"), ("wait", "c1"),
+                    {"type": "response.output_item.done", "agent": {"agent_name": "/root"},
+                     "item": {"type": "multi_agent_call", "action": "spawn_agent"}},
+                    report("/root", "c2", []), ("wait", "c2"),
+                    {"type": "response.completed", "response": {"id": "resp_1"}}])
+    h, driver = harness(fake)
+    driver.est_cost_per_action = 0.001
+    res = await h.search("q", mode="model")
+    assert res.usage.cost_usd == pytest.approx(0.003)  # search + spawn + report
+    assert "cost estimated: 3 model actions" in res.trace.of_type("delegate")[0].data["note"]
