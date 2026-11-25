@@ -43,9 +43,10 @@ swarm: {max_agents: 4, agent_max_turns: 2, rrf_k: 60}
 # grace_s: after the budget runs out, searches are refused and reports still taken this long.
 # Prices per 1M: input, cached input, output. Key: SID_API_KEY or Keychain item `sid-api-key`.
 # SID sends no token counts for swarm runs (usage is only on the SID dashboard), so the cost is
-# an estimate per model action: hero run 2026-11-25, $0.07 on the dashboard / 68 actions.
+# an estimate per model action, checked against the dashboard on the 160-question eval
+# (2026-11-25: $11.96 real vs $9.29 at the first rate of 0.00103).
 sid_swarm: {model: SID-2-Swarm, max_agents: 6, agent_max_turns: 10, reward: ndcg,
-            price_per_mtok: [0.50, 0.05, 2.00], est_cost_per_action: 0.00103,
+            price_per_mtok: [0.50, 0.05, 2.00], est_cost_per_action: 0.00133,
             api_key_env: SID_API_KEY, grace_s: 8,
             budget: {max_turns: 100, max_tool_calls: 200, max_seconds: 120, max_cost_usd: 1.00}}
 typesafe: {type: typesafe, api_key_env: TYPESAFE_API_KEY}

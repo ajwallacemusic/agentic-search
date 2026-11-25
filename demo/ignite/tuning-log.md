@@ -404,6 +404,45 @@ Decision 1 is the judge now (`decision_judge.py`, `make_judge` in `build.py`), a
 default cut of 0.5; 0.35 was a little better on the test half but is not set yet. Live hero run
 with Hydrogen + Decision 1: harness 4/4 gold, 17 s, $0.028.
 
-**Not done yet:** the full four-set re-run with the new pair (stopped before a network drop).
-`results-*.md` and the README numbers are still Argon + flash-lite. Spend this round: about
-$5.10 planner evals, $0.04 judge tests, $0.03 live check.
+**Full four-set re-run (Hydrogen + Decision 1), 2026-11-25.** 0 errors, 1 h 14 min, about $8.
+All questions; `harness-flashlite` is the same harness with flash-lite as the judge:
+
+| set (metric) | retrieval | harness | harness-flashlite | swarm |
+|---|---|---|---|---|
+| MuSiQue (nDCG@10) | 0.726 | **0.849**, 12.0 s, $0.024 | 0.796, 17.3 s, $0.027 | 0.638 |
+| WANDS (nDCG@10) | 0.825 | **0.832**, 5.5 s, $0.010 | 0.806, 11.9 s, $0.019 | 0.805 |
+| WANDS match (nDCG@10) | 0.000 | **0.668**, 21.9 s, $0.031 | 0.591, 26.8 s, $0.043 | 0.152 |
+| WANDS multi (part coverage@10) | 0.600 | 0.600 | 0.625 | **0.804** |
+
+WANDS match harness was 0.542, 46 s, $0.064 with Argon + flash-lite. Decision 1 beats flash-lite as
+the judge on three of four sets and is faster and cheaper on all four. The talk story holds.
+
+**Why the harness stops after one turn on WANDS multi.** All 20 questions ran 1.0 turn. The
+stop-when-done rule (`_done_stop`, `roles/controller.py`, round 14) stops when no plan step is
+open and at least 8 of the top 10 are judged relevant. The planner makes no steps for
+independent-part questions, and turn 1 already gives P@10 0.94, so the rule fires. It counts
+relevance, not part coverage: a top 10 of only sofas passes for "a sofa and a lamp". With
+flash-lite (stricter on Partial) it fired less often (1.8 turns). Kept as is on purpose: it is
+the single-agent failure the swarm lane shows. A fix would check each part has results.
+
+**SID-2 Swarm (`sid-swarm`), same sets, 2026-11-25.** SID's trained swarm model, up to 6 agents,
+our tools over the same documents, reports fused with RRF, no judge. 160 questions, 34 min,
+1 error (MuSiQue 3-hop; message not logged). Cost is estimated (SID sends no usage):
+
+| set (metric) | Hydrogen harness | Gemini swarm | sid-swarm |
+|---|---|---|---|
+| MuSiQue (nDCG@10) | 0.849, 12.0 s, $0.024 | 0.638 | **0.858**, 12.1 s, ~$0.061 |
+| WANDS (nDCG@10) | **0.832**, 5.5 s, $0.010 | 0.805 | 0.804, 11.3 s, ~$0.053 |
+| WANDS match (nDCG@10) | **0.668**, 21.9 s, $0.031 | 0.152 | 0.640, 13.7 s, ~$0.060 |
+| WANDS multi (part coverage@10) | 0.600 | **0.804** | 0.667, 13.6 s, ~$0.062 |
+
+SID's swarm ties our harness on the chain sets (MuSiQue, match), where our Gemini swarm loses
+badly: a trained swarm does not have the split-then-lose-the-chain problem. It does not beat our
+swarm on independent parts. It costs 2-6x more per question than the harness.
+
+Spend this round: about $5.10 planner evals, $0.04 judge tests, $0.03 live check, about $8 full
+re-run (Google), about $12.0 SID eval (SID credit).
+
+**SID cost check.** Dashboard: $12.31 total for the workspace, $0.35 of it before the eval, so
+the eval cost about $11.96. The driver estimated $9.29, which is 22% low. `est_cost_per_action`
+goes from 0.00103 to 0.00133, so real cost per question is about 1.3x the table: ~$0.07-0.08.

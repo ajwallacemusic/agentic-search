@@ -18,7 +18,7 @@ Talk: "Will the Real Agentic Search Please Stand Up?" (Egen Ignite). Specs:
 1. **MuSiQue: the loop wins on multi-hop questions.** Each hop needs a fact from the hop before
    it. One planned pass cannot know what to search for next.
 2. **WANDS: the loop does not help plain product search.** Same models, same settings. Ranking
-   is about the same (within noise; nDCG@10 0.797 vs 0.775) for about 1.4× the cost: the loop
+   is about the same (within noise; nDCG@10 0.832 vs 0.825) for about 1.2× the cost: the loop
    usually stops after one turn. Use the least agentic setting that works.
 3. **WANDS match: the loop wins again when the question has steps.** Same WANDS catalogue, our own
    rule-labeled questions: "I have product X. Find a Y with the same wood tone." First find X and
@@ -26,7 +26,8 @@ Talk: "Will the Real Agentic Search Please Stand Up?" (Egen Ignite). Specs:
 4. **Swarm: splitting does not help when the work is a chain.** A swarm splits the work into
    parts that run side by side. Our questions are chains: hop 2 needs hop 1's answer, and "same
    wood tone" needs the anchor's wood tone read first. So the swarm loses to the single harness
-   on all three sets, at a higher cost, and on WANDS match it is no better than one pass. The
+   on all three sets, at a higher cost, and on WANDS match it is far below the harness (P@10
+   0.140 vs 0.620). The
    exception is when the model already knows the chain: on `hero` the split named the state
    capital and its neighbours from the model's own memory, and the swarm found 4 of 4.
 
@@ -44,8 +45,15 @@ point clearly (`tuning-log.md`, rounds 9 and 10). The fair numbers are the avera
 
 Swarm check (`wands-multi`, eval only, not on stage): 20 shopping tasks whose parts do not depend
 on each other, built from real WANDS queries and human labels (`wands_multi.yaml`). There the
-swarm beats the harness on part coverage@10 (0.800 vs 0.546). See `results-wands-multi.md` and
-`tuning-log.md`, round 16.
+swarm beats the harness on part coverage@10 (0.804 vs 0.600, 2026-11-25). See
+`results-wands-multi.md` and `tuning-log.md`, rounds 16 and 17. The harness stops after one turn
+there: its top 10 is already 8+ relevant, all for one part (stop-when-done counts relevance, not
+parts).
+
+SID-2 Swarm check (`sid-swarm`, eval only): SID's trained swarm ties our harness on the chain sets
+(MuSiQue recall@10 0.901 vs 0.922, WANDS match P@10 0.570 vs 0.620), where our own swarm fails,
+and is between harness and our swarm on independent parts (0.667). It costs about 2.5–8× the
+harness. See the SID section below.
 
 ### MuSiQue hero
 
@@ -94,11 +102,10 @@ for. They return patio pieces that list some wood tone, and about a third of tho
 wood (40 of the 122 patio sofas and tables that list one), so on `match-hero` the swarm lands 3–5 of
 10 by chance. This explains that one question only; the set-wide wood-tone swarm P@10 is 0.029.
 
-**Rehearsal warning (2026-11-19):** in both rehearsal runs the harness took until turn 2 to note
-the wood tone, leaving 2 turns for step 2, and scored only 2 and 6 of 10 (swarm 3 and 5,
-retrieval 0). On 2026-11-09 it was 10 of 10 in 3 of 3 runs. Across all 20 match questions the
-harness still averages P@10 0.515 against the swarm's 0.025, so quote the average. Have the
-2026-11-09 replay ready in case the live run comes in weak.
+**Rehearsal 2026-11-25 (Hydrogen + Decision 1), 2 runs:** harness 10 of 10 both times, 14–25 s,
+$0.028–0.030; SID-2 Swarm 7 and 7; our swarm 3 and 3; retrieval 0. The 2026-11-19 weak runs
+(harness 2 and 6 of 10 with Argon) did not repeat. Across all 20 match questions the harness
+averages P@10 0.620 against our swarm's 0.140, so quote the average.
 
 More match examples, one per attribute (picked from a scan of all 20 rules on 2026-11-09, then
 rehearsed twice each; gold in top 10, retrieval / harness):
@@ -142,8 +149,10 @@ uv run python -m demo.ignite.run_side_by_side --question hero --modes harness,si
 uv run python -m demo.ignite.public.eval_public --dataset musique --modes harness,sid-swarm
 ```
 
-SID does not document which event carries token counts; the driver adds any `usage` it sees,
-and if none arrives the run note says the cost reads 0.
+SID sends no token counts for swarm runs; usage is only on the SID dashboard. The driver adds
+any `usage` it sees and otherwise estimates cost per model action (`est_cost_per_action`),
+checked against the dashboard on the 160-question eval (tuning-log round 17). A full four-set
+`sid-swarm` eval costs about $12 of SID credit.
 
 ## Setup
 
@@ -185,7 +194,6 @@ security add-generic-password -a "$USER" -s gemini-api-key -w   # paste the key 
 ```
 
 If AI Studio is down, copy the `judge_baseline:` block (flash-lite on Vertex) into `judge:` in `config.yaml`.
-The eval numbers in `results-*.md` are still from Argon + flash-lite until the next full run.
 
 To use Anthropic instead: comment out `driver:` and `judge:` and uncomment the `anthropic` line;
 set `ANTHROPIC_API_KEY` and `uv sync --extra anthropic`.
@@ -202,8 +210,8 @@ merged). The planner keeps a short step plan and a notebook of
 facts it read in documents, with the document each fact came from. The loop does not stop while a
 step is open. Once no step is open (no plan, or every step done), it stops when at least 8 of
 the top 10 are judged relevant or a turn adds no judged-relevant result (library setting
-`stop_when_done`, tuning-log round 14). Simple WANDS questions now take 1.4 turns and about
-21 s instead of 3.2 turns and 47 s, at the same quality. The viewer shows the steps and facts as they happen. The demo itself changes nothing under
+`stop_when_done`, tuning-log round 14). Simple WANDS questions now take 1.2 turns and about
+6 s (Hydrogen + Decision 1) instead of 3.2 turns and 47 s before the rule, at the same quality. The viewer shows the steps and facts as they happen. The demo itself changes nothing under
 `src/`.
 
 The library fixes the demo once worked around are merged (library PRs #4, #5 and #6): the
@@ -225,8 +233,8 @@ gets an even share of what is left (tool calls rounded down, at least 1) and 2 t
 whole run is cut at 120 s; agents still running are cancelled and their hits so far are kept.
 This caps the swarm at one harness budget. It does **not** make actual spend equal: a single
 harness usually stops early (stop-when-done), while each swarm agent tends to use its whole
-share, so the swarm spends about 20–24 tool calls and about $0.07–0.08 per question against the
-harness's 8–18 calls and $0.02–0.06.
+share, so the swarm spends about 13–21 tool calls and about $0.03–0.045 per question against the
+harness's 6–12 calls and $0.01–0.03 (2026-11-25).
 
 ## Commands
 
@@ -281,52 +289,61 @@ is set (the viewer itself runs the `ignite` and `ignite-wands` profiles).
 
 ## Numbers for the slides
 
-All numbers: Argon planner, step tracking on, stop-when-done on, project `ajw-sandbox-497707`,
-one run per question, seed 7, a 120 s budget for every mode, evals run one at a time,
-2026-11-19 (`tuning-log.md` round 15).
+All numbers: Hydrogen planner, Decision 1 judge, step tracking on, stop-when-done on, project
+`ajw-sandbox-497707`, one run per question, seed 7, a 120 s budget for every mode, evals run one
+at a time, 2026-11-25 (`tuning-log.md` round 17).
 
-| set | what it tests | sample | metric | bm25 | retrieval | harness | swarm |
-|---|---|---|---|---|---|---|---|
-| MuSiQue (multi-hop Wikipedia) | does the loop chase hops? | 60 questions (20 each 2/3/4-hop), 5,000 paragraphs | recall@10 | 0.468 | 0.757 | **0.885** | 0.749 |
-| WANDS (Wayfair product search) | does the loop help plain ranking? | 60 queries, 42,994 products | nDCG@10 | 0.715 | 0.775 | 0.797 | 0.758 |
-| WANDS match (ours) | does the loop help when a step needs a fact read on the way? | 20 questions, same catalogue | P@10 | 0.015 | 0.010 | **0.515** | 0.025 |
+| set | what it tests | sample | metric | bm25 | retrieval | harness | swarm | SID-2 Swarm |
+|---|---|---|---|---|---|---|---|---|
+| MuSiQue (multi-hop Wikipedia) | does the loop chase hops? | 60 questions (20 each 2/3/4-hop), 5,000 paragraphs | recall@10 | 0.468 | 0.726 | **0.922** | 0.690 | 0.901 |
+| WANDS (Wayfair product search) | does the loop help plain ranking? | 60 queries, 42,994 products | nDCG@10 | 0.715 | 0.825 | **0.832** | 0.805 | 0.804 |
+| WANDS match (ours) | does the loop help when a step needs a fact read on the way? | 20 questions, same catalogue | P@10 | 0.015 | 0.000 | **0.620** | 0.140 | 0.570 |
+| WANDS multi (eval only) | does a swarm help when parts are independent? | 20 tasks, same catalogue | part coverage@10 | — | 0.600 | 0.600 | **0.804** | 0.667 |
 
-Average cost and time per question (retrieval / harness / swarm):
+Average cost and time per question (retrieval / harness / swarm / SID-2 Swarm). SID cost is the
+driver's estimate scaled to the dashboard (×1.29):
 
 | set | cost | seconds | tool calls |
 |---|---|---|---|
-| MuSiQue | $0.014 / $0.042 / $0.080 | 15 / 40 / 33 | 4.6 / 15.3 / 23.8 |
-| WANDS | $0.018 / $0.024 / $0.074 | 14 / 21 / 32 | 5.9 / 8.1 / 22.1 |
-| WANDS match | $0.013 / $0.064 / $0.074 | 10 / 46 / 31 | 3.5 / 18.4 / 20.0 |
+| MuSiQue | $0.007 / $0.024 / $0.045 / ~$0.079 | 4 / 12 / 11 / 12 | 3.8 / 11.5 / 20.9 / 37.4 |
+| WANDS | $0.008 / $0.010 / $0.039 / ~$0.069 | 4 / 6 / 9 / 11 | 4.7 / 5.8 / 19.4 / 32.3 |
+| WANDS match | $0.006 / $0.031 / $0.030 / ~$0.077 | 3 / 22 / 9 / 14 | 2.2 / 11.7 / 13.4 / 33.2 |
+| WANDS multi | $0.010 / $0.010 / $0.033 / ~$0.079 | 5 / 5 / 9 / 14 | 5.9 / 5.9 / 17.1 / 42.3 |
 
-- **MuSiQue:** 4-hop recall@10 harness 0.812, retrieval 0.588, swarm 0.637. Harness about 3.1×
-  the cost of retrieval.
-- **WANDS:** harness +0.02 nDCG@10 over retrieval for about 1.4× the cost (1.4 turns, 21 s vs
-  14 s). The sign has flipped between runs (-0.02 on 2026-11-09); call it a tie.
-- **WANDS match:** harness P@10 by attribute: wood tone 0.700, color 0.371, style 0.467;
-  retrieval 0.000, 0.029, 0.000. Harness about 5× the cost of retrieval. Quote the average, not
+- **Models:** Hydrogen + Decision 1 against the old Argon + flash-lite (2026-11-19): WANDS match
+  harness P@10 0.620 vs 0.515 at half the cost ($0.031 vs $0.064) and half the time (22 s vs
+  46 s); MuSiQue recall@10 0.922 vs 0.885 at about half the cost.
+- **Judge:** the same harness with flash-lite as judge (`harness-flashlite`) scores lower on three
+  of four sets (MuSiQue recall@10 0.828, WANDS nDCG@10 0.806, WANDS match P@10 0.535) and is
+  slower and dearer on all four.
+- **MuSiQue:** 4-hop recall@10 harness 0.825, retrieval 0.637, swarm 0.662, SID 0.838. Harness
+  about 3.6× the cost of retrieval.
+- **WANDS:** harness +0.007 nDCG@10 over retrieval for about 1.2× the cost (1.2 turns, 6 s vs
+  4 s). Call it a tie.
+- **WANDS match:** harness P@10 by attribute: wood tone 0.714, color 0.514, style 0.633;
+  retrieval 0.000 on all three. Harness about 5× the cost of retrieval. Quote the average, not
   only the hero.
-- **Swarm: it loses everywhere.** Below the harness on all three sets, about level with one pass
-  on MuSiQue and WANDS, and no better than one pass on WANDS match (P@10 0.025: wood tone 0.029,
-  color 0.029, style 0.017). It costs the most: about 1.9× the harness on MuSiQue, 3× on WANDS,
-  1.2× on WANDS match. The split cannot know what step 1 will find (the anchor's wood tone, the
-  next hop's name), so the agents search for the wrong thing at the same time.
-- The harness is slow: about 40–46 s per chain question, 21 s on plain WANDS, against about
-  10–15 s for retrieval.
+- **Our swarm loses on chains.** Below the harness on all three stage sets, below one pass on
+  MuSiQue and WANDS, and far below the harness on WANDS match (P@10 0.140: wood tone 0.214, color
+  0.157, style 0.033). It costs about 1.9× the harness on MuSiQue and 3.9× on WANDS. The split
+  cannot know what step 1 will find (the anchor's wood tone, the next hop's name), so the agents
+  search for the wrong thing at the same time. It wins on independent parts (WANDS multi).
+- **SID-2 Swarm** (trained for swarm search) does not have that problem: it ties the harness on
+  the chain sets. It does not beat our swarm on independent parts, and it costs 2.5–8× the harness.
+- Time: the harness takes about 12–22 s per chain question and 6 s on plain WANDS, against about
+  3–4 s for retrieval.
 
-Hero runs (rehearsal 2026-11-19, 120 s budget, `tuning-log.md` round 15):
+Hero runs (rehearsal 2026-11-25, Hydrogen + Decision 1, 120 s budget, all four modes, saved in
+`runs/`):
 
-- MuSiQue `hero`, 2 runs: harness 4/4 gold both times, 41–42 s, about $0.049. Retrieval 1/4,
-  about $0.009–0.015. Swarm 4/4 both times, 24–28 s, $0.073–0.087: it ties the harness on gold
-  and is faster, as it is on MuSiQue overall and on `match-hero` (the swarm eval ran one question
-  at a time and the others two, so the seconds are only roughly comparable). The split already
-  names the chain from the model's own memory ("What is the
-  state capital of South Carolina?", "Which cities border Columbia, South Carolina?"). Say so on
+- MuSiQue `hero`, 2 runs: harness 4/4 gold both times, 14–15 s, $0.027–0.029. Retrieval 1/4,
+  4 s, $0.006. Our swarm 4/4 both times, 17–19 s, $0.055–0.057: it ties the harness on gold
+  because the split already names the chain from the model's own memory ("What is the state
+  capital of South Carolina?", "Which cities border Columbia, South Carolina?"). Say so on
   stage: the swarm works here because the model knows the answer path, not because it searched
-  for it.
-- WANDS match `match-hero`, 2 runs: harness 2 and 6 of 10, 46–52 s, $0.061–0.069; swarm 3 and 5,
-  24–32 s, $0.062–0.083; retrieval 0. Weaker than on 2026-11-09 (harness 10 of 10 in 3 of 3,
-  46–47 s); see the warning above.
+  for it. SID-2 Swarm 2/4 then 4/4, 11 s, about $0.07–0.08.
+- WANDS match `match-hero`, 2 runs: harness 10 of 10 both times, 14–25 s, $0.028–0.030; SID-2
+  Swarm 7 and 7, 13–15 s, about $0.07–0.09; our swarm 3 and 3, 9 s, $0.031; retrieval 0.
 
 Say on the slide: all modes run with `max_limit: 20` and `max_calls_per_turn: 6`
 (`config.yaml`) and a budget of 4 turns, 24 tool calls, $0.50 and 120 s. The swarm gets that same
@@ -342,14 +359,15 @@ uses the WANDS catalogue with our rule labels.
 uv run python -m demo.ignite.public.eval_public --dataset musique --modes bm25,retrieval,harness,harness-flashlite,swarm      # --n 20 per hop, --corpus-size 5000
 uv run python -m demo.ignite.public.eval_public --dataset wands --modes bm25,retrieval,harness,harness-flashlite,swarm        # --n 60
 uv run python -m demo.ignite.public.eval_public --dataset wands-match --modes bm25,retrieval,harness,harness-flashlite,swarm  # all 20 rules
+uv run python -m demo.ignite.public.eval_public --dataset wands-multi --modes retrieval,harness,harness-flashlite,swarm,swarm-4x
 ```
 
 `harness-flashlite` is an eval-only judge control: the same harness with the earlier judge
 (gemini-3.5-flash-lite, config `judge_baseline`) in place of Gemini Decision 1.
 
 Run them one at a time: run together they share the model and run slower, and hit the time
-budget (tuning-log round 14). With all four modes the three runs cost about $8.10, $6.90 and
-$3.00 (about $18 in all; the swarm is more than half of it).
+budget (tuning-log round 14). With Hydrogen + Decision 1 all four sets took 1 h 14 min and about
+$8 (2026-11-25); the swarm is about half of it. `sid-swarm` rows were run separately and merged in.
 
 Why MuSiQue and not HotpotQA: MuSiQue was built to drop questions a single-hop shortcut can answer,
 a known weakness of HotpotQA, and each question ships with its own 20 paragraphs, so a sample is
@@ -373,7 +391,14 @@ If a live run stalls past 120 seconds or shows **✗ Search failed**: press **Sw
 (or go to the replay tab) and say so plainly: "the live API is slow, here is the same run from
 this morning."
 
-Backup runs in `runs/` (Argon):
+Backup runs in `runs/`, newest first:
+
+- 2026-11-25, Hydrogen + Decision 1, 120 s budget (gold in top 10 retrieval / harness / swarm /
+  SID-2 Swarm): `20261125-130753-hero-*` (1/4, 4/4, 4/4, 2/4), `20261125-130848-hero-*` (1/4, 4/4,
+  4/4, 4/4), `20261125-130945-match-hero-*` and `20261125-131044-match-hero-*` (0, 10, 3, 7). The
+  viewer has no SID lane, so leave out the `-sid-swarm.jsonl` file when you pick files. Use these for replay.
+
+Older (Argon):
 
 - 2026-11-19, all three modes, 120 s budget (rehearsal; gold in top 10 retrieval / harness /
   swarm): `20261119-201201-hero-*` (1/4, 4/4, 4/4), `20261119-201330-hero-*` (1/4, 4/4, 4/4),
@@ -396,10 +421,10 @@ Backup runs in `runs/` (Argon):
 
 The `20261029-*-hero-*` runs are older, from the Flash planner.
 
-**Known risk: live time.** A harness run takes 30–60 s with Argon, a swarm run 25–40 s, and the
+**Known risk: live time.** A harness run takes about 14–25 s with Hydrogen (30–60 s with Argon), a swarm run 9–20 s, and the
 viewer shows "⚠ Past 120 s. Switch to replay?" in a live column that runs long. The swarm is cut
 at 120 s by itself (agents still running show ✂ cut, their hits so far are kept). A planner call that times out twice in a
 row ends the harness run with `APITimeoutError` (2 of 60 MuSiQue runs in an earlier eval;
 none in the 2026-11-19 evals). One planner call waits at most about 90 s (45 s, one retry).
-For the WANDS match hero, expect a weak run: 2/10 once in 5 before 2026-11-19, then 2/10 and
-6/10 in the two 2026-11-19 rehearsal runs; keep the replay ready.
+For the WANDS match hero: 10/10 in both 2026-11-25 rehearsal runs (Hydrogen), after weak Argon
+runs on 2026-11-19 (2/10 and 6/10); keep the replay ready anyway.
