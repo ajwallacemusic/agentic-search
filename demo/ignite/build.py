@@ -24,6 +24,7 @@ from agentic_search.models.driver import ToolCallingDriver
 from agentic_search.models.llm_judge import LLMJudge
 from demo.ignite.corpus import DemoData
 from demo.ignite.decision_judge import DecisionJudge
+from demo.ignite.sid_swarm import SidSwarmDriver
 from demo.ignite.swarm import Swarm, SwarmConfig
 
 logger = logging.getLogger(__name__)
@@ -159,6 +160,36 @@ def build_harness_for(cfg: dict[str, Any], docs: dict[str, list[Document]],
     return Harness(backends, driver, embedders=[embedder], analyzer=analyzer, controller=decider,
                    mode="harness", budget=Budget(**cfg["budget"]),
                    settings=HarnessSettings(**cfg.get("settings", {})))
+
+
+def sid_swarm_cfg(cfg: dict[str, Any]) -> dict[str, Any]:
+    """The demo config for SID-2 Swarm runs: its own budget (`sid_swarm.budget`; the swarm makes
+    many calls at once, so the turn budget does not apply) and the judge off, so the swarm's own
+    RRF order is scored as it is."""
+    sid = cfg["sid_swarm"]
+    return {**cfg, "budget": sid["budget"],
+            "settings": {**cfg.get("settings", {}), "judge_delegate": False}}
+
+
+def make_sid_driver(cfg: dict[str, Any], *, connect: Any = None) -> SidSwarmDriver:
+    sid = cfg["sid_swarm"]
+    return SidSwarmDriver(model=sid.get("model", "SID-2-Swarm"),
+                          max_agents=int(sid.get("max_agents", 6)),
+                          agent_max_turns=int(sid.get("agent_max_turns", 10)),
+                          reward=sid.get("reward", "ndcg"),
+                          price_per_mtok=tuple(sid.get("price_per_mtok", (0.50, 0.05, 2.00))),
+                          key=os.environ.get(sid.get("api_key_env", "SID_API_KEY")) or None,
+                          grace_s=float(sid.get("grace_s", 8.0)), connect=connect)
+
+
+def build_sid_harness_for(cfg: dict[str, Any], docs: dict[str, list[Document]],
+                          descriptions: dict[str, str], *, connect: Any = None,
+                          embedder: Embedder | None = None) -> Harness:
+    """A harness whose model mode (`search(..., mode="model")`) is SID-2 Swarm: SID runs the
+    agents, this harness runs their searches over the same files backends (`sid_swarm.py`)."""
+    scfg = sid_swarm_cfg(cfg)
+    return build_harness_for(scfg, docs, descriptions, driver=make_sid_driver(cfg, connect=connect),
+                             analyzer=make_judge(cfg.get("judge"), None), embedder=embedder)
 
 
 def build_demo_swarm(cfg: dict[str, Any], harness: Harness, descriptions: dict[str, str], *,

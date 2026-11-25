@@ -125,6 +125,26 @@ uv run python -m demo.ignite.public.wands_match select   # candidate rules (prin
 uv run python -m demo.ignite.public.wands_match labels   # rewrites wands_match_labels.json
 ```
 
+## SID-2 Swarm (mode `sid-swarm`)
+
+SID-2 Swarm is SID AI's trained multi-agent search model. Unlike our `swarm`, nothing of ours
+plans or splits: SID's server runs up to 6 agents that fork and message each other. Our harness
+runs the searches they ask for (`search` → `vector_search`, `text_search` → `lexical_search`,
+`read` from the agent's cache) over the same documents, and fuses their reports with RRF, as
+SID's reference implementation does (`sid_swarm.py`). It runs in the library's model mode, with
+no judge and its own budget (`sid_swarm` in `config.yaml`). It is an eval and
+`run_side_by_side` mode; it has no viewer lane yet.
+
+```bash
+uv sync --extra server --extra local --extra openai --extra gcp --extra sid   # sid-sdk, Python 3.12+
+security add-generic-password -a "$USER" -s sid-api-key -w   # or export SID_API_KEY
+uv run python -m demo.ignite.run_side_by_side --question hero --modes harness,sid-swarm
+uv run python -m demo.ignite.public.eval_public --dataset musique --modes harness,sid-swarm
+```
+
+SID does not document which event carries token counts; the driver adds any `usage` it sees,
+and if none arrives the run note says the cost reads 0.
+
 ## Setup
 
 ```bash

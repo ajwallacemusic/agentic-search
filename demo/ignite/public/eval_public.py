@@ -14,9 +14,20 @@ from typing import Any, Callable
 
 from agentic_search.core.harness import Harness
 from agentic_search.eval.runner import EvalReport
-from demo.ignite.build import build_demo_swarm, build_harness_for, load_config
-from demo.ignite.eval import (KindReport, bm25_harness_for, evaluate_groups, parts_table,
-                              results_table, verdict)
+from demo.ignite.build import (
+    build_demo_swarm,
+    build_harness_for,
+    build_sid_harness_for,
+    load_config,
+)
+from demo.ignite.eval import (
+    KindReport,
+    bm25_harness_for,
+    evaluate_groups,
+    parts_table,
+    results_table,
+    verdict,
+)
 from demo.ignite.public.datasets import PublicSample, sample_musique, sample_wands
 from demo.ignite.public.fetch import FILES, fetch, sha256_of
 from demo.ignite.public.wands_match import LABELS_PATH, MATCH_PATH, sample_wands_match
@@ -80,6 +91,8 @@ def _harness_for(sample: PublicSample) -> Callable[[str], Harness | Swarm]:
         if mode == "bm25":
             return bm25_harness_for(docs, descriptions)
         cfg = judge_variant_cfg(load_config(), mode)
+        if mode == "sid-swarm":
+            return build_sid_harness_for(cfg, docs, descriptions)
         if mode == "swarm-4x":  # eval-only control: 4x tool calls and cost, 4 turns per agent
             cfg = scaled_budget_cfg(cfg, 4, 4)
         harness = build_harness_for(cfg, docs, descriptions)
@@ -141,6 +154,11 @@ async def write_results(sample: PublicSample, modes: list[str], out: Path, *,
                  "budget with the earlier judge, gemini-3.5-flash-lite on Vertex, in place of "
                  "Gemini Decision 1. It shows what the judge change does to scores, time and cost.",
                  ""] if "harness-flashlite" in modes else []),
+              *(["`sid-swarm`: SID-2 Swarm (SID AI's trained multi-agent search model). SID's "
+                 "server runs up to 6 agents that fork and message each other; our harness runs "
+                 "their searches over the same documents and fuses their reports with RRF. No "
+                 "judge; its own budget (200 tool calls, $1.00, the same 120 s); concurrency 1.",
+                 ""] if "sid-swarm" in modes else []),
               *(["`swarm-4x` (eval-only control): the same swarm with 4x the tool calls and cost "
                  "(96 calls, $2.00), 4 turns per agent, the same 120 s; also concurrency 1. It "
                  "shows whether extra spend alone explains a swarm win.", ""]

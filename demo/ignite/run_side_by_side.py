@@ -1,6 +1,6 @@
 """Run one demo question in retrieval, harness and swarm modes, and compare.
 
-Run: uv run python -m demo.ignite.run_side_by_side --question hero [--controller typesafe] [--modes retrieval,harness,swarm] [--save]
+Run: uv run python -m demo.ignite.run_side_by_side --question hero [--controller typesafe] [--modes retrieval,harness,swarm,sid-swarm] [--save]
 """
 
 from __future__ import annotations
@@ -29,7 +29,12 @@ from agentic_search.events import (
     ToolCallStarted,
     UsageUpdated,
 )
-from demo.ignite.build import build_demo_harness, build_demo_swarm, load_config
+from demo.ignite.build import (
+    build_demo_harness,
+    build_demo_swarm,
+    build_sid_harness_for,
+    load_config,
+)
 from demo.ignite.corpus import Question, corpus_of, load_demo
 from demo.ignite.swarm import Swarm
 
@@ -200,10 +205,10 @@ async def main() -> None:
     p.add_argument("--controller", choices=["heuristic", "typesafe"], default="heuristic")
     p.add_argument("--save", action="store_true", help="write every event to runs/")
     p.add_argument("--modes", default="retrieval,harness,swarm",
-                   help="comma-separated: retrieval, harness, swarm")
+                   help="comma-separated: retrieval, harness, swarm, sid-swarm")
     args = p.parse_args()
     modes = args.modes.split(",")
-    unknown = set(modes) - {"retrieval", "harness", "swarm"}
+    unknown = set(modes) - {"retrieval", "harness", "swarm", "sid-swarm"}
     if unknown:
         p.error(f"unknown modes: {', '.join(sorted(unknown))}")
     corpus = corpus_of(args.question)
@@ -223,6 +228,10 @@ async def main() -> None:
             save_to = save_path(question.id, mode, stamp) if args.save else None
             if mode == "swarm":
                 rows.append(await run_swarm(swarm, question, save_to=save_to))
+            elif mode == "sid-swarm":
+                async with build_sid_harness_for(cfg, data.documents, data.descriptions) as sid:
+                    row = await run_one(sid, question, "model", save_to=save_to)
+                rows.append(row.model_copy(update={"mode": "sid-swarm"}))
             else:
                 rows.append(await run_one(harness, question, mode, save_to=save_to))
     print("\n" + summary_table(rows))

@@ -36,6 +36,15 @@ budget: {max_turns: 4, max_tool_calls: 24, max_seconds: 120, max_cost_usd: 0.50}
 # agent per part, all at once, each with an even share of `budget` and agent_max_turns turns;
 # RRF (k = rrf_k) merges their hits. See docs/superpowers/specs/2026-11-19-ignite-swarm-design.md.
 swarm: {max_agents: 4, agent_max_turns: 2, rrf_k: 60}
+# SID-2 Swarm (mode `sid-swarm`, eval and run_side_by_side): SID's server runs up to max_agents
+# agents (fork / message / wait are SID's); we answer their searches and fuse their reports with
+# RRF (sid_swarm.py). Its own budget: the turn budget does not apply (many agents call at once);
+# the same 120 s; tool calls and cost sized for 6 agents (SID's eval: ~$0.26 per query at 6).
+# grace_s: after the budget runs out, searches are refused and reports still taken this long.
+# Prices per 1M: input, cached input, output. Key: SID_API_KEY or Keychain item `sid-api-key`.
+sid_swarm: {model: SID-2-Swarm, max_agents: 6, agent_max_turns: 10, reward: ndcg,
+            price_per_mtok: [0.50, 0.05, 2.00], api_key_env: SID_API_KEY, grace_s: 8,
+            budget: {max_turns: 100, max_tool_calls: 200, max_seconds: 120, max_cost_usd: 1.00}}
 typesafe: {type: typesafe, api_key_env: TYPESAFE_API_KEY}
 # Same settings for both modes. The judge runs its batches one after another, so a larger
 # batch and fewer, smaller tool calls keep one turn's judging to about one model call.

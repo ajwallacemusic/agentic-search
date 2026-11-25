@@ -96,8 +96,9 @@ def part_recall(ranked: list[str], parts: dict[str, list[str]], k: int = 30) -> 
 
 
 # Eval-only modes that run as another library mode: bm25 is a retrieval run with a BM25-only
-# harness; harness-flashlite is the harness with the earlier judge (config `judge_baseline`).
-RUN_MODE = {"bm25": "retrieval", "harness-flashlite": "harness"}
+# harness; harness-flashlite is the harness with the earlier judge (config `judge_baseline`);
+# sid-swarm is model mode with SID-2 Swarm as the driver (`sid_swarm.py`).
+RUN_MODE = {"bm25": "retrieval", "harness-flashlite": "harness", "sid-swarm": "model"}
 
 
 async def evaluate_groups(modes: list[str], harness_for: Callable[[str], Harness | Swarm],
@@ -118,7 +119,7 @@ async def evaluate_groups(modes: list[str], harness_for: Callable[[str], Harness
                 recorder = TurnRecorder(harness)
                 report = await run_eval(recorder, dataset,  # type: ignore[arg-type]
                                         name=f"{name}/{mode}/{group}", query_ids=qids, k=10,
-                                        recall_k=10, concurrency=1 if mode.startswith("swarm") else 2,
+                                        recall_k=10, concurrency=1 if mode.startswith(("swarm", "sid")) else 2,
                                         mode=run_mode)  # type: ignore[arg-type]
                 turns = [recorder.turns.get(dataset.queries[r.query_id], 0) for r in report.runs]
                 precision = [_precision_at_10(recorder.top10.get(dataset.queries[r.query_id], []),

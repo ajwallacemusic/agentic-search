@@ -27,6 +27,10 @@ milvus = ["pymilvus>=2.5,<4"]
 gcp = ["google-auth[requests]>=2.29"]
 azure = ["azure-identity>=1.17"]
 server = ["fastapi>=0.115", "uvicorn>=0.30"]
+sid = [
+    "openai[realtime]>=2.45",
+    "sid-sdk>=0.2.1,<0.3 ; python_full_version >= '3.12'",
+]
 
 [dependency-groups]
 dev = [
